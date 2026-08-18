@@ -2,8 +2,8 @@
 
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
-**Status:** Pre-Development / Spezifikationsphase
-**Dokumentversion:** 1.0 — Basis für alle folgenden Code-Sessions
+**Status:** In Entwicklung — Phase 0 & 1 abgeschlossen
+**Dokumentversion:** 1.3 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -343,8 +343,6 @@ Abhängigkeitspunkt des Projekts.
 
 *Shares Outstanding* ist in EDGAR vorhanden (Cover-Page-Daten der Filings). Fehlt nur der Kurs.
 
-*Shares Outstanding* ist in EDGAR vorhanden (Cover-Page-Daten der Filings). Fehlt nur der Kurs.
-
 #### Entscheidung D1 (getroffen, Stand 08/2026)
 
 **Primär: Finnhub. Fallback: Stooq. yfinance: nur optional für lokale Experimente.**
@@ -355,13 +353,26 @@ Golden-Set-Lauf (10 Ziele × ~10 Peers ≈ 100 Kursabrufe pro Evaluationsdurchga
 | Quelle | Free-Limit | Stabilität | Entscheidung |
 |---|---|---|---|
 | **Finnhub** | ~60 Calls/Minute, kein Kreditkarte | Offizielle API mit Key + Doku | ✅ **Primär** |
-| **Stooq** | keine Limits, **kein API-Key** | CSV-Download, kein echtes API, aber sehr robust | ✅ **Fallback** |
+| **Stooq** | keine Limits, **kein API-Key** | CSV-Download, kein echtes API — Stand 08/2026 **nicht mehr per einfachem HTTP erreichbar** (siehe unten) | ⚠️ **Fallback, aktuell defekt** |
 | **yfinance** | undokumentiert, schwankend | Inoffiziell — Yahoo hat sein API 2017 abgeschaltet; Library nutzt interne Endpunkte ohne Stabilitätsgarantie, bricht gelegentlich | ⚠️ nur optional |
 | **Alpha Vantage** | 25 Requests/**Tag** | Stabil, aber Limit zu eng | ❌ als Primärquelle |
 
 **Wildcard Alpha Vantage:** Der Anbieter stellt verifizierten Open-Source- und Bildungsprojekten
 unbegrenzte Requests bereit. Dieses Projekt erfüllt beide Kriterien — ein Antrag lohnt sich,
 sobald das Repo öffentlich ist. Dann als dritter Provider hinter demselben Interface einhängbar.
+
+#### ⚠ Erkenntnis aus Phase 1 (Stand 2026-08-18): Stooq-Fallback aktuell defekt
+
+Stooq schützt seine öffentlichen Endpunkte (`/q/l/`, `/q/d/l/`) inzwischen mit einer
+JS-basierten Proof-of-Work-Challenge (Anubis-artiger Bot-Schutz). Einfache `httpx`-Requests —
+auch mit Browser-User-Agent — werden mit einer HTML-Verify-Seite statt CSV-Daten beantwortet.
+Die Annahme "kein Key, sehr robust" aus der D1-Tabelle ist damit **nicht mehr korrekt.**
+
+Konsequenz: `StooqProvider` ist implementiert (Interface bleibt korrekt), liefert aber aktuell
+live keine Daten. **Finnhub ist faktisch die einzige funktionierende Quelle**, bis eine der
+folgenden Optionen umgesetzt ist: (a) Headless-Browser-Bypass für Stooq (hoher Aufwand, fragil),
+(b) Alpha-Vantage-Bildungslizenz vorziehen statt erst vor Phase 5 zu beantragen (siehe D6),
+(c) dritten keyless Fallback evaluieren. → **Neue offene Entscheidung D7** (Abschnitt 13).
 
 #### Cache-Design löst das Rate-Limit strukturell
 
@@ -553,10 +564,11 @@ Memo-Entwurfsmodul · MCP-Server-Variante der Tools (starker Anschluss an dein S
 | D4 | Ausreißer-Definition (IQR-basiert? feste Schwellen?) | offen — Phase 2 |
 | D5 | Projektname final | offen — vor Phase 5 |
 | D6 | Alpha-Vantage-Bildungslizenz beantragen, sobald Repo öffentlich? | offen — Phase 5 |
+| D7 | Stooq-Fallback ist seit 08/2026 durch Bot-Schutz blockiert (siehe 8.3) — Ersatz nötig? | offen — vor Phase 5, Finnhub trägt v1 vorerst allein |
 
 | Risiko | Wahrscheinlichkeit | Gegenmaßnahme |
 |---|---|---|
-| Kursdatenquelle bricht weg | mittel | Provider-Interface + automatischer Fallback + Cache |
+| Kursdatenquelle bricht weg | **eingetreten (Stooq, 08/2026)** | Provider-Interface + automatischer Fallback + Cache — Finnhub trägt v1 vorerst allein (siehe D7) |
 | XBRL-Konzepte uneinheitlich zwischen Unternehmen | **hoch** | Konzept-Fallback-Ketten, explizites "nicht verfügbar" statt Schätzung |
 | Peer-Qualität schwach | mittel | Human-in-the-Loop-Gate rettet jeden Fall |
 | Scope Creep | **hoch** | Abschnitt 4 als harte Grenze behandeln |
@@ -682,7 +694,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.0 | 2026-08-18 | Erstfassung |
 | 1.1 | 2026-08-18 | D1 entschieden (Finnhub/Stooq), Cache-Design ergänzt, Provider-Kapselung konkretisiert, D6 aufgenommen |
 | 1.2 | 2026-08-18 | Projekt final auf **Scout Research** umbenannt (vorher Arbeitstitel "Analyst Copilot") |
+| 1.3 | 2026-08-18 | Phase 0 & 1 umgesetzt. D7 aufgenommen: Stooq-Fallback seit 08/2026 durch Bot-Schutz blockiert, Finnhub trägt v1 vorerst allein (siehe 8.3) |
 
 ---
 
-*Ende Dokumentversion 1.2*
+*Ende Dokumentversion 1.3*

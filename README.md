@@ -9,8 +9,16 @@ Die vollständige Projektspezifikation (Vision, Architektur, Datenquellen, Roadm
 
 ## Status
 
-Phase 0 (Setup) abgeschlossen: EDGAR-Client-Grundgerüst mit Rate Limiting und User-Agent,
-erster reproduzierbarer Datenabruf inkl. vollständiger Provenance.
+Phase 0 & 1 abgeschlossen:
+- EDGAR-Client-Grundgerüst mit Rate Limiting und User-Agent
+- Vollständiger v1-Kennzahlensatz (Revenue, EBIT, EBITDA-Approx, Net Income, Debt, Cash,
+  Margen, YoY-Wachstum) mit vollständiger Provenance
+- `MarketDataProvider`-Interface (Finnhub primär, Stooq als Fallback vorbereitet, SQLite-Cache)
+
+⚠ **Bekannte Lücke:** Stooq blockiert aktuell automatisierte Requests per Bot-Schutz — siehe
+[`docs/foundation.md`, Abschnitt 8.3](docs/foundation.md#83--bekannte-datenlücke-aktienkurse)
+und offene Entscheidung D7. Ohne `FINNHUB_API_KEY` sind Marktdaten (Market Cap, EV) aktuell
+nicht verfügbar; alle anderen Kennzahlen funktionieren unabhängig davon.
 
 ## Setup
 
@@ -18,16 +26,16 @@ erster reproduzierbarer Datenabruf inkl. vollständiger Provenance.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env  # EDGAR_CONTACT_EMAIL mit echter Kontakt-Adresse befüllen
+cp .env.example .env  # EDGAR_CONTACT_EMAIL mit echter Kontakt-Adresse befüllen; FINNHUB_API_KEY optional
 ```
 
-## Phase-0-Smoke-Test
+## Smoke-Tests
 
 ```bash
-python -m scout_research.scratch --ticker AAPL
+python -m scout_research.scratch --ticker AAPL          # Phase 0: nur Revenue + Provenance
+python -m scout_research.scratch --ticker AAPL --full   # Phase 1: vollständiger Kennzahlensatz
 ```
 
-Gibt den zuletzt gemeldeten Jahresumsatz mit Accession Number, Periode und Filing-Datum aus.
 Kein LLM beteiligt — reiner Data-Access/Domain-Pfad (L1/L2).
 
 ## Tests
