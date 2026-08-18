@@ -1,11 +1,13 @@
 """L2 — Domain-Modelle. Kern-Entitäten gemäß Foundation Doc Abschnitt 10.
 
-Phase 1 ergänzt MarketSnapshot und CompanyMetrics. CompsTable und QualityWarning folgen in Phase 2.
+Phase 1 ergänzt MarketSnapshot und CompanyMetrics. Phase 2 ergänzt QualityWarning,
+CompanyMultiples, MultipleStatistics und CompsTable.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -70,3 +72,59 @@ class CompanyMetrics(BaseModel):
     growth_rates: dict[str, float | None]
 
     source_facts: list[FinancialFact]
+
+
+class QualityWarning(BaseModel):
+    """Ein Datenqualitäts-Hinweis (Foundation Doc 2.3, 11). Severity ist nie eine
+    Fehlermeldung, die den Lauf abbricht — der Mensch entscheidet, was damit passiert
+    (HITL-Prinzip, siehe 6.2)."""
+
+    severity: Literal["info", "warning", "critical"]
+    company: str
+    """Ticker oder 'target' — welches Unternehmen betroffen ist."""
+    message: str
+    affected_field: str | None
+
+
+class CompanyMultiples(BaseModel):
+    """Bewertungs-Multiples für ein Unternehmen. Nicht aussagekräftige Multiples (z. B.
+    EV/EBITDA bei negativem EBITDA) werden als `None` geführt, nicht als verzerrte Zahl —
+    der Grund steht in `excluded_reasons` (siehe Foundation Doc 3.2, Aufgabenstellung Punkt 2).
+
+    Trägt bewusst keine eigenen `FinancialFact`-Referenzen: jedes Multiple ist eine reine
+    Ableitung aus Feldern von `CompanyMetrics` (enterprise_value, revenue, ebitda, ebit,
+    net_income), deren Provenance bereits vollständig über `CompsTable.target`/`.peers`
+    (inkl. `source_facts`) nachvollziehbar ist. Keine redundante Duplikation der Kette.
+    """
+
+    company_ticker: str
+    ev_revenue: float | None
+    ev_ebitda: float | None
+    ev_ebit: float | None
+    pe: float | None
+    excluded_reasons: dict[str, str]
+
+
+class MultipleStatistics(BaseModel):
+    """Min/Median/Mean/Max eines Multiples über das Peer-Set (Foundation Doc 10)."""
+
+    multiple_name: str
+    min: float | None
+    median: float | None
+    mean: float | None
+    max: float | None
+    count_included: int
+    excluded_tickers: list[str]
+
+
+class CompsTable(BaseModel):
+    """Das vollständige Comps-Deliverable (Foundation Doc 10)."""
+
+    target: CompanyMetrics
+    peers: list[CompanyMetrics]
+    target_multiples: CompanyMultiples
+    peer_multiples: list[CompanyMultiples]
+    statistics: list[MultipleStatistics]
+    warnings: list[QualityWarning]
+    created_at: datetime
+    period_basis: str

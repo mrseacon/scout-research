@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import io
+import time
 from datetime import datetime, timezone
 from typing import Protocol
 
@@ -18,6 +19,25 @@ import httpx
 from pydantic import BaseModel
 
 from scout_research.data.cache import SqliteCache
+
+
+def _get_with_retry(
+    client: httpx.Client, url: str, params: dict | None = None, max_retries: int = 2
+) -> httpx.Response:
+    """Transiente Netzwerk-Hänger (beobachtet unter Last, siehe `edgar_client._get`) auch
+    hier abfedern, ohne die Fehler/429-Fallback-Semantik von `CachedProvider` zu verändern —
+    ein `httpx.HTTPStatusError` (z. B. 429) wird weiterhin sofort durchgereicht."""
+    last_error: httpx.TransportError | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = client.get(url, params=params)
+            response.raise_for_status()
+            return response
+        except httpx.TransportError as exc:
+            last_error = exc
+            if attempt < max_retries:
+                time.sleep(0.5 * (attempt + 1))
+    raise last_error  # type: ignore[misc]
 
 
 class PriceQuote(BaseModel):
@@ -41,10 +61,9 @@ class FinnhubProvider:
         self._client = client or httpx.Client(timeout=10.0)
 
     def get_price(self, ticker: str) -> PriceQuote | None:
-        response = self._client.get(
-            self.BASE_URL, params={"symbol": ticker.upper(), "token": self._api_key}
+        response = _get_with_retry(
+            self._client, self.BASE_URL, params={"symbol": ticker.upper(), "token": self._api_key}
         )
-        response.raise_for_status()
         data = response.json()
 
         price = data.get("c")
@@ -71,11 +90,11 @@ class StooqProvider:
         self._client = client or httpx.Client(timeout=10.0)
 
     def get_price(self, ticker: str) -> PriceQuote | None:
-        response = self._client.get(
+        response = _get_with_retry(
+            self._client,
             self.BASE_URL,
             params={"s": f"{ticker.lower()}.us", "f": "sd2t2ohlcv", "h": "", "e": "csv"},
         )
-        response.raise_for_status()
 
         reader = csv.DictReader(io.StringIO(response.text))
         row = next(reader, None)

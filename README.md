@@ -9,16 +9,23 @@ Die vollständige Projektspezifikation (Vision, Architektur, Datenquellen, Roadm
 
 ## Status
 
-Phase 0 & 1 abgeschlossen:
-- EDGAR-Client-Grundgerüst mit Rate Limiting und User-Agent
+Phase 0, 1 & 2 abgeschlossen:
+- EDGAR-Client-Grundgerüst mit Rate Limiting, User-Agent und Retry-Logik
 - Vollständiger v1-Kennzahlensatz (Revenue, EBIT, EBITDA-Approx, Net Income, Debt, Cash,
   Margen, YoY-Wachstum) mit vollständiger Provenance
 - `MarketDataProvider`-Interface (Finnhub primär, Stooq als Fallback vorbereitet, SQLite-Cache)
+- Peer-Kandidatensuche (SIC-Filter über `browse-edgar` + Größenfilter über den `frames`-Bulk-Endpunkt)
+- Multiples (EV/Revenue, EV/EBITDA, EV/EBIT, P/E) mit expliziter Behandlung nicht aussagekräftiger
+  Werte (negativer/fehlender Nenner → `None` + Grund, nie eine verzerrte Zahl)
+- Quality Checks: IQR-basierte Ausreißer-Erkennung, Fiskaljahresende-Mismatch, fehlende Daten
+- Vollständige `CompsTable`-Orchestrierung (Target + Peers + Multiples + Statistik + Warnings)
 
-⚠ **Bekannte Lücke:** Stooq blockiert aktuell automatisierte Requests per Bot-Schutz — siehe
-[`docs/foundation.md`, Abschnitt 8.3](docs/foundation.md#83--bekannte-datenlücke-aktienkurse)
-und offene Entscheidung D7. Ohne `FINNHUB_API_KEY` sind Marktdaten (Market Cap, EV) aktuell
-nicht verfügbar; alle anderen Kennzahlen funktionieren unabhängig davon.
+⚠ **Bekannte Lücken:**
+- Stooq blockiert aktuell automatisierte Requests per Bot-Schutz — siehe
+  [`docs/foundation.md`, Abschnitt 8.3](docs/foundation.md#83--bekannte-datenlücke-aktienkurse)
+  und offene Entscheidung D7. Finnhub trägt Marktdaten v1 vorerst allein.
+- SIC-Klassifizierung ist grob (z. B. landet Salesforce nicht im selben SIC-Code wie Adobe) —
+  wird in Phase 3 durch LLM-Ranking über eine breitere Kandidatenbasis kompensiert.
 
 ## Setup
 
@@ -32,8 +39,9 @@ cp .env.example .env  # EDGAR_CONTACT_EMAIL mit echter Kontakt-Adresse befüllen
 ## Smoke-Tests
 
 ```bash
-python -m scout_research.scratch --ticker AAPL          # Phase 0: nur Revenue + Provenance
-python -m scout_research.scratch --ticker AAPL --full   # Phase 1: vollständiger Kennzahlensatz
+python -m scout_research.scratch --ticker AAPL                              # Phase 0: nur Revenue + Provenance
+python -m scout_research.scratch --ticker AAPL --full                       # Phase 1: vollständiger Kennzahlensatz
+python -m scout_research.scratch --ticker ADBE --comps INTU,ADSK,CDNS,TEAM  # Phase 2: vollständige Comps-Tabelle
 ```
 
 Kein LLM beteiligt — reiner Data-Access/Domain-Pfad (L1/L2).

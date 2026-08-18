@@ -2,8 +2,8 @@
 
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
-**Status:** In Entwicklung — Phase 0 & 1 abgeschlossen
-**Dokumentversion:** 1.3 — Basis für alle folgenden Code-Sessions
+**Status:** In Entwicklung — Phase 0, 1 & 2 abgeschlossen
+**Dokumentversion:** 1.4 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -559,9 +559,9 @@ Memo-Entwurfsmodul · MCP-Server-Variante der Tools (starker Anschluss an dein S
 | # | Offene Frage | Status |
 |---|---|---|
 | ~~D1~~ | ~~Welche Kursdatenquelle?~~ | ✅ **Entschieden:** Finnhub primär, Stooq Fallback (siehe 8.3) |
-| D2 | Peer-Suche über `frames`-Endpunkt oder eigener SIC-Index? | offen — Phase 2 |
-| D3 | Kalenderjahr- oder Fiskaljahr-Normalisierung bei abweichenden FY-Enden? | offen — Phase 2 |
-| D4 | Ausreißer-Definition (IQR-basiert? feste Schwellen?) | offen — Phase 2 |
+| ~~D2~~ | ~~Peer-Suche über `frames`-Endpunkt oder eigener SIC-Index?~~ | ✅ **Entschieden:** `browse-edgar` (SIC-Filter, paginiert) + `frames` (Bulk-Größenfilter), kein selbst gepflegter Index nötig (siehe 7.4, `domain/peers.py`) |
+| D3 | Kalenderjahr- oder Fiskaljahr-Normalisierung bei abweichenden FY-Enden? | Teilweise: Mismatch wird erkannt und geflaggt (`check_fiscal_year_mismatch`, Phase 2). Echte Normalisierung (z. B. Trailing-Twelve-Months-Angleichung) bleibt offen — Phase 3+ |
+| ~~D4~~ | ~~Ausreißer-Definition (IQR-basiert? feste Schwellen?)~~ | ✅ **Entschieden:** IQR-basiert (Tukey-Fences, 1,5×), ab n≥4 Datenpunkten je Multiple — siehe `domain/quality.py` |
 | D5 | Projektname final | offen — vor Phase 5 |
 | D6 | Alpha-Vantage-Bildungslizenz beantragen, sobald Repo öffentlich? | offen — Phase 5 |
 | D7 | Stooq-Fallback ist seit 08/2026 durch Bot-Schutz blockiert (siehe 8.3) — Ersatz nötig? | offen — vor Phase 5, Finnhub trägt v1 vorerst allein |
@@ -695,7 +695,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.1 | 2026-08-18 | D1 entschieden (Finnhub/Stooq), Cache-Design ergänzt, Provider-Kapselung konkretisiert, D6 aufgenommen |
 | 1.2 | 2026-08-18 | Projekt final auf **Scout Research** umbenannt (vorher Arbeitstitel "Analyst Copilot") |
 | 1.3 | 2026-08-18 | Phase 0 & 1 umgesetzt. D7 aufgenommen: Stooq-Fallback seit 08/2026 durch Bot-Schutz blockiert, Finnhub trägt v1 vorerst allein (siehe 8.3) |
+| 1.4 | 2026-08-19 | Phase 2 umgesetzt (Comps-Engine). D2 entschieden (`browse-edgar` + `frames`, kein eigener Index), D4 entschieden (IQR/Tukey, n≥4). D3 teilweise: Mismatch-Erkennung steht, Normalisierung bleibt offen |
 
 ---
 
-*Ende Dokumentversion 1.3*
+*Ende Dokumentversion 1.4*
