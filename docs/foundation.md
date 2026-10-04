@@ -2,8 +2,8 @@
 
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
-**Status:** In Entwicklung — Phase 0, 1 & 2 abgeschlossen
-**Dokumentversion:** 1.4 — Basis für alle folgenden Code-Sessions
+**Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt (v1.5)
+**Dokumentversion:** 1.5 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -146,6 +146,9 @@ expliziter Kennzeichnung als approximiert (siehe 8.4).
 **Multiples:** EV/Revenue, EV/EBITDA, EV/EBIT, P/E.
 
 **Kennzahlen:** EBIT-Marge, Net-Marge, Umsatzwachstum YoY, Verschuldungsgrad (Net Debt/EBITDA).
+*Stand v1.5: EBIT-Marge, Net-Marge und Umsatzwachstum YoY sind implementiert (YoY nur zwischen zwei
+direkt aufeinanderfolgenden Geschäftsjahren). Der **Verschuldungsgrad Net Debt/EBITDA ist noch nicht
+implementiert** — der frühere Stand "Phase 1: alle v1-Kennzahlen" war in diesem Punkt zu weit gefasst.*
 
 ### 3.3 Erfolgskriterium für v1
 
@@ -264,6 +267,11 @@ Bewusst analog zur Sentinel-Architektur (Wiedererkennbarkeit im CV, erprobtes Mu
 **Harte Regel:** L4 (Agent) hat keinen direkten Zugriff auf L1. Alle Daten fließen durch L3-Tools.
 Das macht das System testbar (L1–L3 ohne LLM testbar) und verhindert halluzinierte Zahlen.
 
+**Zweite harte Regel (v1.5, Festlegung zur UI-Vision, siehe 12.1):** L1–L5 wissen nichts über die UI.
+Ausgaben sind strukturiert (Pydantic-Modelle, JSON-serialisierbar); Darstellung, Formatierung und
+Interaktion leben ausschließlich in L6. (Die CLI-Ausgabe in `scratch.py` ist ein Test-Hilfsmittel,
+kein Teil von L1–L5.)
+
 ### 7.2 Der Agent-Loop
 
 ```
@@ -289,6 +297,62 @@ Fehler-Feedback an den Agenten statt harter Crash.
 | `compute_comps_table` | Ziel-CIK, Peer-CIKs, Periode | Vollständige Comps-Struktur | Ruft intern L2 auf |
 | `run_quality_checks` | Comps-Struktur | Liste von Warnungen | Ausreißer, Lücken, FY-Mismatch |
 | `export_deliverable` | Comps-Struktur, Format | Dateipfad | XLSX / CSV / MD |
+
+**Stand der Umsetzung (v1.5)** — die L2-Funktionen hinter den Tools existieren (Phase 1/2), die Tools
+selbst (L3) noch nicht (Phase 3). Bekannte Abweichungen zwischen Katalog und L2-Funktionen:
+
+- `resolve_company`: nur **exakter Ticker** (`EdgarClient.resolve_cik`); Fuzzy-Match und
+  Mehrdeutigkeits-Kandidatenliste fehlen.
+- `find_peer_candidates`: liefert **keine Begründung** (bewusst Phase 3, LLM-Ranking). Die L2-Funktion
+  hat noch `calendar_year` als Pflichtparameter; im Tool-Schema entfällt er und wird aus der Zielperiode
+  abgeleitet (siehe 7.3.1).
+- `get_financials` / `compute_comps_table`: **keine Perioden-/Konzeptauswahl** — immer das jüngste
+  10-K je Unternehmen. Schema für `period` freigegeben, Umsetzung steht aus (7.3.1, D9).
+  `get_financials` ohne Konzeptliste: feste v1-Kennzahlen.
+- `get_market_data`: Kurs aus Finnhub, Shares aus `companyfacts`; bei **Mehrklassen-Aktien** sind
+  Shares so nicht ermittelbar (siehe 8.6, D11).
+
+#### 7.3.1 Periodenauswahl (D9 — Schema freigegeben, **noch nicht implementiert**)
+
+Optionaler Parameter `period` an `get_financials` und `compute_comps_table` (für das Ziel). Ohne
+`period` bleibt es beim heutigen Verhalten: jüngstes 10-K (FY) je Unternehmen.
+
+```python
+class PeriodSelector(BaseModel):         # höchstens ein Feld gesetzt; kein Feld = "latest"
+    period_end: date | None = None       # KANONISCH: exaktes Geschäftsjahresende
+    fiscal_year: int | None = None       # BEST EFFORT, siehe unten
+```
+
+- **`period_end` ist kanonisch** und eindeutig. **`fiscal_year` ist Best Effort:** gemeint ist das
+  SEC-Feld `fy` des 10-K (`DocumentFiscalYearFocus`), das jeder Filer selbst setzt. Die Benennung ist
+  nicht einheitlich und kann bei abweichendem Geschäftsjahresende von der Kalenderjahr-Intuition
+  abweichen; dasselbe `fiscal_year` kann bei verschiedenen Firmen verschiedene Zeiträume meinen. Für
+  Vergleiche zwischen Unternehmen ist daher `period_end` zu verwenden; die aufgelöste Periode steht
+  immer im Ergebnis (jeder Fakt trägt `period_end`).
+- **Fehlende Periode:** strukturierter Fehler `PeriodNotAvailable` mit den verfügbaren
+  Geschäftsjahresenden — **nie** ein stilles "nächstes Jahr". Ein Peer ohne passende Periode fehlt mit
+  Warnung.
+- **`peer_period_mode`** (Teil des freigegebenen Vorschlags): `"own_latest"` (Default, heutiges
+  Verhalten) oder `"match_target"` — je Peer das Geschäftsjahr, dessen Ende dem des Ziels am nächsten
+  liegt (±183 Tage), der Abstand wird als Warnung ausgewiesen.
+- **Multiples nur für die aktuelle Periode (v1):** Kurse sind immer "heute". EV, EV/Revenue,
+  EV/EBITDA, EV/EBIT, P/E und die Peer-Statistik gibt es daher **nur für die jeweils aktuelle Periode**.
+  **Historische Perioden liefern nur Financials, Margen und Wachstum.** Offenes Umsetzungsdetail
+  (vor der Implementierung zu bestätigen): ob `compute_comps_table` mit historischer Periode abgelehnt
+  wird oder nur Kennzahlen ohne Multiples liefert.
+- **Anker (8.6):** Wird eine Periode gewählt, ist der Umsatz dieser Periode der Anker; alle anderen
+  Fakten folgen unverändert.
+- **`calendar_year` verschwindet aus dem Tool-Schema.** `find_peer_candidates` leitet ihn intern aus
+  der Zielperiode ab: **`calendar_year = Jahr(Periodenende − 180 Tage)`**. Gegen den `frames`-Endpunkt
+  geprüft (2026-10-04): in welchem `CY…`-Frame taucht das Geschäftsjahr einer Firma tatsächlich auf?
+  Messreihe 1 (30 Firmen): "Jahr des Periodenendes" 24/30, "Mitte der Periode" 28/30. Messreihe 2
+  (31 Firmen mit Geschäftsjahresende in allen Monaten, gezielt um die Juni-Grenze): Offset 150 Tage
+  23/31, 165 Tage 29/31, **180 Tage 31/31**, 183 Tage 25/31. Grenzfälle: Ende 27./28. Juni (SYY, LRCX)
+  → CY2025; 30. Juni (MSFT, ADP, KLAC, PG, TEAM) → CY2026; 3. Juli (STX, WDC) → CY2026. Die naheliegende
+  "Mehrheit der Tage"-Regel scheitert genau an den 30.-Juni-Firmen. **Vorbehalt:** beobachtetes,
+  undokumentiertes SEC-Verhalten; die Marge am 28.–30. Juni beträgt einen Tag. **Absicherung bei der
+  Umsetzung:** das Ziel muss selbst im abgeleiteten Frame mit passendem `end` auftauchen, sonst werden
+  die Nachbarjahre (±1) geprüft und andernfalls ein Fehler geworfen statt zu raten.
 
 ### 7.4 Peer-Identifikation — das methodisch heikelste Stück
 
@@ -327,6 +391,9 @@ zugänglicher.
 - **Pflicht:** Ein aussagekräftiger `User-Agent`-Header mit Kontaktinformation. Ohne diesen
   werden Requests blockiert (SEC Fair Access Policy).
 - **Rate Limit:** max. 10 Requests/Sekunde. → Rate Limiter in L1 zwingend einbauen.
+  *Umsetzung (v1.5):* gleitendes Fenster, jeder Versuch inklusive Retries läuft durch `acquire()`.
+  Das Limit gilt **pro `EdgarClient`-Instanz** (eigener Limiter) — pro Prozess nur eine Instanz
+  verwenden, sonst vervielfacht sich die Rate. SEC-Antworten 429/403 werden **nicht** wiederholt.
 - Relevante Endpunkte (Stand der Planung — in Session 1 verifizieren):
   - Company-Tickers-Mapping (Ticker → CIK)
   - `submissions` (Filing-Historie je Unternehmen)
@@ -352,8 +419,8 @@ Golden-Set-Lauf (10 Ziele × ~10 Peers ≈ 100 Kursabrufe pro Evaluationsdurchga
 
 | Quelle | Free-Limit | Stabilität | Entscheidung |
 |---|---|---|---|
-| **Finnhub** | ~60 Calls/Minute, kein Kreditkarte | Offizielle API mit Key + Doku | ✅ **Primär** |
-| **Stooq** | keine Limits, **kein API-Key** | CSV-Download, kein echtes API — Stand 08/2026 **nicht mehr per einfachem HTTP erreichbar** (siehe unten) | ⚠️ **Fallback, aktuell defekt** |
+| **Finnhub** | ~60 Calls/Minute, kein Kreditkarte | Offizielle API mit Key + Doku; Client-Throttle 55/min, 429 mit `Retry-After` (siehe unten) | ✅ **Primär** |
+| **Stooq** | keine Limits, **kein API-Key** | CSV-Download, kein echtes API; **nie erfolgreich verifiziert** (siehe unten) | ⛔ **unverifiziert / deaktiviert** |
 | **yfinance** | undokumentiert, schwankend | Inoffiziell — Yahoo hat sein API 2017 abgeschaltet; Library nutzt interne Endpunkte ohne Stabilitätsgarantie, bricht gelegentlich | ⚠️ nur optional |
 | **Alpha Vantage** | 25 Requests/**Tag** | Stabil, aber Limit zu eng | ❌ als Primärquelle |
 
@@ -361,37 +428,89 @@ Golden-Set-Lauf (10 Ziele × ~10 Peers ≈ 100 Kursabrufe pro Evaluationsdurchga
 unbegrenzte Requests bereit. Dieses Projekt erfüllt beide Kriterien — ein Antrag lohnt sich,
 sobald das Repo öffentlich ist. Dann als dritter Provider hinter demselben Interface einhängbar.
 
-#### ⚠ Erkenntnis aus Phase 1 (Stand 2026-08-18): Stooq-Fallback aktuell defekt
+#### ⚠ Stooq: unverifiziert und deaktiviert (korrigiert in v1.5; Stand 2026-10-04)
 
-Stooq schützt seine öffentlichen Endpunkte (`/q/l/`, `/q/d/l/`) inzwischen mit einer
-JS-basierten Proof-of-Work-Challenge (Anubis-artiger Bot-Schutz). Einfache `httpx`-Requests —
-auch mit Browser-User-Agent — werden mit einer HTML-Verify-Seite statt CSV-Daten beantwortet.
-Die Annahme "kein Key, sehr robust" aus der D1-Tabelle ist damit **nicht mehr korrekt.**
+Die Aussage in v1.3/v1.4, `StooqProvider` sei "implementiert und nur blockiert", war zu
+optimistisch. Tatsächlicher Befund:
 
-Konsequenz: `StooqProvider` ist implementiert (Interface bleibt korrekt), liefert aber aktuell
-live keine Daten. **Finnhub ist faktisch die einzige funktionierende Quelle**, bis eine der
-folgenden Optionen umgesetzt ist: (a) Headless-Browser-Bypass für Stooq (hoher Aufwand, fragil),
-(b) Alpha-Vantage-Bildungslizenz vorziehen statt erst vor Phase 5 zu beantragen (siehe D6),
-(c) dritten keyless Fallback evaluieren. → **Neue offene Entscheidung D7** (Abschnitt 13).
+- Der historische Endpunkt `/q/d/l/` antwortet mit einer **JS-Proof-of-Work-Challenge**
+  (Anubis-artiger Bot-Schutz) statt mit CSV.
+- Der vom Provider genutzte Quote-Endpunkt `/q/l/?s=aapl.us&f=sd2t2ohlcv&h&e=csv` antwortet mit
+  **"page does not exist"** — er hat in keiner Session Daten geliefert.
+- Das erwartete CSV-Format ist **angenommen**, die Provider-Tests sind gemockt. Der Provider wurde
+  also nie gegen echte Stooq-Daten verifiziert.
+
+Konsequenz: `StooqProvider` bleibt als Interface-Platzhalter im Code, ist aber in der
+Standard-Verdrahtung **nicht als Fallback eingehängt** (`fallback=None`). **Finnhub ist die einzige
+funktionierende Quelle.** Offene Optionen unverändert: (a) Headless-Browser-Bypass (aufwendig,
+fragil), (b) Alpha-Vantage-Bildungslizenz vorziehen (D6), (c) dritten keyless Fallback evaluieren
+→ **D7** (Abschnitt 13).
+
+#### Finnhub: Throttle und 429 (v1.5)
+
+`FinnhubProvider` drosselt auf **55 Requests/Minute** (Konfiguration `FINNHUB_REQUESTS_PER_MINUTE`,
+gleitendes 60-s-Fenster — damit ist auch ein serverseitig fest ausgerichtetes Minutenfenster sicher).
+**Jeder HTTP-Versuch zählt**, auch Wiederholungen nach Netzwerkfehlern und nach 429. Bei **429**
+wird `Retry-After` (Sekunden oder HTTP-Datum) abgewartet, ohne Header 5 s × Versuchsnummer; maximal
+2 Wiederholungen, und verlangt der Server mehr als 120 s, wird nicht blockiert, sondern der Fehler
+an `CachedProvider` gegeben ("Marktdaten nicht verfügbar" statt Hänger). Finnhubs `/quote` liefert
+den **letzten Kurs** — während der US-Börsenzeit also intraday, sonst den letzten Schlusskurs; das
+weicht von der Annahme "End-of-Day" (Abschnitt 4) ab, und der Cache friert den ersten Abruf des Tages ein.
+
+#### Prüfung Finnhub `stock/profile2` für Mehrklassen-Aktien (D11 — nur Befund, nichts eingebaut)
+
+Live-Test im Free-Tier (2026-10-04) für TEAM, GOOGL, META, mit AAPL als Kontrolle: **HTTP 200**, kein
+Premium-Fehler. Die Antwort enthält `marketCapitalization` (Mio. USD) und `shareOutstanding` (Mio.).
+
+| Ticker | `shareOutstanding` | `marketCapitalization` | MarketCap ÷ (Kurs × Shares) |
+|---|---|---|---|
+| TEAM | 253,77 Mio. | 47.562 Mio. | 0,998 |
+| GOOGL | 12.230 Mio. | 4.201.005 Mio. | 1,000 |
+| META | 2.538,42 Mio. | 1.854.788 Mio. | 1,004 |
+| AAPL (Kontrolle) | 14.687,36 Mio. | 4.869.932 Mio. | 0,994 |
+
+- **Plausibilität:** TEAM gegen die Cover Page des 10-K geprüft: Class A 159.005.198 + Class B
+  94.133.617 = 253.138.815; `profile2` liegt +0,25 % darüber (anderer Stichtag). AAPL: 14.687 Mio.
+  (`profile2`) gegen 14.776 Mio. (EDGAR-Cover) = 0,6 % Differenz. GOOGL und META liegen in der
+  erwarteten Größenordnung der Summe aller Klassen, sind aber nicht gegen die Cover Page geprüft.
+- **Schwächere Provenance:** keine Accession Number und **kein Stichtag** in der Antwort, die Quelle
+  ist ein Vendor und nicht das Filing — das berührt das Primärquellen-Prinzip (2.1). Als Shares-Quelle
+  wäre nur eine ausdrücklich gekennzeichnete Ersatzquelle vertretbar.
+- **Kosten:** `profile2` + `quote` = 2 Calls pro Ticker; bei 55/min halbiert sich der Durchsatz
+  (~27 Ticker/min).
+- **Nebenbefund:** Finnhub liefert `x-ratelimit-limit: 60`, `-remaining` und `-reset` mit; der Throttle
+  könnte sich daran orientieren (nicht umgesetzt).
+- **Entscheidung (Sean, 2026-10-04):** D11 bleibt zurückgestellt.
 
 #### Cache-Design löst das Rate-Limit strukturell
 
-Schlusskurse ändern sich pro Handelstag genau einmal. Der Cache wird deshalb auf
-`(ticker, trading_date)` geschlüsselt. Folge: **Ein wiederholter Golden-Set-Lauf kostet null
-API-Calls.** Damit ist das Limit-Thema gelöst und nicht nur umgangen.
+Schlusskurse ändern sich pro Handelstag genau einmal. Der Cache soll deshalb auf
+`(ticker, trading_date)` geschlüsselt werden. Folge: **Ein wiederholter Golden-Set-Lauf kostet null
+API-Calls.**
+
+*Abweichung im Code (v1.5):* der Schlüssel ist `(ticker, UTC-Kalendertag des Aufrufs)`, nicht der
+Handelstag. "Null API-Calls bei Wiederholung" gilt daher nur **innerhalb desselben UTC-Tages**; am
+Wochenende oder an Feiertagen entsteht pro Kalendertag ein eigener Eintrag (und ein Call), obwohl
+sich der Kurs nicht geändert hat. Ein Schlüssel auf den tatsächlichen Handelstag (Datum aus der
+Provider-Antwort) steht noch aus. Der Throttle (oben) ist damit für den ersten Lauf eines Tages nötig,
+der Cache löst das Limit-Thema nicht allein.
 
 #### Pflicht-Kapselung
 
-Kursquelle hinter einem eigenen Interface (`MarketDataProvider`) mit einheitlichem Rückgabetyp
-(`MarketSnapshot`) kapseln. Provider-Wechsel darf genau eine Datei betreffen. **Nicht optional.**
-Konkrete Struktur:
+Kursquelle hinter einem eigenen Interface (`MarketDataProvider`) kapseln. Provider-Wechsel darf
+genau eine Datei betreffen. **Nicht optional.** Konkrete Struktur:
 
 ```
-MarketDataProvider (Protocol)
-  ├── FinnhubProvider    (primär,  benötigt FINNHUB_API_KEY)
-  ├── StooqProvider      (fallback, keyless)
+MarketDataProvider (Protocol)  -> liefert PriceQuote
+  ├── FinnhubProvider    (primär,  benötigt FINNHUB_API_KEY, Throttle 55/min)
+  ├── StooqProvider      (UNVERIFIZIERT, deaktiviert — nicht eingehängt)
   └── CachedProvider     (Decorator, wrapped einen Provider + SQLite-Cache)
 ```
+
+*Abweichung im Code (v1.5):* die Provider liefern einen schlanken **`PriceQuote`** (Ticker, Kurs,
+Datum, Quelle). Der in Abschnitt 10 beschriebene **`MarketSnapshot`** (inkl. `shares_outstanding`
+und `market_cap`) wird erst in L2 (`build_company_metrics`) aus Kurs und den EDGAR-Cover-Page-Shares
+zusammengesetzt — ohne Shares (z. B. Mehrklassen-Aktien) gibt es keinen Snapshot.
 
 Verhalten: `CachedProvider` → Cache-Hit? zurückgeben. Sonst Primär-Provider. Bei Fehler/429 →
 automatisch Fallback-Provider. Bei Fehlschlag beider → `MarketSnapshot` = None und
@@ -407,6 +526,15 @@ Kapitalflussrechnung. Konsequenzen:
 - Bei fehlenden D&A-Daten: EBITDA als nicht verfügbar ausweisen, **nicht schätzen**.
 - Diese Transparenz ist ein Feature, kein Mangel — sie zeigt Verständnis für die Datenlage.
 
+*Messung (v1.5, 30 Ticker):* EBITDA ist nur bei **21/30** Firmen ermittelbar. Bei MSFT, GOOGL, ORCL,
+INTU, CRWD, TXN, WDAY und AMD ist kein *Gesamt*-D&A-Konzept getaggt, nur Teilposten
+(`Depreciation`, `AmortizationOfIntangibleAssets`, `OtherDepreciationAndAmortization`, ...). Ein
+Zusammensetzen aus Teilposten ist **nicht sicher**: Bei ADSK ergibt Depreciation + Amortization-Posten
+193 Mio. gegenüber 195 Mio. gemeldetem Gesamt-D&A, bei CDNS 217 Mio. gegenüber 228 Mio. (−5 %), und bei
+MSFT ist `Depreciation` (34,3 Mrd.) vermutlich schon die ganze Cashflow-Zeile, sodass
+`AmortizationOfIntangibleAssets` doppelt zählen würde. → **Entschieden (D12): EBITDA bleibt `None`,
+es werden keine Teilposten addiert.**
+
 ### 8.5 Der PE-Bezug bleibt erhalten
 
 Auch ohne PE-Daten ist der PE-Bezug erzählbar:
@@ -414,6 +542,109 @@ Auch ohne PE-Daten ist der PE-Bezug erzählbar:
 - v2 kann **Precedent Transactions** aus M&A-bezogenen Filings (8-K, Merger-Proxies) ergänzen —
   dort stehen reale Transaktionsdaten (Kaufpreis, Struktur), die sonst nur kostenpflichtig
   verfügbar sind. Das ist ein echtes Alleinstellungsmerkmal für später.
+
+### 8.6 Periodentreue, Konzept-Ketten und Schuldenregel (Härtungs-Session, 2026-10-04)
+
+#### Befund: veraltete Fakten in den Phasen 1 und 2
+
+Der Extraktor aus Phase 1 nahm je Kennzahl das **erste Konzept der Fallback-Kette mit irgendeiner
+Historie** und davon den jüngsten Wert — ohne zu prüfen, ob dieser Wert zur Berichtsperiode des
+Unternehmens gehört. Firmen wechseln XBRL-Tags; das alte Tag bleibt mit Altdaten in `companyfacts`.
+Messung über 30 Ticker (AAPL, MSFT, GOOGL, AMZN, META, NVDA, ORCL, CRM, ADBE, INTU, ADSK, CDNS, SNPS,
+NOW, WDAY, TEAM, HUBS, PANW, FTNT, DDOG, ZS, CRWD, IBM, CSCO, QCOM, TXN, AMD, PYPL, EBAY, UBER):
+
+- **8/30 Firmen** (ADBE, ADSK, AMD, EBAY, GOOGL, NVDA, PYPL, WDAY) hatten Fakten aus der falschen Periode.
+- Beispiele: NVDA-**Umsatz** FY2022 neben EBIT 2026; PYPL-Umsatz 2019; GOOGL-Umsatz ein Jahr zurück;
+  ADSK-D&A aus **2016** (EBITDA = EBIT 2026 + D&A 2016); **ADBE-Gesamtschuld aus 2019**
+  (4,14 statt 6,21 Mrd.); EBAY-Schuld 2023.
+- **Folge:** Die in Phase 1/2 berichteten Live-Läufe waren für das Ziel **Adobe** fehlerhaft (EV und
+  alle EV-Multiples auf Basis der 2019er Schuld). AAPL, GOOGL, CSCO u. a. wichen ebenfalls ab (siehe
+  Schuldenregel). Die Aussage "Phase 1/2 live verifiziert" galt nur für die damals getesteten Firmen.
+- Zusätzlich war `LongTermDebtAndCapitalLeaseObligations` fälschlich als Gesamtschuld geführt; laut
+  Definition ist es **nicht-kurzfristig**.
+
+#### Prinzip: Periodenanker
+
+Die Berichtsperiode eines Unternehmens wird **einmal** festgelegt: Ende des jüngsten Jahresumsatzes,
+wobei über die ganze Umsatz-Kette das Konzept mit dem **jüngsten Periodenende** gewinnt (die
+Kettenreihenfolge entscheidet nur bei Gleichstand). **Jeder andere Fakt muss exakt auf dieses
+Periodenende fallen** — ein Wert aus einer früheren Periode gilt als *nicht vorhanden*, nicht als
+Ersatz. Cover-Page-Shares tragen das Einreichdatum und werden stattdessen an **dasselbe 10-K-Filing**
+(Accession Number) wie der Umsatz gebunden. YoY-Wachstum gibt es nur zwischen zwei direkt
+aufeinanderfolgenden Geschäftsjahren (350–380 Tage Abstand der Periodenenden).
+
+#### Messung vorher / nachher (30 Ticker)
+
+| | Baseline (v1.4) | v1.5 |
+|---|---|---|
+| Firmen mit Fakten aus falscher Periode | 8 / 30 | **0 / 30** |
+| `total_debt` verfügbar | 21 / 30 (teils veraltet) | 20 / 30 exakt (periodenrichtig) **+ 9 / 30 als Untergrenze mit Flag (D10)**, 1 / 30 fehlt (HUBS) |
+| `ebitda` verfügbar | 23 / 30 (teils veraltet) | 21 / 30 (periodenrichtig) |
+| `shares` verfügbar | 25 / 30 (teils veraltet) | 24 / 30 (periodenrichtig) |
+
+Der nominelle Rückgang ist gewollt: die fehlenden Werte waren zuvor veraltet oder falsch. Größte
+Korrekturen: GOOGL-Schuld 10,9 → 49,1 Mrd.; ADBE 4,14 → 6,21; CSCO 22,9 → 29,5; AAPL 90,7 → 98,7
+(Commercial Paper); NVDA/PYPL/GOOGL-Umsatz jetzt aus dem richtigen Jahr.
+
+#### Schuldenregel
+
+Gelesen aus den Definitionen in `companyfacts` (nicht aus der Erinnerung) und an Zahlen geprüft:
+
+| Konzept | Bedeutung (Definition) | Verwendung |
+|---|---|---|
+| `DebtLongtermAndShorttermCombinedAmount` | LT inkl. current maturities + ST | Gesamtschuld |
+| `DebtAndCapitalLeaseObligations` | ST + LT, inkl. Leasing | Gesamtschuld (nachrangig, Leasing enthalten) |
+| `LongTermDebt` | LT-Schuld inkl. current maturities (= Noncurrent + Current: AAPL, MSFT, NVDA, CRM, SNPS, INTU exakt) | Gesamtschuld |
+| `LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities` | LT inkl. Leasing, inkl. current | Gesamtschuld (nachrangig) |
+| `LongTermDebtNoncurrent` | **ohne** current maturities | Teil — exakt nur mit explizit gemeldetem kurzfristigem Anteil, sonst **Untergrenze** (D10) |
+| `DebtCurrent` | ST-Debt + current maturities | Ergänzung zu Noncurrent |
+| `LongTermDebtCurrent` | nur current maturities der LT-Schuld | Ergänzung zu Noncurrent |
+| `CommercialPaper` | Commercial Paper | addiert, außer erkennbar enthalten |
+| `ShortTermBorrowings` | uneinheitlich getaggt (IBM: current maturities, schon im Total) | **nie addiert** |
+| `UnsecuredLongTermDebt`, `SecuredLongTermDebt`, `LongTermNotesPayable`, `LongTermNotesAndLoans`, `ConvertibleLongTermNotesPayable`, `ConvertibleDebtNoncurrent` | Klassen-/Instrumentkonzepte, deren Definition den kurzfristigen Anteil **ausdrücklich ausschließt** ("excluding current portion", "net of the amount due in the next twelve months") | nie als Gesamtschuld; seit D10 nur als **Untergrenze** |
+| `SeniorNotes`, `ConvertibleNotesPayable`, `DebtInstrumentCarryingAmount` | Klassen-/Instrumentkonzepte ohne ausdrücklichen Ausschluss; `DebtInstrumentCarryingAmount` kann ein Einzelinstrument meinen | **nicht akzeptiert** |
+| `LongTermDebtAndCapitalLeaseObligations` | nicht-kurzfristig, inkl. Leasing | nicht als Total (früher fälschlich) |
+
+**Regel:** Ein Konzept zählt nur dann als Gesamtschuld, wenn seine Definition die Gesamtheit abdeckt —
+oder wenn jeder Teil, den seine Definition ausschließt, **explizit gemeldet** ist (auch als 0).
+Fehlt ein ausgeschlossener Teil, ist die **exakte** Gesamtschuld nicht ermittelbar — es bleibt `None`
+oder, bei ausdrücklichem Ausschluss des kurzfristigen Anteils, die gekennzeichnete Untergrenze (unten, D10). "Explizit" heißt:
+Wert für **genau diese Periode**; ein 0-Wert aus dem Vorjahr zählt nicht (TEAM). Die Provenance nennt
+alle verwendeten Konzepte (`LongTermDebt+CommercialPaper`) und Accession Numbers. Leasing ist nur
+enthalten, soweit das gewählte Aggregat es enthält (IBM, EBAY) — der Konzeptname zeigt es.
+
+Bekannte Restabweichungen: AMZN: `ShortTermBorrowings` (0,46 Mrd., < 1 %) fehlen bewusst.
+
+**Untergrenze statt `None` (D10, entschieden und implementiert 2026-10-04).** Lässt sich keine exakte
+Gesamtschuld bilden, wird dennoch ein Wert ausgewiesen — aber nur, wenn die **Definition** eines
+vorhandenen Konzepts den kurzfristigen Anteil **ausdrücklich ausschließt** (Konzeptliste: siehe Tabelle,
+im Code `DEBT_LOWER_BOUND_CONCEPTS`). Jedes dieser Konzepte ist eine Teilmenge der Gesamtschuld; das
+**Maximum** der für genau diese Periode gemeldeten Werte ist daher eine gültige Untergrenze. Das Muster
+entspricht der EBITDA-Approximation (8.4): nie stillschweigend, immer gekennzeichnet:
+
+- Feld `CompanyMetrics.total_debt_is_lower_bound`; daraus `enterprise_value_is_lower_bound`,
+  `CompanyMultiples.ev_multiples_are_lower_bound` (EV/Revenue, EV/EBITDA, EV/EBIT; **P/E nie
+  betroffen**) und `MultipleStatistics.lower_bound_tickers` (die Statistik mischt dann exakte Werte
+  und Untergrenzen).
+- `QualityWarning` mit Severity `warning` (`affected_field = total_debt`), die das verwendete Konzept
+  nennt und festhält, dass EV und EV-Multiples zu niedrig sind.
+- **Export-Anforderung (Phase 4):** der Export muss Untergrenzen (und approximiertes EBITDA) sichtbar
+  kennzeichnen und die zugehörigen Warnings mitführen. Es gibt noch keinen Export; bis dahin kennzeichnet
+  die CLI (`scratch.py`) die Werte mit `*` und weist "x/N Peers, davon y mit Flag" aus.
+- Eine exakte Summe trägt nie das Flag. Die Provenance bleibt lückenlos (das Konzept steht in
+  `source_facts`).
+
+#### Verbleibende Lücken (30 Ticker, nach Härtung und D10)
+
+- **`total_debt`:** 20 exakt; **9 als Untergrenze** (CDNS, NOW, WDAY, TEAM, PANW, DDOG, ZS, CRWD, PYPL);
+  **1 fehlt** (HUBS — gar kein Schuldkonzept getaggt). Sensitivität am Beispiel CDNS: selbst die
+  vollständige `UnsecuredLongTermDebt` (2,48 Mrd.) wäre nur **2,6 % des EV**.
+- **`shares` fehlt (6):** CRWD, DDOG, GOOGL, META, TEAM, WDAY — durchweg **Mehrklassen-Aktien**: die
+  Cover-Page-Fakten sind dimensional (Class A/B) und stehen nicht in `companyfacts`. Die Zahlen stehen
+  im Filing selbst (`R1.htm`, z. B. TEAM: Class A 159.005.198, Class B 94.133.617). → **D11**
+  (zurückgestellt; `profile2`-Befund in 8.3).
+- **`ebitda` fehlt (9):** AMD, CRWD, GOOGL, IBM (kein EBIT), INTU, MSFT, ORCL, TXN, WDAY — bleibt `None`
+  (**D12 entschieden**, keine Teilposten).
 
 ---
 
@@ -438,6 +669,21 @@ Auch ohne PE-Daten ist der PE-Bezug erzählbar:
 Bei diesem Nutzungsprofil (Einzelnutzer, wenige Analysen/Tag) sind das geringe Beträge.
 Kostenhebel: aggressives Caching von EDGAR-Daten, kompakte Tool-Ergebnisse (keine Roh-JSONs ins
 Kontextfenster kippen), günstigeres Modell für einfache Schritte.
+*Stand v1.5: EDGAR-Antworten werden **nicht** gecacht (jeder Lauf lädt `companyfacts` neu); gecacht
+werden nur Kurse (siehe 8.3). `pandas` und `openpyxl` sind deklariert, aber bis Phase 4 ungenutzt.*
+
+### Entwicklungsumgebung (Befund 2026-10-04)
+
+**Projekt und venv nicht in einem iCloud-synchronisierten Ordner ablegen** (z. B. `~/Desktop` bei aktivierter
+"Schreibtisch & Dokumente"-Synchronisierung). Belegt gemessen: Im iCloud-Desktop setzt macOS binnen
+~2 Sekunden das Flag `hidden` auf jede Datei und jeden Ordner mit Punkt-Namen (`.venv` samt Inhalt,
+`.env`, `.gitignore`, `.pytest_cache`); in `/private/tmp` und `~` passiert das nicht. Python 3.13 überspringt
+`.pth`-Dateien mit diesem Flag **ohne Fehlermeldung** — der Editable-Install (`pip install -e .`)
+funktioniert dann nicht mehr, `python -m scout_research...` scheitert mit `ModuleNotFoundError`, während
+`pytest` (`pythonpath = ["src"]` in `pyproject.toml`) weiterläuft. Das Flag kehrt nach `chflags -R nohidden .venv`
+von selbst zurück. Abhilfe: Projekt außerhalb von iCloud ablegen (venv neu anlegen — venvs sind nicht
+verschiebbar) oder vorübergehend `PYTHONPATH=src` setzen. Zusätzlich liegt die SQLite-Kursdatei im
+Projektordner; SQLite-Dateien in synchronisierten Ordnern sind ein Korruptionsrisiko.
 
 ---
 
@@ -477,6 +723,22 @@ QualityWarning
 
 **Design-Regel:** `CompanyMetrics` referenziert immer die zugrundeliegenden `FinancialFact`s.
 Es darf keinen Wert im Output geben, der nicht auf mindestens einen Fact zurückführbar ist.
+
+**Umsetzung und Abweichungen (v1.5).** Die obige Skizze ist konzeptionell; der Code weicht bewusst ab:
+
+- `CompanyMetrics`: statt `period` die Felder `period_end` + `fiscal_year`; `ebitda` + `ebitda_approximated`
+  getrennt; zusätzlich `total_assets`, `market` (optional) und `enterprise_value`. Alle Werte gehören
+  zur Periode des Umsatz-Ankers (8.6). Untergrenzen-Kennzeichnung (D10): `total_debt_is_lower_bound`
+  und `enterprise_value_is_lower_bound`.
+- `CompsTable`: statt `multiples: dict` die typisierten Listen `target_multiples` / `peer_multiples`
+  (`CompanyMultiples`, nicht aussagekräftige Multiples als `None` + `excluded_reasons`) und `statistics`
+  als Liste von `MultipleStatistics` (je Multiple min/median/mean/max/count_included/excluded_tickers
+  und `lower_bound_tickers`); `CompanyMultiples.ev_multiples_are_lower_bound` kennzeichnet EV-Multiples
+  auf Basis einer Schuld-Untergrenze.
+- `CompanyMultiples` trägt keine eigenen Fact-Referenzen — die Provenance läuft über `CompsTable.target`
+  / `.peers` und deren `source_facts`. Zusammengesetzte Fakten (Schuld) nennen alle Konzepte im `concept`
+  (`LongTermDebt+CommercialPaper`) und alle Accession Numbers (`A+B`).
+- `MarketSnapshot` entsteht in L2 aus `PriceQuote` (L1) + Cover-Page-Shares (siehe 8.3).
 
 ---
 
@@ -531,6 +793,12 @@ alle folgenden Änderungen dagegen messbar werden.
 - Multiples-Berechnung, Statistiken, Ausreißerlogik
 - Quality Checks
 - **DoD:** Manuell übergebenes Peer-Set → vollständige Comps-Tabelle in Python
+- **Nachtrag v1.5:** Die Härtungs-Session vor Phase 3 hat Fehler in der Datenextraktion aus Phase 1
+  korrigiert (veraltete Fakten, Schuldenregel — siehe 8.6). Die in Phase 1/2 berichteten
+  Live-Ergebnisse (insbesondere EV/Multiples für Adobe) wurden dadurch teilweise ungültig. Live-Gate der
+  Härtung ("≥ 4 von 5 Peers mit EV-Multiples", Adobe gegen INTU, ADSK, CDNS, TEAM, CRM): zunächst **3/5
+  (verfehlt)**; nach Umsetzung von D10 **4/5, davon 1 mit Flag (CDNS, Untergrenze)**. TEAM bleibt ohne
+  Shares (D11 zurückgestellt).
 
 ### Phase 3 — Agent-Schicht (2–3 Sessions)
 - Tool-Definitionen, Agent-Loop, System-Prompt
@@ -541,6 +809,8 @@ alle folgenden Änderungen dagegen messbar werden.
 ### Phase 4 — Interface & Export (1–2 Sessions)
 - Streamlit-Chat mit Peer-Bestätigungs-Gate
 - XLSX-Export inkl. separatem Quellenblatt
+- Export kennzeichnet **approximiertes EBITDA und Untergrenzen** (`total_debt`, EV, EV-Multiples)
+  sichtbar und führt die zugehörigen Warnings mit (siehe 8.4, 8.6)
 - **DoD:** Kompletter Workflow ohne Terminal nutzbar
 
 ### Phase 5 — Evaluation & Härtung (1–2 Sessions)
@@ -552,6 +822,35 @@ alle folgenden Änderungen dagegen messbar werden.
 Precedent Transactions aus M&A-Filings · Multi-Perioden-Trends · Sektor-Screening ·
 Memo-Entwurfsmodul · MCP-Server-Variante der Tools (starker Anschluss an dein Seminar)
 
+### 12.1 UI-Vision (Phase 6)
+
+**Ziel.** Eine moderne, professionelle Oberfläche, leicht "fancy", aber finance-tauglich. Die
+**Lesbarkeit der Daten hat Vorrang** vor Effekten.
+
+**Werkzeug.** Entwurf und Prototyp mit **Claude Design**. Offen: Exportformat und Übernahme in den
+Code (→ D8).
+
+**Prinzipien.**
+- Ruhige Palette; Hell- und Dunkelmodus.
+- Dichte, gut lesbare Tabellen mit tabellarischen Ziffern.
+- Jede Zahl ist per Klick/Hover bis zur **Provenance** aufklappbar: CIK, Accession Number,
+  XBRL-Konzept, Periode.
+- Qualitätswarnungen sind nach Severity (info / warning / critical) klar getrennt.
+- Die Peer-Bestätigung ist ein eigener, deutlicher Schritt.
+- Export mit einem Klick.
+
+**Kernscreens.** Chat/Arbeitsbereich · Peer-Auswahl · Comps-Tabelle mit Provenance-Drilldown · Verlauf.
+
+**Technik (D8).** Streamlit reicht für Phase 4. Für Phase 6 ist wahrscheinlich ein eigenes Frontend
+(z. B. Next.js/TypeScript) über eine API-Schicht nötig.
+
+**Regel ab jetzt.** L1–L5 wissen nichts über die UI; Ausgaben sind strukturiert (siehe 7.1). Das ist
+heute schon die Voraussetzung dafür, dass die Provenance-Drilldowns und die Kennzeichnung von
+Näherungen/Untergrenzen (8.4, 8.6) später ohne Umbau darstellbar sind.
+
+**Nicht-Ziel.** Kein UI-Aufwand vor abgeschlossener Evaluation (Phase 5). Gemeint ist die
+Phase-6-Oberfläche; die Streamlit-Oberfläche aus Phase 4 bleibt wie geplant.
+
 ---
 
 ## 13. Offene Entscheidungen & Risiken
@@ -562,14 +861,21 @@ Memo-Entwurfsmodul · MCP-Server-Variante der Tools (starker Anschluss an dein S
 | ~~D2~~ | ~~Peer-Suche über `frames`-Endpunkt oder eigener SIC-Index?~~ | ✅ **Entschieden:** `browse-edgar` (SIC-Filter, paginiert) + `frames` (Bulk-Größenfilter), kein selbst gepflegter Index nötig (siehe 7.4, `domain/peers.py`) |
 | D3 | Kalenderjahr- oder Fiskaljahr-Normalisierung bei abweichenden FY-Enden? | Teilweise: Mismatch wird erkannt und geflaggt (`check_fiscal_year_mismatch`, Phase 2). Echte Normalisierung (z. B. Trailing-Twelve-Months-Angleichung) bleibt offen — Phase 3+ |
 | ~~D4~~ | ~~Ausreißer-Definition (IQR-basiert? feste Schwellen?)~~ | ✅ **Entschieden:** IQR-basiert (Tukey-Fences, 1,5×), ab n≥4 Datenpunkten je Multiple — siehe `domain/quality.py` |
-| D5 | Projektname final | offen — vor Phase 5 |
+| ~~D5~~ | ~~Projektname final~~ | ✅ **Entschieden:** **Scout Research** (siehe Änderungshistorie 1.2; der Tabelleneintrag war veraltet) |
 | D6 | Alpha-Vantage-Bildungslizenz beantragen, sobald Repo öffentlich? | offen — Phase 5 |
-| D7 | Stooq-Fallback ist seit 08/2026 durch Bot-Schutz blockiert (siehe 8.3) — Ersatz nötig? | offen — vor Phase 5, Finnhub trägt v1 vorerst allein |
+| D7 | Stooq ist unverifiziert/deaktiviert (nie funktionierender Fallback, siehe 8.3) — Ersatz nötig? | offen — vor Phase 5, Finnhub trägt v1 allein |
+| D8 | UI-Vision (Phase 6): Entwurf/Prototyp mit **Claude Design** — Exportformat und Übernahme in den Code offen; Frontend-Technik: Streamlit (Phase 4) vs. eigenes Frontend (z. B. Next.js/TypeScript) über eine API-Schicht (Phase 6). Siehe 12.1. | offen — vor Phase 6 |
+| ~~D9~~ | ~~Periodenauswahl: optionaler `period`-Parameter~~ | ✅ **Schema freigegeben** (7.3.1): `period_end` kanonisch, `fiscal_year` Best Effort; Multiples nur für die aktuelle Periode, historische Perioden nur Financials/Margen/Wachstum; `calendar_year` aus dem Tool-Schema, Ableitung `Jahr(Periodenende − 180 Tage)` gegen `frames` geprüft. **Umsetzung steht aus** (mit den Phase-3-Tools). |
+| ~~D10~~ | ~~Gesamtschuld bei fehlendem kurzfristigem Anteil~~ | ✅ **Entschieden und implementiert:** gekennzeichnete Untergrenze (`total_debt_is_lower_bound`), nur für Konzepte mit ausdrücklichem Ausschluss des kurzfristigen Anteils; sichtbar in EV, EV-Multiples, Statistik und als QualityWarning; Export-Kennzeichnung ist Phase-4-Anforderung (8.6). |
+| D11 | Shares bei Mehrklassen-Aktien (GOOGL, META, TEAM, DDOG, CRWD, WDAY): Cover Page (`R1.htm`) parsen oder Finnhub `profile2` nutzen? | **zurückgestellt** (Sean, 2026-10-04). `profile2` ist im Free-Tier verfügbar und plausibel, aber ohne Stichtag/Accession (8.3). Nichts eingebaut. |
+| ~~D12~~ | ~~EBITDA ohne Gesamt-D&A-Konzept~~ | ✅ **Entschieden:** bleibt `None`, keine Teilposten addieren (8.4). |
 
 | Risiko | Wahrscheinlichkeit | Gegenmaßnahme |
 |---|---|---|
-| Kursdatenquelle bricht weg | **eingetreten (Stooq, 08/2026)** | Provider-Interface + automatischer Fallback + Cache — Finnhub trägt v1 vorerst allein (siehe D7) |
-| XBRL-Konzepte uneinheitlich zwischen Unternehmen | **hoch** | Konzept-Fallback-Ketten, explizites "nicht verfügbar" statt Schätzung |
+| Kursdatenquelle bricht weg | **eingetreten (Stooq war nie verifiziert)** | Provider-Interface + Cache; Finnhub trägt v1 allein (D7); Throttle 55/min und `Retry-After`-Behandlung (8.3) |
+| XBRL-Konzepte uneinheitlich zwischen Unternehmen | **hoch — eingetreten** (8/30 Firmen mit Fakten aus falscher Periode, siehe 8.6) | Periodenanker, Konzept mit jüngster Periode gewinnt, Schuldenregel, explizites "nicht verfügbar" statt Schätzung |
+| Mehrklassen-Aktien: Shares/Market Cap fehlen | **hoch** (6/30) | D11; bis dahin klare Warnung "market nicht verfügbar" |
+| Projekt/venv in iCloud-Ordner | eingetreten | Siehe 9, Entwicklungsumgebung: Projekt außerhalb von iCloud ablegen |
 | Peer-Qualität schwach | mittel | Human-in-the-Loop-Gate rettet jeden Fall |
 | Scope Creep | **hoch** | Abschnitt 4 als harte Grenze behandeln |
 | LLM-Kosten steigen | niedrig | Caching, kompakte Tool-Outputs |
@@ -619,15 +925,19 @@ Memo-Entwurfsmodul · MCP-Server-Variante der Tools (starker Anschluss an dein S
 
 ## 15. Vorgeschlagene Repo-Struktur
 
+Soll-Struktur; Markierung `[fehlt]` = noch nicht vorhanden (Stand v1.5), `[neu]` = vorhanden, aber
+im ursprünglichen Entwurf nicht aufgeführt.
+
 ```
 scout-research/
 ├── README.md
 ├── docs/
 │   ├── foundation.md              ← dieses Dokument
-│   ├── architecture.md
-│   └── decisions/                 ← ADRs für D1–D5
+│   ├── architecture.md            [fehlt]
+│   └── decisions/                 [fehlt] ADRs für D1–D5 (leerer Ordner, von git nicht getrackt)
 ├── src/scout_research/
 │   ├── config.py
+│   ├── scratch.py                 [neu] CLI-Smoke-Tests (--full, --comps)
 │   ├── data/                      # L1
 │   │   ├── edgar_client.py
 │   │   ├── market_provider.py     # Interface + Implementierungen
@@ -638,31 +948,36 @@ scout-research/
 │   │   ├── metrics.py
 │   │   ├── peers.py
 │   │   ├── multiples.py
-│   │   └── quality.py
-│   ├── tools/                     # L3
-│   │   ├── definitions.py
-│   │   └── handlers.py
-│   ├── agent/                     # L4
-│   │   ├── loop.py
-│   │   └── prompts.py
-│   ├── export/                    # L5
-│   │   ├── excel.py
-│   │   └── markdown.py
-│   └── ui/                        # L6
-│       └── app.py
+│   │   ├── quality.py
+│   │   └── comps.py               [neu] CompsTable-Orchestrierung
+│   ├── tools/                     # L3  (nur __init__.py)
+│   │   ├── definitions.py         [fehlt] Phase 3
+│   │   └── handlers.py            [fehlt] Phase 3
+│   ├── agent/                     # L4  (nur __init__.py)
+│   │   ├── loop.py                [fehlt] Phase 3
+│   │   └── prompts.py             [fehlt] Phase 3
+│   ├── export/                    # L5  (nur __init__.py)
+│   │   ├── excel.py               [fehlt] Phase 4
+│   │   └── markdown.py            [fehlt] Phase 4
+│   └── ui/                        # L6  (nur __init__.py)
+│       └── app.py                 [fehlt] Phase 4
 ├── tests/
-│   ├── unit/
-│   ├── integration/
+│   ├── unit/                      # inkl. factories.py [neu], test_metrics_periods.py, test_throttle.py
+│   ├── integration/               (leerer Ordner, von git nicht getrackt)
 │   └── fixtures/                  # aufgezeichnete EDGAR-Responses
 ├── eval/
-│   ├── golden_set/
-│   └── run_eval.py
+│   ├── golden_set/                (leerer Ordner, von git nicht getrackt)
+│   └── run_eval.py                [fehlt] Phase 5
 └── pyproject.toml
 ```
 
 ---
 
 ## 16. Startpunkt für Session 1
+
+*(Historisch — Phase 0 ist abgeschlossen. Die Definition of Done gilt weiter, setzt aber einen
+funktionierenden Editable-Install voraus; siehe 9, Entwicklungsumgebung. Für Phase 3 wird zusätzlich
+`ANTHROPIC_API_KEY` in `.env` benötigt — Stand 2026-10-04 ist er dort leer.)*
 
 **Ziel der ersten Code-Session (Phase 0):**
 
@@ -696,7 +1011,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.2 | 2026-08-18 | Projekt final auf **Scout Research** umbenannt (vorher Arbeitstitel "Analyst Copilot") |
 | 1.3 | 2026-08-18 | Phase 0 & 1 umgesetzt. D7 aufgenommen: Stooq-Fallback seit 08/2026 durch Bot-Schutz blockiert, Finnhub trägt v1 vorerst allein (siehe 8.3) |
 | 1.4 | 2026-08-19 | Phase 2 umgesetzt (Comps-Engine). D2 entschieden (`browse-edgar` + `frames`, kein eigener Index), D4 entschieden (IQR/Tukey, n≥4). D3 teilweise: Mismatch-Erkennung steht, Normalisierung bleibt offen |
+| 1.5 | 2026-10-04 | **Härtungs-Session vor Phase 3.** Nachgeführte Abweichungen (§0-Regel): Net Debt/EBITDA nicht implementiert (3.2); Tool-Katalog vs. L2-Stand (7.3); Rate-Limit pro Client-Instanz (8.2); Cache-Schlüssel = UTC-Kalendertag statt Handelstag, `/quote` = letzter Kurs statt EOD, `PriceQuote` statt `MarketSnapshot` aus Providern (8.3); Datenmodell-Abweichungen (10); EDGAR nicht gecacht, pandas/openpyxl ungenutzt (9); Repo-Struktur (15). **Korrekturen:** Stooq ist unverifiziert/deaktiviert, der Quote-Endpunkt hat nie funktioniert (8.3, D7); D5 geschlossen. **Neu:** 8.6 — Befund *veraltete Fakten aus falscher Periode* (8/30 Firmen, u. a. ADBE-Schuld aus 2019), Periodenanker, Schuldenregel mit Definitionsbelegen; Finnhub-Throttle (55/min, jeder Versuch zählt) und 429/`Retry-After`; Entwicklungsumgebung (iCloud setzt `hidden` auf Punkt-Dateien → Editable-Install bricht); D8–D12 aufgenommen. Phase-1/2-Live-Ergebnisse für Adobe sind ungültig (Nachtrag in 12). **Entscheidungen (Sean, 2026-10-04):** D12 `None` ohne Teilposten; D9 Periodenschema freigegeben (`period_end` kanonisch, `fiscal_year` Best Effort, Multiples nur aktuelle Periode, `calendar_year` aus dem Tool-Schema, Ableitung `Jahr(Periodenende − 180 Tage)` gegen `frames` geprüft: 31/31 — 7.3.1), noch nicht implementiert; D10 **implementiert** — gekennzeichnete Schuld-Untergrenze (`total_debt_is_lower_bound`, sichtbar in EV, EV-Multiples, Statistik, QualityWarning; 8.6); D11 zurückgestellt, `profile2`-Befund in 8.3; UI-Vision (Phase 6) als 12.1 eingefügt, D8 konkretisiert; zweite harte Regel in 7.1 (L1–L5 wissen nichts über die UI). **Live-Gate (≥ 4/5 Peers mit EV-Multiples):** vor D10 verfehlt (3/5), nach D10 **4/5, davon 1 mit Flag**. |
 
 ---
 
-*Ende Dokumentversion 1.4*
+*Ende Dokumentversion 1.5*

@@ -24,9 +24,11 @@ Phase 0, 1 & 2 abgeschlossen:
 - Stooq ist **unverifiziert und deaktiviert** (der Quote-Endpunkt hat nie funktioniert) — siehe
   [`docs/foundation.md`, Abschnitt 8.3](docs/foundation.md#83--bekannte-datenlücke-aktienkurse)
   und D7. Finnhub trägt Marktdaten allein (Throttle 55/min, 429 mit `Retry-After`).
-- Datenabdeckung (30 Ticker gemessen, siehe Abschnitt 8.6): `total_debt` 20/30, `ebitda` 21/30,
-  `shares` 24/30. Fehlende Werte bleiben `None` — Mehrklassen-Aktien (GOOGL, META, TEAM, ...) haben
-  keine Shares aus `companyfacts`. Alle Werte gehören zur selben Berichtsperiode (Periodenanker).
+- Datenabdeckung (30 Ticker gemessen, siehe Abschnitt 8.6): `total_debt` 20/30 exakt + 9/30 als
+  **Untergrenze mit Flag** (`total_debt_is_lower_bound`, in EV/Multiples/Warnings sichtbar, CLI: `*`),
+  `ebitda` 21/30, `shares` 24/30. Fehlende Werte bleiben `None` (EBITDA ohne Teilposten) —
+  Mehrklassen-Aktien (GOOGL, META, TEAM, ...) haben keine Shares aus `companyfacts`. Alle Werte
+  gehören zur selben Berichtsperiode (Periodenanker).
 - Net Debt/EBITDA ist noch nicht implementiert; es gibt keine Periodenauswahl (immer jüngstes 10-K).
 - SIC-Klassifizierung ist grob (z. B. landet Salesforce nicht im selben SIC-Code wie Adobe) —
   wird in Phase 3 durch LLM-Ranking über eine breitere Kandidatenbasis kompensiert.
