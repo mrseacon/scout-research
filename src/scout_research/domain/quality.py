@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import statistics as stats
 
+from scout_research.domain.metrics import DEBT_LOWER_BOUND_CONCEPTS
 from scout_research.domain.models import CompanyMetrics, CompanyMultiples, QualityWarning
 from scout_research.domain.multiples import MULTIPLE_GETTERS, MULTIPLE_NAMES
 
@@ -125,6 +126,36 @@ def check_missing_data(metrics: CompanyMetrics) -> list[QualityWarning]:
     return warnings
 
 
+def check_debt_lower_bound(metrics: CompanyMetrics) -> list[QualityWarning]:
+    """`total_debt` ist nur eine Untergrenze (D10): Das Konzept schließt den kurzfristigen Anteil
+    laut Definition aus, und dieser ist für die Periode nicht gemeldet. Severity `warning`."""
+    if not metrics.total_debt_is_lower_bound:
+        return []
+
+    concept = next(
+        (f.concept for f in metrics.source_facts if f.concept in DEBT_LOWER_BOUND_CONCEPTS),
+        "ein Konzept ohne kurzfristigen Anteil",
+    )
+    consequence = (
+        "Enterprise Value und EV/Revenue, EV/EBITDA, EV/EBIT sind damit ebenfalls Untergrenzen (zu niedrig)"
+        if metrics.enterprise_value is not None
+        else "Ein daraus berechneter Enterprise Value und die EV-Multiples wären ebenfalls Untergrenzen "
+        "(hier mangels Marktdaten nicht berechnet)"
+    )
+    return [
+        QualityWarning(
+            severity="warning",
+            company=_company_ticker(metrics),
+            message=(
+                f"total_debt ist eine Untergrenze: {concept} schließt laut Definition den "
+                f"kurzfristigen Anteil aus und dieser ist für die Periode nicht gemeldet — die "
+                f"Gesamtschuld ist nicht ermittelbar. {consequence}; P/E ist nicht betroffen."
+            ),
+            affected_field="total_debt",
+        )
+    ]
+
+
 def run_quality_checks(
     target: CompanyMetrics,
     peers: list[CompanyMetrics],
@@ -134,8 +165,10 @@ def run_quality_checks(
     warnings: list[QualityWarning] = []
     warnings += check_fiscal_year_mismatch(target, peers)
     warnings += check_missing_data(target)
+    warnings += check_debt_lower_bound(target)
     for peer in peers:
         warnings += check_missing_data(peer)
+        warnings += check_debt_lower_bound(peer)
     for multiple_name in MULTIPLE_NAMES:
         warnings += check_outliers(peer_multiples, multiple_name)
     return warnings

@@ -77,6 +77,7 @@ def compute_multiples(metrics: CompanyMetrics) -> CompanyMultiples:
         ev_ebit=ev_ebit,
         pe=pe,
         excluded_reasons=excluded_reasons,
+        ev_multiples_are_lower_bound=metrics.enterprise_value_is_lower_bound,
     )
 
 
@@ -86,15 +87,19 @@ def compute_multiple_statistics(
     """Min/Median/Mean/Max eines Multiples über das Peer-Set, ohne die Peers, bei denen
     dieses Multiple nicht aussagekräftig war."""
     getter = MULTIPLE_GETTERS[multiple_name]
+    is_ev_multiple = multiple_name.startswith("ev_")
 
     included: list[float] = []
     excluded_tickers: list[str] = []
+    lower_bound_tickers: list[str] = []
     for peer in peer_multiples:
         value = getter(peer)
         if value is None:
             excluded_tickers.append(peer.company_ticker)
         else:
             included.append(value)
+            if is_ev_multiple and peer.ev_multiples_are_lower_bound:
+                lower_bound_tickers.append(peer.company_ticker)
 
     if not included:
         return MultipleStatistics(
@@ -115,4 +120,5 @@ def compute_multiple_statistics(
         max=max(included),
         count_included=len(included),
         excluded_tickers=excluded_tickers,
+        lower_bound_tickers=lower_bound_tickers,
     )

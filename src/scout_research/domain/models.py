@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from scout_research.data.edgar_client import CompanyMetadata
 
@@ -63,10 +63,17 @@ class CompanyMetrics(BaseModel):
     net_income: float | None
     total_assets: float | None
     total_debt: float | None
+    total_debt_is_lower_bound: bool = False
+    """True, wenn `total_debt` nur eine Untergrenze ist: es stammt aus einem Konzept, dessen
+    Definition den kurzfristigen Anteil ausdrücklich ausschließt, und dieser Anteil ist für die
+    Periode nicht gemeldet (Foundation Doc 8.6, D10). Muster wie `ebitda_approximated`."""
     cash: float | None
 
     market: MarketSnapshot | None
     enterprise_value: float | None
+    enterprise_value_is_lower_bound: bool = False
+    """True, wenn `enterprise_value` berechnet wurde und `total_debt` eine Untergrenze ist —
+    der EV ist dann ebenfalls eine Untergrenze (zu niedrig)."""
 
     margins: dict[str, float | None]
     growth_rates: dict[str, float | None]
@@ -103,6 +110,9 @@ class CompanyMultiples(BaseModel):
     ev_ebit: float | None
     pe: float | None
     excluded_reasons: dict[str, str]
+    ev_multiples_are_lower_bound: bool = False
+    """True, wenn EV/Revenue, EV/EBITDA und EV/EBIT auf einer Untergrenze der Gesamtschuld
+    beruhen (der wahre Wert ist ≥ dem gezeigten). P/E ist nie betroffen."""
 
 
 class MultipleStatistics(BaseModel):
@@ -115,6 +125,9 @@ class MultipleStatistics(BaseModel):
     max: float | None
     count_included: int
     excluded_tickers: list[str]
+    lower_bound_tickers: list[str] = Field(default_factory=list)
+    """Peers, deren in die Statistik eingegangener Wert eine Untergrenze ist (D10). Die
+    Statistik mischt dann exakte Werte und Untergrenzen."""
 
 
 class CompsTable(BaseModel):

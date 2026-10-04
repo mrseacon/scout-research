@@ -62,6 +62,22 @@ LONG_TERM_DEBT_CURRENT_CONCEPTS = ["LongTermDebtCurrent"]  # nur current maturit
 COMMERCIAL_PAPER_CONCEPTS = ["CommercialPaper"]
 _CONTAINMENT_TOLERANCE = 0.005
 
+# Untergrenze der Gesamtschuld (D10): nur Konzepte, deren Definition (Volltext in companyfacts
+# gelesen) den kurzfristigen Anteil AUSDRÜCKLICH ausschließt ("excluding ...", "net of the amount
+# due in the next twelve months"). Jedes davon ist eine Teilmenge der Gesamtschuld, daher ist das
+# Maximum der vorhandenen Werte eine gültige Untergrenze. Nicht aufgenommen: Konzepte, die nur
+# "classified as noncurrent" sagen (LongTermDebtAndCapitalLeaseObligations, lease-inklusiv),
+# DebtInstrumentCarryingAmount (kann ein Einzelinstrument sein) und ShortTermBorrowings.
+DEBT_LOWER_BOUND_CONCEPTS = [
+    "LongTermDebtNoncurrent",  # "excluding amounts to be repaid within one year"
+    "UnsecuredLongTermDebt",  # "excluding current portion" (nur unbesicherte Schuld)
+    "SecuredLongTermDebt",  # "excluding the current portion" (nur besicherte Schuld)
+    "LongTermNotesPayable",  # "excluding current portion" (nur Notes)
+    "LongTermNotesAndLoans",  # "excluding current portion"
+    "ConvertibleLongTermNotesPayable",  # "excluding current portion" (nur Wandelanleihen)
+    "ConvertibleDebtNoncurrent",  # "net of the amount due in the next twelve months"
+]
+
 # Max. Abstand zweier aufeinanderfolgender Geschäftsjahresenden für eine YoY-Rate (52/53-Wochen-Jahre).
 _YOY_GAP_DAYS = (350, 380)
 
@@ -268,6 +284,21 @@ def extract_total_debt(cik: str, company_facts: dict, period_end: str) -> Financ
     return None
 
 
+def extract_debt_lower_bound(cik: str, company_facts: dict, period_end: str) -> FinancialFact | None:
+    """Untergrenze der Gesamtschuld, wenn `extract_total_debt` keine exakte Zahl liefert.
+
+    Nimmt das Maximum der Konzepte aus `DEBT_LOWER_BOUND_CONCEPTS`, die für genau diese Periode
+    gemeldet sind. Der Aufrufer muss das Ergebnis als Untergrenze kennzeichnen
+    (`CompanyMetrics.total_debt_is_lower_bound`). Gibt es keines, bleibt die Schuld `None`.
+    """
+    facts = [
+        extract_latest_annual_concept(cik, company_facts, [concept], period_end=period_end)
+        for concept in DEBT_LOWER_BOUND_CONCEPTS
+    ]
+    present = [f for f in facts if f is not None]
+    return max(present, key=lambda f: f.value) if present else None
+
+
 def compute_ebitda(ebit: FinancialFact | None, d_and_a: FinancialFact | None) -> tuple[float | None, bool]:
     """EBITDA ist kein XBRL-Konzept (Foundation Doc 8.4) — approximiert als EBIT + D&A.
     Fehlt eine der Komponenten, wird EBITDA als nicht verfügbar ausgewiesen, nicht geschätzt."""
@@ -309,6 +340,10 @@ def build_company_metrics(
     net_income = at_anchor(NET_INCOME_CONCEPTS)
     total_assets = at_anchor(TOTAL_ASSETS_CONCEPTS)
     total_debt = extract_total_debt(cik, company_facts, anchor)
+    total_debt_is_lower_bound = False
+    if total_debt is None:
+        total_debt = extract_debt_lower_bound(cik, company_facts, anchor)
+        total_debt_is_lower_bound = total_debt is not None
     cash = at_anchor(CASH_CONCEPTS)
     d_and_a = at_anchor(DEPRECIATION_AMORTIZATION_CONCEPTS)
     # Cover-Page-Daten tragen das Datum des Einreichens, nicht der Periode — daher Bindung an
@@ -362,9 +397,11 @@ def build_company_metrics(
         net_income=net_income.value if net_income else None,
         total_assets=total_assets.value if total_assets else None,
         total_debt=total_debt.value if total_debt else None,
+        total_debt_is_lower_bound=total_debt_is_lower_bound,
         cash=cash.value if cash else None,
         market=market,
         enterprise_value=enterprise_value,
+        enterprise_value_is_lower_bound=total_debt_is_lower_bound and enterprise_value is not None,
         margins=margins,
         growth_rates=growth_rates,
         source_facts=source_facts,

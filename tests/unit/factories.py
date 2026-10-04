@@ -23,6 +23,7 @@ def make_metrics(
     price: float = 50.0,
     shares_outstanding: float = 100.0,
     has_market: bool = True,
+    total_debt_is_lower_bound: bool = False,
 ) -> CompanyMetrics:
     company = CompanyMetadata(
         cik=cik,
@@ -60,9 +61,11 @@ def make_metrics(
         net_income=net_income,
         total_assets=total_assets,
         total_debt=total_debt,
+        total_debt_is_lower_bound=total_debt_is_lower_bound,
         cash=cash,
         market=market,
         enterprise_value=enterprise_value,
+        enterprise_value_is_lower_bound=total_debt_is_lower_bound and enterprise_value is not None,
         margins={
             "ebit_margin": (ebit / revenue) if ebit is not None and revenue else None,
             "net_margin": (net_income / revenue) if net_income is not None and revenue else None,

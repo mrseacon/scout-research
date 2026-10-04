@@ -101,8 +101,11 @@ def _fmt_pct(value: float | None) -> str:
     return f"{value:.1%}" if value is not None else "nicht verfügbar"
 
 
-def _fmt_multiple(value: float | None) -> str:
-    return f"{value:.1f}x" if value is not None else "n/a"
+def _fmt_multiple(value: float | None, lower_bound: bool = False) -> str:
+    """`*` markiert eine Untergrenze (D10): Total Debt unvollständig, wahrer Wert ≥ gezeigt."""
+    if value is None:
+        return "n/a"
+    return f"{value:.1f}x" + ("*" if lower_bound else "")
 
 
 def _print_full(client: EdgarClient, company: CompanyLookup, settings) -> None:
@@ -122,14 +125,16 @@ def _print_full(client: EdgarClient, company: CompanyLookup, settings) -> None:
     print(f"EBITDA (approx.):   {_fmt(metrics.ebitda, ' USD')}")
     print(f"Net Income:         {_fmt(metrics.net_income, ' USD')}")
     print(f"Total Assets:       {_fmt(metrics.total_assets, ' USD')}")
-    print(f"Total Debt:         {_fmt(metrics.total_debt, ' USD')}")
+    bound_note = "  (UNTERGRENZE: kurzfristiger Anteil nicht gemeldet)" if metrics.total_debt_is_lower_bound else ""
+    print(f"Total Debt:         {_fmt(metrics.total_debt, ' USD')}{bound_note}")
     print(f"Cash:               {_fmt(metrics.cash, ' USD')}")
     print()
     if metrics.market is not None:
         print(f"Kurs:               {metrics.market.price} ({metrics.market.source}, {metrics.market.as_of_date})")
         print(f"Shares Outstanding: {_fmt(metrics.market.shares_outstanding)}")
         print(f"Market Cap:         {_fmt(metrics.market.market_cap, ' USD')}")
-        print(f"Enterprise Value:   {_fmt(metrics.enterprise_value, ' USD')}")
+        ev_note = "  (UNTERGRENZE, da Total Debt Untergrenze)" if metrics.enterprise_value_is_lower_bound else ""
+        print(f"Enterprise Value:   {_fmt(metrics.enterprise_value, ' USD')}{ev_note}")
     else:
         print("Marktdaten:         nicht verfügbar (kein Kurs von Finnhub — FINNHUB_API_KEY in .env —")
         print("                    oder Shares Outstanding nicht aus companyfacts ermittelbar, z. B. bei")
@@ -175,22 +180,35 @@ def _print_comps(
     header = f"{'Ticker':10s} {'EV/Rev':>8s} {'EV/EBITDA':>10s} {'EV/EBIT':>9s} {'P/E':>8s}"
     print(header)
     print("-" * len(header))
-    tm = table.target_multiples
-    print(
-        f"{tm.company_ticker:10s} {_fmt_multiple(tm.ev_revenue):>8s} {_fmt_multiple(tm.ev_ebitda):>10s} "
-        f"{_fmt_multiple(tm.ev_ebit):>9s} {_fmt_multiple(tm.pe):>8s}  (Target)"
-    )
-    for pm in table.peer_multiples:
-        print(
-            f"{pm.company_ticker:10s} {_fmt_multiple(pm.ev_revenue):>8s} {_fmt_multiple(pm.ev_ebitda):>10s} "
-            f"{_fmt_multiple(pm.ev_ebit):>9s} {_fmt_multiple(pm.pe):>8s}"
+    def row(mu, suffix: str = "") -> str:
+        lb = mu.ev_multiples_are_lower_bound
+        return (
+            f"{mu.company_ticker:10s} {_fmt_multiple(mu.ev_revenue, lb):>8s} {_fmt_multiple(mu.ev_ebitda, lb):>10s} "
+            f"{_fmt_multiple(mu.ev_ebit, lb):>9s} {_fmt_multiple(mu.pe):>8s}{suffix}"
         )
+
+    print(row(table.target_multiples, "  (Target)"))
+    for pm in table.peer_multiples:
+        print(row(pm))
     print("-" * len(header))
     for s in table.statistics:
+        flagged = f", davon {len(s.lower_bound_tickers)} Untergrenze" if s.lower_bound_tickers else ""
         print(
             f"{s.multiple_name:10s} min={_fmt_multiple(s.min):>6s}  median={_fmt_multiple(s.median):>6s}  "
-            f"mean={_fmt_multiple(s.mean):>6s}  max={_fmt_multiple(s.max):>6s}  (n={s.count_included})"
+            f"mean={_fmt_multiple(s.mean):>6s}  max={_fmt_multiple(s.max):>6s}  (n={s.count_included}{flagged})"
         )
+
+    all_mu = [table.target_multiples, *table.peer_multiples]
+    if any(mu.ev_multiples_are_lower_bound for mu in all_mu):
+        print("* Untergrenze: Total Debt unvollständig (kurzfristiger Anteil nicht gemeldet), siehe Warnings —")
+        print("  der wahre EV-Multiple ist größer oder gleich dem gezeigten Wert. P/E ist nicht betroffen.")
+
+    def has_ev(mu) -> bool:
+        return any(v is not None for v in (mu.ev_revenue, mu.ev_ebitda, mu.ev_ebit))
+
+    with_ev = [mu for mu in table.peer_multiples if has_ev(mu)]
+    with_flag = [mu for mu in with_ev if mu.ev_multiples_are_lower_bound]
+    print(f"EV-Multiples bei {len(with_ev)}/{len(table.peer_multiples)} Peers, davon {len(with_flag)} mit Flag (Untergrenze).")
 
     print()
     print(f"{len(table.warnings)} Warnings:")
