@@ -33,7 +33,6 @@ from scout_research.data.market_provider import (
     FinnhubProvider,
     MarketDataProvider,
     PriceQuote,
-    StooqProvider,
 )
 from scout_research.data.rate_limiter import RateLimiter
 from scout_research.domain.comps import build_comps_table
@@ -49,9 +48,15 @@ class _NullProvider:
 
 
 def _market_provider(settings) -> tuple[MarketDataProvider, SqliteCache]:
-    primary = FinnhubProvider(settings.finnhub_api_key) if settings.finnhub_api_key else _NullProvider()
+    # Ein einziger Provider (und damit ein einziger Throttle) für Target und alle Peers.
+    # Stooq ist unverifiziert/deaktiviert (Foundation Doc 8.3, D7) und hier nicht eingehängt.
+    primary = (
+        FinnhubProvider(settings.finnhub_api_key, requests_per_minute=settings.finnhub_requests_per_minute)
+        if settings.finnhub_api_key
+        else _NullProvider()
+    )
     cache = SqliteCache()
-    return CachedProvider(primary=primary, fallback=StooqProvider(), cache=cache), cache
+    return CachedProvider(primary=primary, fallback=None, cache=cache), cache
 
 
 def _build_metrics(
@@ -126,8 +131,9 @@ def _print_full(client: EdgarClient, company: CompanyLookup, settings) -> None:
         print(f"Market Cap:         {_fmt(metrics.market.market_cap, ' USD')}")
         print(f"Enterprise Value:   {_fmt(metrics.enterprise_value, ' USD')}")
     else:
-        print("Marktdaten:         nicht verfügbar (kein Finnhub-Key gesetzt und Stooq-Fallback")
-        print("                    liefert aktuell keine Daten — siehe FINNHUB_API_KEY in .env)")
+        print("Marktdaten:         nicht verfügbar (kein Kurs von Finnhub — FINNHUB_API_KEY in .env —")
+        print("                    oder Shares Outstanding nicht aus companyfacts ermittelbar, z. B. bei")
+        print("                    Mehrklassen-Aktien)")
     print()
     print(f"EBIT-Marge:         {_fmt_pct(metrics.margins['ebit_margin'])}")
     print(f"Net-Marge:          {_fmt_pct(metrics.margins['net_margin'])}")

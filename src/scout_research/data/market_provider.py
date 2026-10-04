@@ -10,8 +10,11 @@ ein Kurs geschätzt.
 from __future__ import annotations
 
 import csv
+import email.utils
 import io
+import math
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Protocol
 
@@ -19,24 +22,82 @@ import httpx
 from pydantic import BaseModel
 
 from scout_research.data.cache import SqliteCache
+from scout_research.data.rate_limiter import RateLimiter
+
+FINNHUB_DEFAULT_REQUESTS_PER_MINUTE = 55
+"""Finnhub Free-Tier: ~60 Calls/Minute (Foundation Doc 8.3). 55 lässt Spielraum für
+Netzwerk-Jitter — das Fenster gleitet, daher ist auch ein fest ausgerichtetes Minutenfenster sicher."""
+
+MAX_RETRY_AFTER_SECONDS = 120.0
+"""Verlangt der Server eine längere Pause, wird nicht blockiert: der Fehler geht an den
+Aufrufer (CachedProvider -> Fallback bzw. "Marktdaten nicht verfügbar")."""
+
+_DEFAULT_429_BACKOFF_SECONDS = 5.0
+"""Wartezeit (mal Versuchsnummer), wenn ein 429 ohne verwertbaren Retry-After kommt."""
+
+
+def _parse_retry_after(value: str | None, now: datetime | None = None) -> float | None:
+    """`Retry-After` ist laut HTTP entweder eine Zahl Sekunden oder ein HTTP-Datum."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        seconds = float(value)
+    except ValueError:
+        seconds = None
+    if seconds is not None:
+        return max(seconds, 0.0) if math.isfinite(seconds) else None
+
+    try:
+        when = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max((when - (now or datetime.now(timezone.utc))).total_seconds(), 0.0)
 
 
 def _get_with_retry(
-    client: httpx.Client, url: str, params: dict | None = None, max_retries: int = 2
+    client: httpx.Client,
+    url: str,
+    params: dict | None = None,
+    max_retries: int = 2,
+    rate_limiter: RateLimiter | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> httpx.Response:
-    """Transiente Netzwerk-Hänger (beobachtet unter Last, siehe `edgar_client._get`) auch
-    hier abfedern, ohne die Fehler/429-Fallback-Semantik von `CachedProvider` zu verändern —
-    ein `httpx.HTTPStatusError` (z. B. 429) wird weiterhin sofort durchgereicht."""
-    last_error: httpx.TransportError | None = None
+    """GET mit Throttle und Retry.
+
+    - **Jeder Versuch zählt:** `rate_limiter.acquire()` läuft vor jedem Request, auch vor
+      Wiederholungen nach Netzwerkfehlern und nach 429.
+    - Netzwerkfehler (`TransportError`): bis zu `max_retries` Wiederholungen mit Backoff.
+    - **429:** Wartezeit aus `Retry-After` (Sekunden oder HTTP-Datum), sonst 5 s * Versuchsnummer;
+      verlangt der Server mehr als `MAX_RETRY_AFTER_SECONDS`, wird sofort abgebrochen.
+    - Alle anderen Statusfehler werden sofort durchgereicht (kein Retry).
+    Nach ausgeschöpften Versuchen wird der letzte Fehler geworfen (`httpx.HTTPError`), den
+    `CachedProvider` in die Fallback-Kaskade übersetzt.
+    """
+    last_error: httpx.HTTPError | None = None
     for attempt in range(max_retries + 1):
+        if rate_limiter is not None:
+            rate_limiter.acquire()
         try:
             response = client.get(url, params=params)
             response.raise_for_status()
             return response
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 429 or attempt == max_retries:
+                raise
+            wait = _parse_retry_after(exc.response.headers.get("Retry-After"))
+            if wait is None:
+                wait = _DEFAULT_429_BACKOFF_SECONDS * (attempt + 1)
+            if wait > MAX_RETRY_AFTER_SECONDS:
+                raise
+            last_error = exc
+            sleep(wait)
         except httpx.TransportError as exc:
             last_error = exc
             if attempt < max_retries:
-                time.sleep(0.5 * (attempt + 1))
+                sleep(0.5 * (attempt + 1))
     raise last_error  # type: ignore[misc]
 
 
@@ -52,17 +113,36 @@ class MarketDataProvider(Protocol):
 
 
 class FinnhubProvider:
-    """Primär-Provider (Foundation Doc 8.3). Benötigt FINNHUB_API_KEY."""
+    """Primär-Provider (Foundation Doc 8.3). Benötigt FINNHUB_API_KEY.
+
+    Jeder HTTP-Versuch läuft durch den Throttle (`requests_per_minute`, Standard 55);
+    429-Antworten werden gemäß `Retry-After` abgewartet (siehe `_get_with_retry`).
+    `/quote` liefert den *letzten* Kurs — während der US-Börsenzeit also intraday,
+    außerhalb den letzten Schlusskurs (Foundation Doc 8.3, Abweichung zu "End-of-Day").
+    """
 
     BASE_URL = "https://finnhub.io/api/v1/quote"
 
-    def __init__(self, api_key: str, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        client: httpx.Client | None = None,
+        rate_limiter: RateLimiter | None = None,
+        requests_per_minute: int = FINNHUB_DEFAULT_REQUESTS_PER_MINUTE,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._api_key = api_key
         self._client = client or httpx.Client(timeout=10.0)
+        self._rate_limiter = rate_limiter or RateLimiter(requests_per_minute, period_seconds=60.0)
+        self._sleep = sleep
 
     def get_price(self, ticker: str) -> PriceQuote | None:
         response = _get_with_retry(
-            self._client, self.BASE_URL, params={"symbol": ticker.upper(), "token": self._api_key}
+            self._client,
+            self.BASE_URL,
+            params={"symbol": ticker.upper(), "token": self._api_key},
+            rate_limiter=self._rate_limiter,
+            sleep=self._sleep,
         )
         data = response.json()
 
@@ -76,12 +156,13 @@ class FinnhubProvider:
 
 
 class StooqProvider:
-    """Fallback-Provider, keyless (Foundation Doc 8.3).
+    """Fallback-Provider, keyless — **UNVERIFIZIERT und standardmäßig DEAKTIVIERT** (D7).
 
-    Stand 2026-08: Stooq schützt seine öffentlichen Endpunkte inzwischen mit einer
-    JS-basierten Proof-of-Work-Challenge — einfache HTTP-Requests werden abgewiesen.
-    Das Interface bleibt bewusst so implementiert, wie es funktionieren *sollte*; ein
-    funktionierender Fallback ist eine offene Entscheidung (vgl. Risikotabelle Abschnitt 13).
+    Diese Klasse hat nie gegen echte Stooq-Daten funktioniert: der hier genutzte Endpunkt
+    (`/q/l/`) antwortet (Stand 2026-10-04) mit "page does not exist", der Historien-Endpunkt
+    (`/q/d/l/`) mit einer JS-Proof-of-Work-Challenge. Das CSV-Format ist angenommen, die
+    Tests sind gemockt. Sie bleibt als Interface-Platzhalter erhalten, wird aber in der
+    Standard-Verdrahtung (`scratch.py`) nicht mehr als Fallback eingehängt.
     """
 
     BASE_URL = "https://stooq.com/q/l/"

@@ -57,7 +57,10 @@ def test_cached_provider_falls_back_when_primary_fails() -> None:
     def working_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="Symbol,Date,Time,Open,High,Low,Close,Volume\r\nAAPL.US,2026-08-17,22:00:00,229,232,228.5,230.5,1\r\n")
 
-    primary = FinnhubProvider(api_key="fake-key", client=_client_with_handler(failing_handler))
+    # 429 wird jetzt bis zu 2x wiederholt (Retry-After bzw. Backoff); sleep injiziert -> kein Warten.
+    primary = FinnhubProvider(
+        api_key="fake-key", client=_client_with_handler(failing_handler), sleep=lambda seconds: None
+    )
     fallback = StooqProvider(client=_client_with_handler(working_handler))
 
     with tempfile.TemporaryDirectory() as tmp:

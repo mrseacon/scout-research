@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
 
     edgar_requests_per_second: int = 10
+    finnhub_requests_per_minute: int = 55
 
     @field_validator("edgar_contact_email")
     @classmethod
