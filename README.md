@@ -21,9 +21,13 @@ Phase 0, 1 & 2 abgeschlossen:
 - Vollständige `CompsTable`-Orchestrierung (Target + Peers + Multiples + Statistik + Warnings)
 
 ⚠ **Bekannte Lücken:**
-- Stooq blockiert aktuell automatisierte Requests per Bot-Schutz — siehe
+- Stooq ist **unverifiziert und deaktiviert** (der Quote-Endpunkt hat nie funktioniert) — siehe
   [`docs/foundation.md`, Abschnitt 8.3](docs/foundation.md#83--bekannte-datenlücke-aktienkurse)
-  und offene Entscheidung D7. Finnhub trägt Marktdaten v1 vorerst allein.
+  und D7. Finnhub trägt Marktdaten allein (Throttle 55/min, 429 mit `Retry-After`).
+- Datenabdeckung (30 Ticker gemessen, siehe Abschnitt 8.6): `total_debt` 20/30, `ebitda` 21/30,
+  `shares` 24/30. Fehlende Werte bleiben `None` — Mehrklassen-Aktien (GOOGL, META, TEAM, ...) haben
+  keine Shares aus `companyfacts`. Alle Werte gehören zur selben Berichtsperiode (Periodenanker).
+- Net Debt/EBITDA ist noch nicht implementiert; es gibt keine Periodenauswahl (immer jüngstes 10-K).
 - SIC-Klassifizierung ist grob (z. B. landet Salesforce nicht im selben SIC-Code wie Adobe) —
   wird in Phase 3 durch LLM-Ranking über eine breitere Kandidatenbasis kompensiert.
 
@@ -35,6 +39,12 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env  # EDGAR_CONTACT_EMAIL mit echter Kontakt-Adresse befüllen; FINNHUB_API_KEY optional
 ```
+
+> **Nicht in einem iCloud-synchronisierten Ordner (z. B. `~/Desktop`) ablegen.** iCloud setzt `hidden`
+> auf Punkt-Dateien (`.venv`, `.env`, ...); Python 3.13 überspringt dann die `.pth`-Datei des
+> Editable-Installs, und `python -m scout_research...` scheitert mit `ModuleNotFoundError`
+> (`pytest` läuft weiter). Siehe `docs/foundation.md`, Abschnitt 9 (Entwicklungsumgebung).
+> Notbehelf: `PYTHONPATH=src python -m scout_research.scratch ...`
 
 ## Smoke-Tests
 
