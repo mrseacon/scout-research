@@ -58,6 +58,24 @@ def test_missing_market_data_excludes_all_ev_and_pe_multiples() -> None:
     assert "Marktdaten (Market Cap) nicht verfügbar" == multiples.excluded_reasons["pe"]
 
 
+def test_missing_debt_is_named_as_the_reason_not_market_data() -> None:
+    # CDNS: Markt vorhanden, Schuld nicht ermittelbar -> die Begründung darf nicht "Marktdaten" nennen.
+    multiples = compute_multiples(make_metrics(total_debt=None))
+    reason = multiples.excluded_reasons["ev_revenue"]
+    assert "Total Debt" in reason and "Marktdaten" not in reason
+    assert multiples.pe is not None  # P/E braucht keine Schuld
+
+
+def test_missing_cash_is_named_as_the_reason() -> None:
+    reason = compute_multiples(make_metrics(cash=None)).excluded_reasons["ev_revenue"]
+    assert "Cash" in reason
+
+
+def test_missing_market_is_named_as_the_reason() -> None:
+    reason = compute_multiples(make_metrics(has_market=False)).excluded_reasons["ev_revenue"]
+    assert "Marktdaten" in reason
+
+
 def test_zero_revenue_excludes_ev_revenue_without_division_by_zero() -> None:
     metrics = make_metrics(revenue=0.0)
     multiples = compute_multiples(metrics)

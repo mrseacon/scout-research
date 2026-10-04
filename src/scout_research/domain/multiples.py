@@ -33,9 +33,17 @@ def compute_multiples(metrics: CompanyMetrics) -> CompanyMultiples:
     excluded_reasons: dict[str, str] = {}
     ev = metrics.enterprise_value
 
+    def _ev_missing_reason() -> str:
+        # EV = Market Cap + Total Debt - Cash: die Ursache nennen, die tatsächlich fehlt.
+        if metrics.market is None:
+            return "Enterprise Value nicht verfügbar (Marktdaten fehlen: Kurs oder Shares)"
+        if metrics.total_debt is None:
+            return "Enterprise Value nicht verfügbar (Total Debt nicht ermittelbar)"
+        return "Enterprise Value nicht verfügbar (Cash nicht ermittelbar)"
+
     def _ev_multiple(name: str, denominator: float | None, denominator_label: str) -> float | None:
         if ev is None:
-            excluded_reasons[name] = "Enterprise Value nicht verfügbar (Marktdaten fehlen)"
+            excluded_reasons[name] = _ev_missing_reason()
             return None
         if denominator is None:
             excluded_reasons[name] = f"{denominator_label} nicht verfügbar"
