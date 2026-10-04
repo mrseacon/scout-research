@@ -1,19 +1,24 @@
 """L2 — Domain Logic: Extraktion und Ableitung von Kennzahlen aus rohen companyfacts.
 
-Kern-Prinzip (Foundation Doc 2.2, 8.4): Werte kommen ausschließlich aus XBRL-Fakten oder
-werden deterministisch daraus berechnet. Ist ein Konzept nicht vorhanden, wird der Wert als
-`None` ausgewiesen — niemals geschätzt.
+Kern-Prinzipien (Foundation Doc 2.2, 8.4):
+- Werte kommen ausschließlich aus XBRL-Fakten oder werden deterministisch daraus berechnet.
+  Ist ein Wert nicht ermittelbar, wird er als `None` ausgewiesen — niemals geschätzt.
+- **Periodentreue:** Die Berichtsperiode eines Unternehmens wird einmal festgelegt (Ende der
+  jüngsten Umsatz-Periode, "Anker"). Jeder andere Fakt muss exakt auf diese Periode fallen —
+  ein Wert aus einem früheren Jahr gilt als nicht vorhanden, nicht als Ersatz.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from scout_research.data.edgar_client import CompanyMetadata
 from scout_research.data.market_provider import PriceQuote
 from scout_research.domain.models import CompanyMetrics, FinancialFact, MarketSnapshot
 
 # Fallback-Ketten: XBRL-Tagging ist zwischen Unternehmen uneinheitlich (Risikotabelle, Abschnitt 13).
+# Reihenfolge = Priorität bei gleicher Periode. Eine Kette darf nie ein *älteres* Konzept
+# gegenüber einem Konzept mit jüngerer Periode bevorzugen (Firmen wechseln Tags).
 REVENUE_CONCEPTS = [
     "RevenueFromContractWithCustomerExcludingAssessedTax",
     "RevenueFromContractWithCustomerIncludingAssessedTax",
@@ -23,9 +28,6 @@ REVENUE_CONCEPTS = [
 EBIT_CONCEPTS = ["OperatingIncomeLoss"]
 NET_INCOME_CONCEPTS = ["NetIncomeLoss", "ProfitLoss"]
 TOTAL_ASSETS_CONCEPTS = ["Assets"]
-TOTAL_DEBT_CONCEPTS = ["DebtLongtermAndShorttermCombinedAmount", "LongTermDebtAndCapitalLeaseObligations"]
-LONG_TERM_DEBT_CONCEPTS = ["LongTermDebtNoncurrent", "LongTermDebt"]
-SHORT_TERM_DEBT_CONCEPTS = ["LongTermDebtCurrent", "DebtCurrent", "ShortTermBorrowings"]
 CASH_CONCEPTS = ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"]
 DEPRECIATION_AMORTIZATION_CONCEPTS = [
     "DepreciationDepletionAndAmortization",
@@ -33,6 +35,35 @@ DEPRECIATION_AMORTIZATION_CONCEPTS = [
     "DepreciationAndAmortization",
 ]
 SHARES_OUTSTANDING_CONCEPTS = ["EntityCommonStockSharesOutstanding"]
+
+# Schulden: nur *aggregierte* Konzepte, deren Definition (aus companyfacts gelesen, siehe
+# docs/foundation.md 8.6) die jeweilige Gesamtheit abdeckt. Klassen- oder instrumentenbezogene
+# Konzepte (UnsecuredLongTermDebt, SeniorNotes, ConvertibleNotesPayable, DebtInstrumentCarryingAmount, ...)
+# sind bewusst NICHT enthalten: sie können unvollständig sein, ohne dass man es sieht.
+# Leasing: die *Gesamt*-Konzepte "...AndCapitalLeaseObligations..." sind vollständige Aggregate und
+# stehen mit niedrigster Priorität in den Ketten; der verwendete Konzeptname steht in der Provenance.
+# `LongTermDebtAndCapitalLeaseObligations` (ohne Zusatz) ist laut Definition nicht-kurzfristig und
+# daher kein Gesamtkonzept.
+DEBT_TOTAL_CONCEPTS = [
+    "DebtLongtermAndShorttermCombinedAmount",  # LT inkl. current maturities + ST
+    "DebtAndCapitalLeaseObligations",  # ST + LT inkl. Leasingverbindlichkeiten
+]
+LONG_TERM_DEBT_TOTAL_CONCEPTS = [
+    "LongTermDebt",  # LT inkl. current maturities (INTU: = Noncurrent + Current)
+    "LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities",
+]
+LONG_TERM_DEBT_NONCURRENT_CONCEPTS = ["LongTermDebtNoncurrent"]  # Definition: OHNE current maturities
+DEBT_CURRENT_CONCEPTS = ["DebtCurrent"]  # ST-Debt + current maturities
+LONG_TERM_DEBT_CURRENT_CONCEPTS = ["LongTermDebtCurrent"]  # nur current maturities der LT-Schuld
+# Commercial Paper steht bei AAPL außerhalb von LongTermDebt (LTD = Noncurrent + Current exakt) und
+# wird addiert, sofern es nicht erkennbar schon enthalten ist (`_is_contained`).
+# `ShortTermBorrowings` wird NIE addiert: Filer nutzen das Tag uneinheitlich — IBM taggt damit die
+# current maturities, die im Gesamtkonzept bereits stecken (54,84 + 6,42 = 61,26 Mrd.).
+COMMERCIAL_PAPER_CONCEPTS = ["CommercialPaper"]
+_CONTAINMENT_TOLERANCE = 0.005
+
+# Max. Abstand zweier aufeinanderfolgender Geschäftsjahresenden für eine YoY-Rate (52/53-Wochen-Jahre).
+_YOY_GAP_DAYS = (350, 380)
 
 
 class RevenueNotFoundError(Exception):
@@ -56,6 +87,26 @@ def _fact_from_entry(cik: str, concept: str, unit: str, entry: dict) -> Financia
     )
 
 
+def _annual_entries(
+    taxonomy_facts: dict,
+    concept: str,
+    unit: str,
+    form: str,
+    fiscal_period: str,
+    period_end: str | None,
+    accession_number: str | None,
+) -> list[dict]:
+    entries = taxonomy_facts.get(concept, {}).get("units", {}).get(unit, [])
+    return [
+        e
+        for e in entries
+        if e.get("form") == form
+        and e.get("fp") == fiscal_period
+        and (period_end is None or e.get("end") == period_end)
+        and (accession_number is None or e.get("accn") == accession_number)
+    ]
+
+
 def extract_latest_annual_concept(
     cik: str,
     company_facts: dict,
@@ -64,25 +115,35 @@ def extract_latest_annual_concept(
     taxonomy: str = "us-gaap",
     form: str = "10-K",
     fiscal_period: str = "FY",
+    period_end: str | None = None,
+    accession_number: str | None = None,
 ) -> FinancialFact | None:
-    """Sucht den jüngsten annual Fact über eine Konzept-Fallback-Kette. `None` statt
-    Exception — Aufrufer entscheiden, ob ein fehlender Wert kritisch ist (siehe 8.4)."""
+    """Jüngster annual Fakt über eine Konzept-Fallback-Kette. `None` statt Exception —
+    Aufrufer entscheiden, ob ein fehlender Wert kritisch ist (siehe 8.4).
+
+    - Ohne `period_end`: gewinnt das Konzept mit dem **jüngsten** Periodenende; die
+      Kettenreihenfolge entscheidet nur bei Gleichstand. (Früher gewann das erste Konzept mit
+      irgendeiner Historie — das lieferte z. B. 2022er Umsatz für NVDA.)
+    - Mit `period_end`: nur Fakten exakt dieser Periode; ältere Werte zählen als fehlend.
+    - Mit `accession_number`: nur Fakten aus genau diesem Filing (für Cover-Page-Daten).
+    """
     taxonomy_facts = company_facts.get("facts", {}).get(taxonomy, {})
 
-    for concept in concepts:
-        concept_data = taxonomy_facts.get(concept)
-        if not concept_data:
-            continue
-
-        entries = concept_data.get("units", {}).get(unit, [])
-        annual = [e for e in entries if e.get("form") == form and e.get("fp") == fiscal_period]
+    best: tuple[tuple[str, int], str, dict] | None = None
+    for priority, concept in enumerate(concepts):
+        annual = _annual_entries(
+            taxonomy_facts, concept, unit, form, fiscal_period, period_end, accession_number
+        )
         if not annual:
             continue
-
         latest = max(annual, key=lambda e: e["end"])
-        return _fact_from_entry(cik, concept, unit, latest)
+        rank = (latest["end"], -priority)
+        if best is None or rank > best[0]:
+            best = (rank, concept, latest)
 
-    return None
+    if best is None:
+        return None
+    return _fact_from_entry(cik, best[1], unit, best[2])
 
 
 def extract_annual_series(
@@ -94,29 +155,36 @@ def extract_annual_series(
     form: str = "10-K",
     fiscal_period: str = "FY",
 ) -> list[FinancialFact]:
-    """Wie `extract_latest_annual_concept`, liefert aber alle annual Facts absteigend nach
-    Periodenende sortiert — Grundlage für YoY-Wachstumsraten."""
+    """Alle annual Fakten *des Konzepts mit dem jüngsten Periodenende*, absteigend sortiert,
+    je Periodenende ein Eintrag (bei mehrfacher Meldung der zuletzt eingereichte) — Grundlage
+    für YoY-Wachstumsraten."""
     taxonomy_facts = company_facts.get("facts", {}).get(taxonomy, {})
 
-    for concept in concepts:
-        concept_data = taxonomy_facts.get(concept)
-        if not concept_data:
-            continue
-
-        entries = concept_data.get("units", {}).get(unit, [])
-        annual = [e for e in entries if e.get("form") == form and e.get("fp") == fiscal_period]
+    best: tuple[tuple[str, int], str, list[dict]] | None = None
+    for priority, concept in enumerate(concepts):
+        annual = _annual_entries(taxonomy_facts, concept, unit, form, fiscal_period, None, None)
         if not annual:
             continue
+        rank = (max(e["end"] for e in annual), -priority)
+        if best is None or rank > best[0]:
+            best = (rank, concept, annual)
 
-        facts = [_fact_from_entry(cik, concept, unit, e) for e in annual]
-        return sorted(facts, key=lambda f: f.period_end, reverse=True)
+    if best is None:
+        return []
 
-    return []
+    by_end: dict[str, dict] = {}
+    for entry in best[2]:
+        current = by_end.get(entry["end"])
+        if current is None or entry["filed"] > current["filed"]:
+            by_end[entry["end"]] = entry
+
+    facts = [_fact_from_entry(cik, best[1], unit, e) for e in by_end.values()]
+    return sorted(facts, key=lambda f: f.period_end, reverse=True)
 
 
 def extract_latest_annual_revenue(cik: str, company_facts: dict) -> FinancialFact:
-    """Wie Phase 0 — wirft RevenueNotFoundError statt None, weil Revenue für einen Comps-Lauf
-    unverzichtbar ist (alle Multiples hängen davon ab)."""
+    """Wirft RevenueNotFoundError statt None, weil Revenue für einen Comps-Lauf unverzichtbar
+    ist (alle Multiples hängen davon ab) und die Berichtsperiode festlegt."""
     fact = extract_latest_annual_concept(cik, company_facts, REVENUE_CONCEPTS)
     if fact is None:
         raise RevenueNotFoundError(
@@ -125,32 +193,79 @@ def extract_latest_annual_revenue(cik: str, company_facts: dict) -> FinancialFac
     return fact
 
 
-def extract_total_debt(cik: str, company_facts: dict) -> FinancialFact | None:
-    """Erst ein direktes Aggregat-Konzept versuchen; sonst kurz- und langfristige
-    Fremdkapitalanteile summieren, wenn beide vorhanden sind."""
-    direct = extract_latest_annual_concept(cik, company_facts, TOTAL_DEBT_CONCEPTS)
-    if direct is not None:
-        return direct
-
-    long_term = extract_latest_annual_concept(cik, company_facts, LONG_TERM_DEBT_CONCEPTS)
-    short_term = extract_latest_annual_concept(cik, company_facts, SHORT_TERM_DEBT_CONCEPTS)
-    if long_term is None or short_term is None:
+def _sum_facts(cik: str, parts: list[FinancialFact | None]) -> FinancialFact | None:
+    """Summiert mehrere Fakten derselben Periode zu einem Fakt, dessen `concept` alle
+    Bestandteile nennt (Provenance). Ein einzelner Bestandteil wird unverändert zurückgegeben."""
+    present = [p for p in parts if p is not None]
+    if not present:
         return None
+    if len(present) == 1:
+        return present[0]
 
+    first = present[0]
     return FinancialFact(
         cik=cik,
-        concept=f"{long_term.concept}+{short_term.concept}",
-        value=long_term.value + short_term.value,
-        unit="USD",
-        period_start=long_term.period_start,
-        period_end=long_term.period_end,
-        fiscal_year=long_term.fiscal_year,
-        fiscal_period=long_term.fiscal_period,
-        form_type=long_term.form_type,
-        accession_number=long_term.accession_number,
-        filed_date=long_term.filed_date,
+        concept="+".join(p.concept for p in present),
+        value=sum(p.value for p in present),
+        unit=first.unit,
+        period_start=first.period_start,
+        period_end=first.period_end,
+        fiscal_year=first.fiscal_year,
+        fiscal_period=first.fiscal_period,
+        form_type=first.form_type,
+        accession_number="+".join(dict.fromkeys(p.accession_number for p in present)),
+        filed_date=max(p.filed_date for p in present),
         retrieved_at=datetime.now(timezone.utc),
     )
+
+
+def _is_contained(total: FinancialFact, noncurrent: FinancialFact, extra: FinancialFact) -> bool:
+    """True, wenn `extra` erkennbar bereits in `total` steckt: total == noncurrent + extra
+    (z. B. ist ein "kurzfristiger" Posten exakt der Teil, der zur Gesamtschuld fehlt)."""
+    return abs(total.value - (noncurrent.value + extra.value)) <= _CONTAINMENT_TOLERANCE * max(total.value, 1.0)
+
+
+def extract_total_debt(cik: str, company_facts: dict, period_end: str) -> FinancialFact | None:
+    """Gesamtschuld (ohne Leasingverbindlichkeiten) zur Periode `period_end`.
+
+    Regel: Ein Konzept zählt nur dann als Gesamtschuld, wenn seine Definition die Gesamtheit
+    abdeckt — oder wenn jeder Teil, den seine Definition ausschließt, explizit gemeldet ist
+    (auch als 0). Fehlt ein ausgeschlossener Teil (z. B. kurzfristiger Anteil bei
+    `LongTermDebtNoncurrent`), ist die Zahl unvollständig und bleibt `None`.
+    """
+
+    def get(chain: list[str]) -> FinancialFact | None:
+        return extract_latest_annual_concept(cik, company_facts, chain, period_end=period_end)
+
+    combined = get(DEBT_TOTAL_CONCEPTS)
+    if combined is not None:
+        return combined
+
+    noncurrent = get(LONG_TERM_DEBT_NONCURRENT_CONCEPTS)
+    debt_current = get(DEBT_CURRENT_CONCEPTS)
+    if noncurrent is not None and debt_current is not None:
+        return _sum_facts(cik, [noncurrent, debt_current])  # DebtCurrent enthält ST + current LTD
+
+    commercial_paper = get(COMMERCIAL_PAPER_CONCEPTS)
+
+    long_term_total = get(LONG_TERM_DEBT_TOTAL_CONCEPTS)
+    if long_term_total is not None:
+        if commercial_paper is not None and noncurrent is not None and _is_contained(
+            long_term_total, noncurrent, commercial_paper
+        ):
+            commercial_paper = None
+        return _sum_facts(cik, [long_term_total, commercial_paper])
+
+    if noncurrent is not None:
+        current_ltd = get(LONG_TERM_DEBT_CURRENT_CONCEPTS)
+        if current_ltd is not None:
+            if commercial_paper is not None and abs(commercial_paper.value - current_ltd.value) <= (
+                _CONTAINMENT_TOLERANCE * max(current_ltd.value, 1.0)
+            ):
+                commercial_paper = None  # identisch mit den current maturities -> schon enthalten
+            return _sum_facts(cik, [noncurrent, current_ltd, commercial_paper])
+
+    return None
 
 
 def compute_ebitda(ebit: FinancialFact | None, d_and_a: FinancialFact | None) -> tuple[float | None, bool]:
@@ -159,6 +274,17 @@ def compute_ebitda(ebit: FinancialFact | None, d_and_a: FinancialFact | None) ->
     if ebit is None or d_and_a is None:
         return None, True
     return ebit.value + d_and_a.value, True
+
+
+def _revenue_growth_yoy(series: list[FinancialFact]) -> float | None:
+    """YoY nur zwischen zwei direkt aufeinanderfolgenden Geschäftsjahren — eine Lücke im
+    Datenbestand würde sonst als "Jahreswachstum" ausgegeben."""
+    if len(series) < 2 or not series[1].value:
+        return None
+    gap = (date.fromisoformat(series[0].period_end) - date.fromisoformat(series[1].period_end)).days
+    if not (_YOY_GAP_DAYS[0] <= gap <= _YOY_GAP_DAYS[1]):
+        return None
+    return (series[0].value - series[1].value) / series[1].value
 
 
 def build_company_metrics(
@@ -170,17 +296,30 @@ def build_company_metrics(
     """Orchestriert die Extraktion aller v1-Kennzahlen für ein Unternehmen (Foundation Doc 3.2).
 
     Fehlende Einzelwerte blockieren nicht den gesamten Aufbau — sie werden als `None`
-    durchgereicht, damit Nutzer sehen, was fehlt, statt einen Absturz zu erleben.
+    durchgereicht, damit Nutzer sehen, was fehlt, statt einen Absturz zu erleben. Alle Werte
+    gehören zur Periode des jüngsten Umsatzes (Anker, siehe Modul-Docstring).
     """
-    revenue = extract_latest_annual_concept(cik, company_facts, REVENUE_CONCEPTS)
-    ebit = extract_latest_annual_concept(cik, company_facts, EBIT_CONCEPTS)
-    net_income = extract_latest_annual_concept(cik, company_facts, NET_INCOME_CONCEPTS)
-    total_assets = extract_latest_annual_concept(cik, company_facts, TOTAL_ASSETS_CONCEPTS)
-    total_debt = extract_total_debt(cik, company_facts)
-    cash = extract_latest_annual_concept(cik, company_facts, CASH_CONCEPTS)
-    d_and_a = extract_latest_annual_concept(cik, company_facts, DEPRECIATION_AMORTIZATION_CONCEPTS)
+    revenue = extract_latest_annual_revenue(cik, company_facts)
+    anchor = revenue.period_end
+
+    def at_anchor(chain: list[str]) -> FinancialFact | None:
+        return extract_latest_annual_concept(cik, company_facts, chain, period_end=anchor)
+
+    ebit = at_anchor(EBIT_CONCEPTS)
+    net_income = at_anchor(NET_INCOME_CONCEPTS)
+    total_assets = at_anchor(TOTAL_ASSETS_CONCEPTS)
+    total_debt = extract_total_debt(cik, company_facts, anchor)
+    cash = at_anchor(CASH_CONCEPTS)
+    d_and_a = at_anchor(DEPRECIATION_AMORTIZATION_CONCEPTS)
+    # Cover-Page-Daten tragen das Datum des Einreichens, nicht der Periode — daher Bindung an
+    # dasselbe 10-K-Filing wie der Umsatz statt an das Periodenende.
     shares = extract_latest_annual_concept(
-        cik, company_facts, SHARES_OUTSTANDING_CONCEPTS, unit="shares", taxonomy="dei"
+        cik,
+        company_facts,
+        SHARES_OUTSTANDING_CONCEPTS,
+        unit="shares",
+        taxonomy="dei",
+        accession_number=revenue.accession_number,
     )
 
     ebitda_value, ebitda_approximated = compute_ebitda(ebit, d_and_a)
@@ -204,21 +343,13 @@ def build_company_metrics(
         if total_debt is not None and cash is not None:
             enterprise_value = market_cap + total_debt.value - cash.value
 
-    revenue_series = extract_annual_series(cik, company_facts, REVENUE_CONCEPTS)
-    revenue_growth_yoy = None
-    if len(revenue_series) >= 2 and revenue_series[1].value:
-        revenue_growth_yoy = (revenue_series[0].value - revenue_series[1].value) / revenue_series[1].value
+    revenue_growth_yoy = _revenue_growth_yoy(extract_annual_series(cik, company_facts, REVENUE_CONCEPTS))
 
     margins = {
-        "ebit_margin": (ebit.value / revenue.value) if ebit and revenue and revenue.value else None,
-        "net_margin": (net_income.value / revenue.value) if net_income and revenue and revenue.value else None,
+        "ebit_margin": (ebit.value / revenue.value) if ebit and revenue.value else None,
+        "net_margin": (net_income.value / revenue.value) if net_income and revenue.value else None,
     }
     growth_rates = {"revenue_yoy": revenue_growth_yoy}
-
-    if revenue is None:
-        raise RevenueNotFoundError(
-            f"Kein Revenue-Konzept aus {REVENUE_CONCEPTS} in companyfacts für CIK {cik} gefunden."
-        )
 
     return CompanyMetrics(
         company=company,
