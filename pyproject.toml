@@ -15,6 +15,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pyyaml>=6",  # Golden-Set-Seed (eval/golden_seed.py)
 ]
 agent = [
     "anthropic>=1,<2",  # 1.x: HTTP-Layer httpx2, Python >= 3.10; 1.11.0 am 2026-10-05 veröffentlicht
@@ -32,7 +33,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 addopts = "-m 'not live'"
 markers = [
     "live: ruft externe Dienste (LLM, EDGAR, Finnhub) live auf; nicht Teil der Standardsuite (-m live)",

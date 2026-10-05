@@ -1,0 +1,23 @@
+# Golden-Set-Seed CDNS — von Hand aus dem 10-K geprüft (Messlineal, nicht aus dem Extraktor).
+# Gepinnt an period_end UND accession_number des 10-K, nicht an "jüngstes 10-K".
+# Werte so eintragen, wie sie im 10-K stehen; `unit` gibt die Einheit an (millions | thousands | units),
+# die Umrechnung in USD macht eval/golden_seed.py exakt. Ist ein Wert im 10-K nicht ausgewiesen, statt
+# `value` einen `absent_reason` setzen (z. B. "kein Gesamt-D&A im Cashflow ausgewiesen").
+# `status: complete` erst setzen, wenn alles geprüft ist; `python eval/golden_seed.py` listet die Lücken.
+status: skeleton            # skeleton | complete
+scope: partial          # nur die unter values aufgeführten Werte werden geprüft
+ticker: CDNS
+cik: "0000813672"
+form: 10-K
+period_end:                 # JJJJ-MM-TT, Geschäftsjahresende laut 10-K
+fiscal_year:                # ganze Zahl (DocumentFiscalYearFocus)
+accession_number:           # 0000000000-00-000000, das 10-K, aus dem die Werte stammen
+checked_by:
+checked_on:                 # JJJJ-MM-TT
+values:
+  total_debt:
+    value:
+    unit: millions
+    is_lower_bound:         # true/false: ist der Seed-Wert selbst nur eine Untergrenze?
+    source: "TODO: Gesamtschuld inkl. kurzfristigem Anteil, ohne Leasing — Seite/Anhang im 10-K"
+notes: ""
