@@ -13,7 +13,7 @@ Phase 0, 1 & 2 abgeschlossen:
 - EDGAR-Client-Grundgerüst mit Rate Limiting, User-Agent und Retry-Logik
 - Vollständiger v1-Kennzahlensatz (Revenue, EBIT, EBITDA-Approx, Net Income, Debt, Cash,
   Margen, YoY-Wachstum) mit vollständiger Provenance
-- `MarketDataProvider`-Interface (Finnhub primär, Stooq als Fallback vorbereitet, SQLite-Cache)
+- `MarketDataProvider`-Interface (Finnhub einzige Quelle, `StooqProvider` nur als deaktivierter Platzhalter, SQLite-Cache)
 - Peer-Kandidatensuche (SIC-Filter über `browse-edgar` + Größenfilter über den `frames`-Bulk-Endpunkt)
 - Multiples (EV/Revenue, EV/EBITDA, EV/EBIT, P/E) mit expliziter Behandlung nicht aussagekräftiger
   Werte (negativer/fehlender Nenner → `None` + Grund, nie eine verzerrte Zahl)

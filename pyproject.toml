@@ -17,7 +17,7 @@ dev = [
     "pytest-asyncio>=0.23",
 ]
 agent = [
-    "anthropic>=0.40",
+    "anthropic>=1,<2",  # 1.x: HTTP-Layer httpx2, Python >= 3.10; 1.11.0 am 2026-10-05 veröffentlicht
 ]
 ui = [
     "streamlit>=1.35",
@@ -33,3 +33,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-m 'not live'"
+markers = [
+    "live: ruft externe Dienste (LLM, EDGAR, Finnhub) live auf; nicht Teil der Standardsuite (-m live)",
+]

@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.1 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -456,7 +456,7 @@ Abhängigkeitspunkt des Projekts.
 
 #### Entscheidung D1 (getroffen, Stand 08/2026)
 
-**Primär: Finnhub. Fallback: Stooq. yfinance: nur optional für lokale Experimente.**
+**Primär: Finnhub. Stooq-Fallback verworfen — nie verifiziert, in der Standard-Verdrahtung nicht eingehängt (siehe unten, D7). yfinance: nur optional für lokale Experimente.**
 
 Bedarfsanalyse: ~10 Ticker pro Comps-Lauf, nur End-of-Day-Kurse. Der eigentliche Engpass ist der
 Golden-Set-Lauf (10 Ziele × ~10 Peers ≈ 100 Kursabrufe pro Evaluationsdurchgang).
@@ -702,7 +702,7 @@ entspricht der EBITDA-Approximation (8.4): nie stillschweigend, immer gekennzeic
 | LLM | Anthropic API (Claude) | Tool-Use nativ, passt zu deinen MCP-/Agent-Zertifikaten |
 | UI | Streamlit | Bereits beherrscht, schnelle Iteration |
 | Datenzugriff | `httpx` | Sync + async fähig, moderne API |
-| Marktdaten | Finnhub REST (primär), Stooq CSV (Fallback) | Siehe 8.3 — beide direkt per HTTP, keine SDK-Abhängigkeit nötig |
+| Marktdaten | Finnhub REST (einzige funktionierende Quelle) | Siehe 8.3 — direkt per HTTP, keine SDK-Abhängigkeit nötig; `StooqProvider` nur als deaktivierter Platzhalter (D7) |
 | Datenmodelle | `pydantic` | Validierung + saubere Tool-Schemas |
 | Tabellen | `pandas` | — |
 | Export | `openpyxl` (XLSX), stdlib (CSV/MD) | — |
@@ -912,7 +912,7 @@ Phase-6-Oberfläche; die Streamlit-Oberfläche aus Phase 4 bleibt wie geplant.
 
 | # | Offene Frage | Status |
 |---|---|---|
-| ~~D1~~ | ~~Welche Kursdatenquelle?~~ | ✅ **Entschieden:** Finnhub primär, Stooq Fallback (siehe 8.3) |
+| ~~D1~~ | ~~Welche Kursdatenquelle?~~ | ✅ **Entschieden:** Finnhub primär. Der ursprünglich vorgesehene Stooq-Fallback ist unverifiziert und deaktiviert (siehe 8.3, D7). |
 | ~~D2~~ | ~~Peer-Suche über `frames`-Endpunkt oder eigener SIC-Index?~~ | ✅ **Entschieden:** `browse-edgar` (SIC-Filter, paginiert) + `frames` (Bulk-Größenfilter), kein selbst gepflegter Index nötig (siehe 7.4, `domain/peers.py`) |
 | D3 | Kalenderjahr- oder Fiskaljahr-Normalisierung bei abweichenden FY-Enden? | Teilweise: Mismatch wird erkannt und geflaggt (`check_fiscal_year_mismatch`, Phase 2). Echte Normalisierung (z. B. Trailing-Twelve-Months-Angleichung) bleibt offen — Phase 3+ |
 | ~~D4~~ | ~~Ausreißer-Definition (IQR-basiert? feste Schwellen?)~~ | ✅ **Entschieden:** IQR-basiert (Tukey-Fences, 1,5×), ab n≥4 Datenpunkten je Multiple — siehe `domain/quality.py` |
@@ -1076,7 +1076,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.4 | 2026-08-19 | Phase 2 umgesetzt (Comps-Engine). D2 entschieden (`browse-edgar` + `frames`, kein eigener Index), D4 entschieden (IQR/Tukey, n≥4). D3 teilweise: Mismatch-Erkennung steht, Normalisierung bleibt offen |
 | 1.5 | 2026-10-04 | **Härtungs-Session vor Phase 3.** Nachgeführte Abweichungen (§0-Regel): Net Debt/EBITDA nicht implementiert (3.2); Tool-Katalog vs. L2-Stand (7.3); Rate-Limit pro Client-Instanz (8.2); Cache-Schlüssel = UTC-Kalendertag statt Handelstag, `/quote` = letzter Kurs statt EOD, `PriceQuote` statt `MarketSnapshot` aus Providern (8.3); Datenmodell-Abweichungen (10); EDGAR nicht gecacht, pandas/openpyxl ungenutzt (9); Repo-Struktur (15). **Korrekturen:** Stooq ist unverifiziert/deaktiviert, der Quote-Endpunkt hat nie funktioniert (8.3, D7); D5 geschlossen. **Neu:** 8.6 — Befund *veraltete Fakten aus falscher Periode* (8/30 Firmen, u. a. ADBE-Schuld aus 2019), Periodenanker, Schuldenregel mit Definitionsbelegen; Finnhub-Throttle (55/min, jeder Versuch zählt) und 429/`Retry-After`; Entwicklungsumgebung (iCloud setzt `hidden` auf Punkt-Dateien → Editable-Install bricht); D8–D12 aufgenommen. Phase-1/2-Live-Ergebnisse für Adobe sind ungültig (Nachtrag in 12). **Entscheidungen (Sean, 2026-10-04):** D12 `None` ohne Teilposten; D9 Periodenschema freigegeben (`period_end` kanonisch, `fiscal_year` Best Effort, Multiples nur aktuelle Periode, `calendar_year` aus dem Tool-Schema, Ableitung `Jahr(Periodenende − 180 Tage)` gegen `frames` geprüft: 31/31 — 7.3.1), noch nicht implementiert; D10 **implementiert** — gekennzeichnete Schuld-Untergrenze (`total_debt_is_lower_bound`, sichtbar in EV, EV-Multiples, Statistik, QualityWarning; 8.6); D11 zurückgestellt, `profile2`-Befund in 8.3; UI-Vision (Phase 6) als 12.1 eingefügt, D8 konkretisiert; zweite harte Regel in 7.1 (L1–L5 wissen nichts über die UI). **Live-Gate (≥ 4/5 Peers mit EV-Multiples):** vor D10 verfehlt (3/5), nach D10 **4/5, davon 1 mit Flag**. |
 | 1.6 | 2026-10-05 | **Strategische Ausrichtung** als 1.4 eingefügt: Scout ist Zuarbeiter für Private Equity und Deal-Analyse (Valuation, Transaction Advisory), kein Consulting-Framework-Werkzeug; Bausteinfolge (Comps → Precedent Transactions, DCF, LBO-/Returns-Screening → optional Due-Diligence-Support), Prinzipien je Baustein, Consulting-One-Pager als Ausgabeform nach Phase 4, Abgrenzung zu Arcticon (MCP-Server nach Phase 5). Widersprüche abgeglichen: §1.3 Punkt 4, §4 (Precedent/DCF nicht mehr "v2/v3", neue strategische Nicht-Ziele), §8.5, Roadmap "Danach" (Memo-Entwurfsmodul entfällt), §13 Risiko Scope Creep, §14.1 Positionierung. **Neu offen:** D13 (Reihenfolge nach den Comps), D14 (Format One-Pager), D15 (MCP-Server/Arcticon). Kein Code geändert. |
+| 1.6.1 | 2026-10-05 | Phase 3, Schritt 1: Stooq-Reste bereinigt (§8.3 D1-Überschrift, §9 Tech-Stack, §13 D1) — Stooq ist kein Fallback mehr, sondern ein deaktivierter Platzhalter (D7). Neue Config-Felder `anthropic_model` (Default `claude-sonnet-5-5`), `anthropic_compare_model`, `anthropic_effort`, `output_language`; Extra `agent` mit `anthropic>=1,<2`; pytest-Marker `live`. Plan: `docs/decisions/phase-3-plan.md`. |
 
 ---
 
-*Ende Dokumentversion 1.6*
+*Ende Dokumentversion 1.6.1*
