@@ -2,8 +2,8 @@
 
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
-**Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt (v1.5)
-**Dokumentversion:** 1.5 — Basis für alle folgenden Code-Sessions
+**Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
+**Dokumentversion:** 1.6 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -65,8 +65,49 @@ zuarbeitet"**. Konkret bedeutet das:
    richtig liegt. Ein autonomer "Investment-Urteiler" ist praktisch nicht evaluierbar.
 3. **Glaubwürdig:** Entspricht exakt der Art, wie Beratungen und Banken KI real einsetzen —
    Augmentation statt Substitution.
-4. **Anschlussfähig:** Comps sind die Grundlage für spätere Module (Precedent Transactions,
-   DCF-Support, Memo-Entwürfe). Das Projekt kann organisch wachsen.
+4. **Anschlussfähig:** Comps sind die Grundlage für spätere Bausteine (Precedent Transactions,
+   DCF-Support, LBO-/Returns-Screening; Reihenfolge offen, D13). Das Projekt kann organisch wachsen —
+   Richtung und Grenzen stehen in 1.4.
+
+### 1.4 Strategische Ausrichtung (Entscheidung vom 2026-10-05)
+
+**Entscheidung:** Scout Research ist ein spezialisierter Zuarbeiter für Private Equity und Deal-Analyse
+(Valuation, Transaction Advisory). Es ist kein Werkzeug für Consulting-Frameworks (Marktgröße, Issue
+Trees, Porter, 2x2, Folienlogik).
+
+**Begründung:**
+- Das Provenance-Prinzip ("das Modell erzeugt keine Zahl, jede Zahl hat eine Quelle") passt zu
+  Finanzmodellen, nicht zu Strukturieren und Formulieren.
+- Finanzmodelle haben eine prüfbare Ground Truth, daher funktioniert das Golden Set nur auf dieser Seite.
+- Scope und Zeit: Breite in zwei Richtungen würde das Projekt verwässern.
+
+**Ausbau des Workflows (nach Abschluss von Phase 5, jeweils mit eigenem Golden Set):**
+1. Trading Comps (Kern, Phase 0–5)
+2. Precedent Transactions aus 8-K und Merger-Proxies
+3. DCF-Unterstützung (Annahmen immer vom Menschen)
+4. LBO-/Returns-Screening (IRR, MoM; Annahmen wie Einstiegsmultiple, Leverage und Exit immer vom Menschen)
+5. Optional: Due-Diligence-Support (Red Flags in 10-Ks)
+
+Reihenfolge von 2–4 offen (D13).
+
+**Prinzipien für jeden Baustein:** Das Modell erzeugt keine Zahl. Annahmen setzt der Mensch und bestätigt
+sie explizit. Jede Zahl trägt ihre Quelle. Jeder Baustein hat eine eigene Evaluation, bevor er als fertig
+gilt.
+
+**Consulting als Ausgabeform:** Nach Phase 4 erzeugt Scout eine One-Pager-Zusammenfassung im
+Consulting-Stil (Kernaussage zuerst, drei Beobachtungen, Risiken), ausschließlich aus Tool-Ergebnissen und
+ohne neue Zahlen. Format offen (D14).
+
+**Abgrenzung zu Arcticon:** Consulting-Frameworks sind kein Ziel von Scout, sondern ein Kandidat für
+Arcticon. Arcticon kann Scout nach Phase 5 über einen MCP-Server nutzen (D15, Zeitpunkt offen). Regeln
+dafür: Arcticon reicht Scouts strukturierte Tabellen durch und erzählt Zahlen nicht nach, und das
+Peer-Gate wird nie automatisch bestätigt.
+
+**Positionierung:** Scout belegt Valuation- und Deal-Kompetenz. Im CV und in Gesprächen wird nur
+behauptet, was gebaut ist.
+
+**Nicht-Ziele (strategisch):** Keine Framework-Engine. Kein Ausbau auf weitere Modelltypen vor Abschluss
+der Evaluation.
 
 ---
 
@@ -164,8 +205,11 @@ Explizite Abgrenzung — schützt vor Scope Creep und macht das Projekt im Gespr
 
 - ❌ **Keine Investment-Empfehlungen** (kein "kaufen/halten/verkaufen", keine Kursziele)
 - ❌ **Keine autonome Ausführung ohne Freigabe** — Peer-Set wird immer bestätigt
-- ❌ **Kein DCF-Modell** (potenziell v3)
-- ❌ **Keine Precedent Transactions** (potenziell v2)
+- ❌ **Kein DCF-Modell in v1** (geplanter späterer Baustein, siehe 1.4; Reihenfolge D13)
+- ❌ **Keine Precedent Transactions in v1** (geplanter späterer Baustein, siehe 1.4; Reihenfolge D13)
+- ❌ **Kein LBO-/Returns-Screening in v1** (siehe 1.4)
+- ❌ **Keine Framework-Engine** (Marktgröße, Issue Trees, Porter, 2x2) — strategisch, nicht nur v1 (1.4)
+- ❌ **Kein Ausbau auf weitere Modelltypen vor Abschluss der Evaluation** (Phase 5)
 - ❌ **Keine Nicht-US-Unternehmen** (EDGAR deckt primär US-Registranten ab)
 - ❌ **Keine privaten Unternehmen als Zielobjekt in v1** (siehe 8.5 für den PE-Bezug)
 - ❌ **Keine Echtzeit-Kurse** (End-of-Day reicht vollständig)
@@ -539,7 +583,8 @@ es werden keine Teilposten addiert.**
 
 Auch ohne PE-Daten ist der PE-Bezug erzählbar:
 - Comps sind Standard-Handwerkszeug jedes PE-Analysten.
-- v2 kann **Precedent Transactions** aus M&A-bezogenen Filings (8-K, Merger-Proxies) ergänzen —
+- Nach Phase 5 kann **Precedent Transactions** aus M&A-bezogenen Filings (8-K, Merger-Proxies) ein
+  weiterer Baustein werden (Reihenfolge der Bausteine offen, D13; siehe 1.4) —
   dort stehen reale Transaktionsdaten (Kaufpreis, Struktur), die sonst nur kostenpflichtig
   verfügbar sind. Das ist ein echtes Alleinstellungsmerkmal für später.
 
@@ -818,9 +863,19 @@ alle folgenden Änderungen dagegen messbar werden.
 - README, Architekturdiagramm, Demo-Material
 - **DoD:** Messbare Qualitätsaussagen möglich, Projekt vorzeigbar
 
-### Danach (v2+, optional)
-Precedent Transactions aus M&A-Filings · Multi-Perioden-Trends · Sektor-Screening ·
-Memo-Entwurfsmodul · MCP-Server-Variante der Tools (starker Anschluss an dein Seminar)
+### Danach (nach Phase 5, Entscheidung vom 2026-10-05 — siehe 1.4)
+Neue Bausteine, jeweils mit eigenem Golden Set und eigener Evaluation, bevor sie als fertig gelten;
+**Reihenfolge von 2–4 offen (D13):**
+1. Trading Comps (Phase 0–5, Kern)
+2. Precedent Transactions aus 8-K und Merger-Proxies
+3. DCF-Unterstützung (Annahmen immer vom Menschen)
+4. LBO-/Returns-Screening (IRR, MoM; Annahmen immer vom Menschen)
+5. Optional: Due-Diligence-Support (Red Flags in 10-Ks)
+
+Daneben: **MCP-Server** für die Arcticon-Anbindung (Zeitpunkt und Zuschnitt offen, D15) und der
+**Consulting-One-Pager** als Ausgabeform nach Phase 4 (Format offen, D14). Multi-Perioden-Trends und
+Sektor-Screening bleiben Kandidaten ohne Zuordnung. Das frühere Memo-Entwurfsmodul entfällt als
+eigener Baustein; der One-Pager deckt den Bedarf ab. Eine Framework-Engine ist kein Ziel (1.4).
 
 ### 12.1 UI-Vision (Phase 6)
 
@@ -869,6 +924,9 @@ Phase-6-Oberfläche; die Streamlit-Oberfläche aus Phase 4 bleibt wie geplant.
 | ~~D10~~ | ~~Gesamtschuld bei fehlendem kurzfristigem Anteil~~ | ✅ **Entschieden und implementiert:** gekennzeichnete Untergrenze (`total_debt_is_lower_bound`), nur für Konzepte mit ausdrücklichem Ausschluss des kurzfristigen Anteils; sichtbar in EV, EV-Multiples, Statistik und als QualityWarning; Export-Kennzeichnung ist Phase-4-Anforderung (8.6). |
 | D11 | Shares bei Mehrklassen-Aktien (GOOGL, META, TEAM, DDOG, CRWD, WDAY): Cover Page (`R1.htm`) parsen oder Finnhub `profile2` nutzen? | **zurückgestellt** (Sean, 2026-10-04). `profile2` ist im Free-Tier verfügbar und plausibel, aber ohne Stichtag/Accession (8.3). Nichts eingebaut. |
 | ~~D12~~ | ~~EBITDA ohne Gesamt-D&A-Konzept~~ | ✅ **Entschieden:** bleibt `None`, keine Teilposten addieren (8.4). |
+| D13 | Reihenfolge nach den Comps: Precedent Transactions, DCF, LBO (siehe 1.4) | offen, nach Phase 5 |
+| D14 | Format des Consulting-One-Pagers (Markdown, DOCX, PDF, Folie) | offen, vor Phase 4 klären |
+| D15 | Zeitpunkt und Zuschnitt des MCP-Servers für die Arcticon-Anbindung | offen, nach Phase 5 |
 
 | Risiko | Wahrscheinlichkeit | Gegenmaßnahme |
 |---|---|---|
@@ -877,7 +935,7 @@ Phase-6-Oberfläche; die Streamlit-Oberfläche aus Phase 4 bleibt wie geplant.
 | Mehrklassen-Aktien: Shares/Market Cap fehlen | **hoch** (6/30) | D11; bis dahin klare Warnung "market nicht verfügbar" |
 | Projekt/venv in iCloud-Ordner | eingetreten | Siehe 9, Entwicklungsumgebung: Projekt außerhalb von iCloud ablegen |
 | Peer-Qualität schwach | mittel | Human-in-the-Loop-Gate rettet jeden Fall |
-| Scope Creep | **hoch** | Abschnitt 4 als harte Grenze behandeln |
+| Scope Creep | **hoch** | Abschnitt 4 und 1.4 als harte Grenze behandeln |
 | LLM-Kosten steigen | niedrig | Caching, kompakte Tool-Outputs |
 
 ---
@@ -896,6 +954,11 @@ Phase-6-Oberfläche; die Streamlit-Oberfläche aus Phase 4 bleibt wie geplant.
 >   Datenqualitätsprüfungen (Ausreißer, Periodeninkonsistenzen, fehlende Daten)
 > - Evaluationsframework mit manuell erstelltem Golden Set zur Messung von Peer-Übereinstimmung,
 >   numerischer Korrektheit und Halluzinationsfreiheit
+
+*Positionierung (1.4):* Scout belegt Valuation- und Deal-Kompetenz (Private Equity, Transaction
+Advisory). Im CV und in Gesprächen wird nur behauptet, was gebaut ist — Precedent Transactions, DCF
+und LBO-Screening erst, wenn der jeweilige Baustein mit Golden Set evaluiert ist. Consulting-Frameworks
+sind kein Teil von Scout (Kandidat für Arcticon).
 
 ### 14.2 Interview-Kernaussagen
 
@@ -1012,7 +1075,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.3 | 2026-08-18 | Phase 0 & 1 umgesetzt. D7 aufgenommen: Stooq-Fallback seit 08/2026 durch Bot-Schutz blockiert, Finnhub trägt v1 vorerst allein (siehe 8.3) |
 | 1.4 | 2026-08-19 | Phase 2 umgesetzt (Comps-Engine). D2 entschieden (`browse-edgar` + `frames`, kein eigener Index), D4 entschieden (IQR/Tukey, n≥4). D3 teilweise: Mismatch-Erkennung steht, Normalisierung bleibt offen |
 | 1.5 | 2026-10-04 | **Härtungs-Session vor Phase 3.** Nachgeführte Abweichungen (§0-Regel): Net Debt/EBITDA nicht implementiert (3.2); Tool-Katalog vs. L2-Stand (7.3); Rate-Limit pro Client-Instanz (8.2); Cache-Schlüssel = UTC-Kalendertag statt Handelstag, `/quote` = letzter Kurs statt EOD, `PriceQuote` statt `MarketSnapshot` aus Providern (8.3); Datenmodell-Abweichungen (10); EDGAR nicht gecacht, pandas/openpyxl ungenutzt (9); Repo-Struktur (15). **Korrekturen:** Stooq ist unverifiziert/deaktiviert, der Quote-Endpunkt hat nie funktioniert (8.3, D7); D5 geschlossen. **Neu:** 8.6 — Befund *veraltete Fakten aus falscher Periode* (8/30 Firmen, u. a. ADBE-Schuld aus 2019), Periodenanker, Schuldenregel mit Definitionsbelegen; Finnhub-Throttle (55/min, jeder Versuch zählt) und 429/`Retry-After`; Entwicklungsumgebung (iCloud setzt `hidden` auf Punkt-Dateien → Editable-Install bricht); D8–D12 aufgenommen. Phase-1/2-Live-Ergebnisse für Adobe sind ungültig (Nachtrag in 12). **Entscheidungen (Sean, 2026-10-04):** D12 `None` ohne Teilposten; D9 Periodenschema freigegeben (`period_end` kanonisch, `fiscal_year` Best Effort, Multiples nur aktuelle Periode, `calendar_year` aus dem Tool-Schema, Ableitung `Jahr(Periodenende − 180 Tage)` gegen `frames` geprüft: 31/31 — 7.3.1), noch nicht implementiert; D10 **implementiert** — gekennzeichnete Schuld-Untergrenze (`total_debt_is_lower_bound`, sichtbar in EV, EV-Multiples, Statistik, QualityWarning; 8.6); D11 zurückgestellt, `profile2`-Befund in 8.3; UI-Vision (Phase 6) als 12.1 eingefügt, D8 konkretisiert; zweite harte Regel in 7.1 (L1–L5 wissen nichts über die UI). **Live-Gate (≥ 4/5 Peers mit EV-Multiples):** vor D10 verfehlt (3/5), nach D10 **4/5, davon 1 mit Flag**. |
+| 1.6 | 2026-10-05 | **Strategische Ausrichtung** als 1.4 eingefügt: Scout ist Zuarbeiter für Private Equity und Deal-Analyse (Valuation, Transaction Advisory), kein Consulting-Framework-Werkzeug; Bausteinfolge (Comps → Precedent Transactions, DCF, LBO-/Returns-Screening → optional Due-Diligence-Support), Prinzipien je Baustein, Consulting-One-Pager als Ausgabeform nach Phase 4, Abgrenzung zu Arcticon (MCP-Server nach Phase 5). Widersprüche abgeglichen: §1.3 Punkt 4, §4 (Precedent/DCF nicht mehr "v2/v3", neue strategische Nicht-Ziele), §8.5, Roadmap "Danach" (Memo-Entwurfsmodul entfällt), §13 Risiko Scope Creep, §14.1 Positionierung. **Neu offen:** D13 (Reihenfolge nach den Comps), D14 (Format One-Pager), D15 (MCP-Server/Arcticon). Kein Code geändert. |
 
 ---
 
-*Ende Dokumentversion 1.5*
+*Ende Dokumentversion 1.6*
