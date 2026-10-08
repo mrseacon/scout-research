@@ -46,6 +46,9 @@ def check_outliers(peer_multiples: list[CompanyMultiples], multiple_name: str) -
                     f"(mindestens {MIN_DATAPOINTS_FOR_OUTLIER_CHECK} nötig)."
                 ),
                 affected_field=multiple_name,
+                kind="too_few_datapoints",
+                params={"multiple": multiple_name, "count": len(values_by_ticker),
+                        "minimum": MIN_DATAPOINTS_FOR_OUTLIER_CHECK},
             )
         ]
 
@@ -67,6 +70,9 @@ def check_outliers(peer_multiples: list[CompanyMultiples], multiple_name: str) -
                         f"[{lower_fence:.2f}, {upper_fence:.2f}] (IQR-Methode über das Peer-Set)."
                     ),
                     affected_field=multiple_name,
+                    kind="outlier",
+                    params={"multiple": multiple_name, "direction": "below" if value < lower_fence else "above",
+                            "value": value, "lower_fence": lower_fence, "upper_fence": upper_fence},
                 )
             )
     return warnings
@@ -111,6 +117,9 @@ def check_fiscal_year_mismatch(
                     f"gefaltet; Toleranz ±{PERIOD_TOLERANCE_DAYS}) — Kennzahlen sind nicht periodengleich."
                 ),
                 affected_field="period_end",
+                kind="fiscal_year_mismatch",
+                params={"peer_period_end": peer.period_end, "target_period_end": target.period_end,
+                        "offset_days": offset, "tolerance_days": PERIOD_TOLERANCE_DAYS},
             )
         )
     return warnings
@@ -136,6 +145,9 @@ def check_stale_period(target: CompanyMetrics, peers: list[CompanyMetrics]) -> l
                     f"älteren Periode verglichen."
                 ),
                 affected_field="period_end",
+                kind="stale_period",
+                params={"peer_period_end": peer.period_end, "target_period_end": target.period_end,
+                        "gap_days": gap},
             )
         )
     return warnings
@@ -164,6 +176,8 @@ def check_missing_data(metrics: CompanyMetrics) -> list[QualityWarning]:
                     company=ticker,
                     message=f"{field_name} für {metrics.company.name} nicht verfügbar.",
                     affected_field=field_name,
+                    kind="missing_data",
+                    params={"field": field_name},
                 )
             )
     return warnings
@@ -195,6 +209,8 @@ def check_debt_lower_bound(metrics: CompanyMetrics) -> list[QualityWarning]:
                 f"Gesamtschuld ist nicht ermittelbar. {consequence}; P/E ist nicht betroffen."
             ),
             affected_field="total_debt",
+            kind="debt_lower_bound",
+            params={"concept": concept, "ev_available": metrics.enterprise_value is not None},
         )
     ]
 

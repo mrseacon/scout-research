@@ -31,6 +31,7 @@ def compute_multiples(metrics: CompanyMetrics) -> CompanyMultiples:
     """EV/Revenue, EV/EBITDA, EV/EBIT, P/E für ein Unternehmen. Jeder Ausschluss trägt
     einen menschenlesbaren Grund in `excluded_reasons`."""
     excluded_reasons: dict[str, str] = {}
+    excluded_codes: dict[str, str] = {}
     ev = metrics.enterprise_value
 
     if metrics.is_historical:
@@ -42,28 +43,33 @@ def compute_multiples(metrics: CompanyMetrics) -> CompanyMultiples:
             ev_ebit=None,
             pe=None,
             excluded_reasons={name: reason for name in MULTIPLE_NAMES},
+            excluded_codes={name: "historical_period" for name in MULTIPLE_NAMES},
         )
 
-    def _ev_missing_reason() -> str:
+    def _ev_missing_reason() -> tuple[str, str]:
         # EV = Market Cap + Total Debt - Cash: die Ursache nennen, die tatsächlich fehlt.
         if metrics.market is None:
-            return "Enterprise Value nicht verfügbar (Marktdaten fehlen: Kurs oder Shares)"
+            return "Enterprise Value nicht verfügbar (Marktdaten fehlen: Kurs oder Shares)", "ev_unavailable_market"
         if metrics.total_debt is None:
-            return "Enterprise Value nicht verfügbar (Total Debt nicht ermittelbar)"
-        return "Enterprise Value nicht verfügbar (Cash nicht ermittelbar)"
+            return "Enterprise Value nicht verfügbar (Total Debt nicht ermittelbar)", "ev_unavailable_debt"
+        return "Enterprise Value nicht verfügbar (Cash nicht ermittelbar)", "ev_unavailable_cash"
+
+    def _exclude(name: str, reason: str, code: str) -> None:
+        excluded_reasons[name] = reason
+        excluded_codes[name] = code
 
     def _ev_multiple(name: str, denominator: float | None, denominator_label: str) -> float | None:
         if ev is None:
-            excluded_reasons[name] = _ev_missing_reason()
+            _exclude(name, *_ev_missing_reason())
             return None
         if denominator is None:
-            excluded_reasons[name] = f"{denominator_label} nicht verfügbar"
+            _exclude(name, f"{denominator_label} nicht verfügbar", "denominator_unavailable")
             return None
         if denominator <= 0:
-            excluded_reasons[name] = f"{denominator_label} <= 0, Multiple nicht aussagekräftig"
+            _exclude(name, f"{denominator_label} <= 0, Multiple nicht aussagekräftig", "denominator_not_positive")
             return None
         if ev <= 0:
-            excluded_reasons[name] = "Enterprise Value <= 0, Multiple nicht aussagekräftig"
+            _exclude(name, "Enterprise Value <= 0, Multiple nicht aussagekräftig", "ev_not_positive")
             return None
         return ev / denominator
 
@@ -73,11 +79,11 @@ def compute_multiples(metrics: CompanyMetrics) -> CompanyMultiples:
 
     pe: float | None = None
     if metrics.market is None:
-        excluded_reasons["pe"] = "Marktdaten (Market Cap) nicht verfügbar"
+        _exclude("pe", "Marktdaten (Market Cap) nicht verfügbar", "market_unavailable")
     elif metrics.net_income is None:
-        excluded_reasons["pe"] = "Net Income nicht verfügbar"
+        _exclude("pe", "Net Income nicht verfügbar", "net_income_unavailable")
     elif metrics.net_income <= 0:
-        excluded_reasons["pe"] = "Net Income <= 0, Multiple nicht aussagekräftig"
+        _exclude("pe", "Net Income <= 0, Multiple nicht aussagekräftig", "net_income_not_positive")
     else:
         pe = metrics.market.market_cap / metrics.net_income
 
@@ -88,6 +94,7 @@ def compute_multiples(metrics: CompanyMetrics) -> CompanyMultiples:
         ev_ebit=ev_ebit,
         pe=pe,
         excluded_reasons=excluded_reasons,
+        excluded_codes=excluded_codes,
         ev_multiples_are_lower_bound=metrics.enterprise_value_is_lower_bound,
     )
 

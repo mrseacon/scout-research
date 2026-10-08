@@ -110,3 +110,34 @@ def test_compute_multiple_statistics_all_excluded_returns_none_stats() -> None:
     assert stats.mean is None
     assert stats.max is None
     assert stats.excluded_tickers == ["A"]
+
+
+# --- E4: maschinenlesbare Ausschlussgründe --------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "overrides,expected",
+    [
+        ({"ebit": -50.0}, {"ev_ebit": "denominator_not_positive"}),
+        ({"ebitda": None}, {"ev_ebitda": "denominator_unavailable"}),
+        ({"net_income": -1.0}, {"pe": "net_income_not_positive"}),
+        ({"net_income": None}, {"pe": "net_income_unavailable"}),
+        ({"total_debt": None}, {n: "ev_unavailable_debt" for n in ("ev_revenue", "ev_ebitda", "ev_ebit")}),
+        ({"cash": None}, {n: "ev_unavailable_cash" for n in ("ev_revenue", "ev_ebitda", "ev_ebit")}),
+        (
+            {"has_market": False},
+            {**{n: "ev_unavailable_market" for n in ("ev_revenue", "ev_ebitda", "ev_ebit")}, "pe": "market_unavailable"},
+        ),
+    ],
+)
+def test_excluded_codes_match_excluded_reasons(overrides: dict, expected: dict) -> None:
+    multiples = compute_multiples(make_metrics(**overrides))
+    assert multiples.excluded_codes == expected
+    assert multiples.excluded_codes.keys() == multiples.excluded_reasons.keys()
+
+
+def test_historical_period_excludes_everything_with_one_code() -> None:
+    metrics = make_metrics().model_copy(update={"is_historical": True})
+    multiples = compute_multiples(metrics)
+    assert set(multiples.excluded_codes.values()) == {"historical_period"}
+    assert len(multiples.excluded_codes) == 4

@@ -20,6 +20,7 @@ Kandidaten dort fehlen. Je Firma zählt der Eintrag des Konzepts mit der höchst
 
 from __future__ import annotations
 
+import math
 from datetime import date
 from typing import Literal
 
@@ -28,6 +29,9 @@ from pydantic import BaseModel
 from scout_research.data.edgar_client import EdgarClient, EdgarDataNotFound, FrameEntry
 from scout_research.domain.metrics import REVENUE_CONCEPTS
 from scout_research.domain.periods import derive_calendar_year
+
+MAX_PEER_CANDIDATES = 40
+"""Höchstzahl der Kandidaten, die ein Tool an das Modell gibt (Phase-3-Plan, `find_peer_candidates`)."""
 
 REVENUE_FRAME_CONCEPT = REVENUE_CONCEPTS[0]
 """Konzept mit höchster Priorität; seine Frame-Einträge gewinnen, wenn eine Firma in mehreren vorkommt."""
@@ -103,6 +107,8 @@ class PeerSearchCounts(BaseModel):
     outside_size_range: int
     returned: int
     frames_loaded: list[str]
+    sic_search_truncated: bool = False
+    """True, wenn die SIC-Suche am Seitenlimit endete: `sic_matches` ist dann eine Untergrenze."""
 
 
 class PeerSearchResult(BaseModel):
@@ -115,6 +121,7 @@ class SicSearchOutcome(BaseModel):
     candidates: list[CandidateCompany]
     sic_matches: int
     without_ticker: int
+    search_truncated: bool = False
 
 
 def resolve_calendar_year(
@@ -143,7 +150,8 @@ def search_sic_candidates(client: EdgarClient, sic_code: str, exclude_cik: str) 
     """Alle aktuell filenden Unternehmen mit gegebenem SIC-Code, außer dem Zielunternehmen selbst.
     Kandidaten ohne Ticker (nicht öffentlich handelbar, z. B. reine Bond-Registranten) werden übersprungen —
     sie eignen sich ohnehin nicht als Comps-Peer (keine Marktdaten) — aber mitgezählt."""
-    sic_matches = client.search_companies_by_sic(sic_code)
+    page = client.search_companies_by_sic_paged(sic_code)
+    sic_matches = page.candidates
     cik_to_ticker = client.get_cik_to_ticker_map()
 
     candidates: list[CandidateCompany] = []
@@ -162,7 +170,12 @@ def search_sic_candidates(client: EdgarClient, sic_code: str, exclude_cik: str) 
         ticker, name = entry
         candidates.append(CandidateCompany(cik=match.cik, ticker=ticker, name=name, sic_code=match.sic_code))
 
-    return SicSearchOutcome(candidates=candidates, sic_matches=len(seen_ciks), without_ticker=without_ticker)
+    return SicSearchOutcome(
+        candidates=candidates,
+        sic_matches=len(seen_ciks),
+        without_ticker=without_ticker,
+        search_truncated=page.truncated,
+    )
 
 
 def find_sic_candidates(client: EdgarClient, sic_code: str, exclude_cik: str) -> list[CandidateCompany]:
@@ -268,5 +281,17 @@ def find_peer_candidates(
             outside_size_range=size.outside_size_range,
             returned=len(size.candidates),
             frames_loaded=size.frames_loaded,
+            sic_search_truncated=sic.search_truncated,
         ),
     )
+
+
+def rank_candidates(
+    candidates: list[PeerCandidate], limit: int = MAX_PEER_CANDIDATES
+) -> tuple[list[PeerCandidate], int]:
+    """Sortiert nach Größenähnlichkeit und kürzt: aufsteigend nach `|ln size_ratio|` (0,5× und 2× sind gleich weit
+    vom Ziel), bei Gleichstand nach Ticker, dann CIK. Gibt die ersten `limit` und die Zahl der abgeschnittenen
+    Kandidaten zurück. Deterministisch und unabhängig von der Trefferreihenfolge der SIC-Suche."""
+    ordered = sorted(candidates, key=lambda c: (abs(math.log(c.size_ratio)) if c.size_ratio > 0 else math.inf, c.ticker, c.cik))
+    kept = ordered[:limit]
+    return kept, len(ordered) - len(kept)

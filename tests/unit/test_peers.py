@@ -350,3 +350,44 @@ def test_sic_search_empty_first_page_is_not_truncated() -> None:
     with _client(lambda request: httpx.Response(200, text="<feed></feed>")) as client:
         page = client.search_companies_by_sic_paged("7372")
     assert page.candidates == [] and page.truncated is False
+
+
+# --- Sortierung und Kürzung für das Tool (Phase-3-Plan, find_peer_candidates) -----------------------------------
+
+
+def _pc(ticker: str, ratio: float, cik: str | None = None):
+    from scout_research.domain.peers import PeerCandidate
+
+    return PeerCandidate(
+        cik=cik or f"{abs(hash(ticker)) % 10**9:010d}", ticker=ticker, name=ticker, sic_code="7372",
+        revenue=ratio * 1000.0, size_ratio=ratio, calendar_year_used=2025, revenue_concept="Revenues",
+        revenue_period_end="2025-12-31", revenue_accession_number="x",
+    )
+
+
+def test_rank_candidates_sorts_by_log_distance_so_half_and_double_are_equidistant() -> None:
+    from scout_research.domain.peers import rank_candidates
+
+    candidates = [_pc("FAR", 4.0), _pc("TWO", 2.0), _pc("HALF", 0.5), _pc("NEAR", 1.1), _pc("SMALL", 0.25)]
+    ranked, truncated = rank_candidates(candidates)
+
+    assert [c.ticker for c in ranked] == ["NEAR", "HALF", "TWO", "FAR", "SMALL"]  # 0,5 = 2 und 0,25 = 4: Gleichstand nach Ticker
+    assert truncated == 0
+
+
+def test_rank_candidates_cuts_to_the_limit_and_counts_the_cut() -> None:
+    from scout_research.domain.peers import MAX_PEER_CANDIDATES, rank_candidates
+
+    assert MAX_PEER_CANDIDATES == 40
+    candidates = [_pc(f"T{i:03d}", 1.0 + i / 100.0, cik=f"{i:010d}") for i in range(55)]
+    ranked, truncated = rank_candidates(candidates)
+
+    assert len(ranked) == 40 and truncated == 15
+    assert ranked[0].ticker == "T000" and ranked[-1].ticker == "T039"  # die nächsten bleiben, die fernsten fallen weg
+
+
+def test_rank_candidates_is_independent_of_input_order() -> None:
+    from scout_research.domain.peers import rank_candidates
+
+    candidates = [_pc("B", 1.5, cik="0000000002"), _pc("A", 1.5, cik="0000000001"), _pc("C", 0.9, cik="0000000003")]
+    assert rank_candidates(candidates) == rank_candidates(list(reversed(candidates)))

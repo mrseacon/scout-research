@@ -171,3 +171,41 @@ def test_run_quality_checks_combines_all_checks() -> None:
     assert "MISMATCH" in companies_warned
     assert "INCOMPLETE" in companies_warned
     assert len(warnings) > 0
+
+
+# --- E4: jede Warnung trägt Art und Parameter für den Tool-Layer ---------------------------------------------
+
+
+def test_every_warning_kind_is_set_and_carries_its_parameters() -> None:
+    target = make_metrics(ticker="TGT", period_end="2025-12-31")
+    peers = [
+        make_metrics(ticker="MIS", cik="0000000002", period_end="2025-06-30"),
+        make_metrics(ticker="OLD", cik="0000000003", period_end="2024-12-31", ebit=None),
+        make_metrics(ticker="DBT", cik="0000000004", total_debt_is_lower_bound=True),
+    ]
+    peer_multiples = [compute_multiples(p) for p in peers]
+
+    warnings = run_quality_checks(target, peers, peer_multiples)
+
+    assert all(w.kind for w in warnings)
+    by_kind = {w.kind: w for w in warnings if w.company in ("MIS", "OLD", "DBT")}
+    assert by_kind["fiscal_year_mismatch"].params["offset_days"] == folded_offset_days(
+        date(2025, 6, 30), date(2025, 12, 31)
+    )
+    assert by_kind["stale_period"].params["gap_days"] == 365
+    assert by_kind["missing_data"].params == {"field": "ebit"}
+    assert by_kind["debt_lower_bound"].params["ev_available"] is True
+    assert any(w.kind == "too_few_datapoints" for w in warnings)
+
+
+def test_outlier_warning_has_direction_and_fences() -> None:
+    peer_multiples = [
+        _pe_multiples("A", price=100.0, shares=10.0, net_income=100.0),
+        _pe_multiples("B", price=110.0, shares=10.0, net_income=100.0),
+        _pe_multiples("C", price=95.0, shares=10.0, net_income=100.0),
+        _pe_multiples("D", price=1000.0, shares=10.0, net_income=100.0),
+    ]
+    (warning,) = check_outliers(peer_multiples, "pe")
+    assert warning.kind == "outlier"
+    assert warning.params["direction"] == "above" and warning.params["multiple"] == "pe"
+    assert warning.params["upper_fence"] < warning.params["value"]

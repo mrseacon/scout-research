@@ -95,6 +95,12 @@ class QualityWarning(BaseModel):
     """Ticker oder 'target' — welches Unternehmen betroffen ist."""
     message: str
     affected_field: str | None
+    kind: str | None = None
+    """Maschinenlesbare Art der Warnung (z. B. `fiscal_year_mismatch`). Der Tool-Layer baut daraus Texte ohne
+    Zahlen für das Modell (Phase 3, E4); `message` bleibt der ausführliche Text für die feste Warnungsliste."""
+    params: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    """Parameter zur Art, ggf. numerisch (Abstand in Tagen, Spannbreite) — nur der Tool-Layer entscheidet, was
+    davon ein Modell sieht."""
 
 
 class CompanyMultiples(BaseModel):
@@ -114,6 +120,8 @@ class CompanyMultiples(BaseModel):
     ev_ebit: float | None
     pe: float | None
     excluded_reasons: dict[str, str]
+    excluded_codes: dict[str, str] = Field(default_factory=dict)
+    """Maschinenlesbarer Ausschlussgrund je Multiple (gleiche Schlüssel wie `excluded_reasons`)."""
     ev_multiples_are_lower_bound: bool = False
     """True, wenn EV/Revenue, EV/EBITDA und EV/EBIT auf einer Untergrenze der Gesamtschuld
     beruhen (der wahre Wert ist ≥ dem gezeigten). P/E ist nie betroffen."""
