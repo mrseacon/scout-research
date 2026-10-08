@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
+import re
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -79,6 +81,39 @@ def _get_with_retry(
     raise last_error  # type: ignore[misc]
 
 
+class MarketDataUnavailable(httpx.HTTPError):
+    """Bereinigter Fehler eines Kursanbieters (Netz, Timeout oder HTTP-Status).
+
+    **Sicherheit:** Der Finnhub-Key steht im Query-String der URL, und die URL steckt in jeder rohen httpx-
+    Ausnahme. Dieser Fehler trägt deshalb nur Anbieter und Statuscode — keine URL, keinen Token, keine
+    angehängte httpx-Ausnahme (weder `__cause__` noch `__context__`). Er bleibt eine Unterklasse von
+    `httpx.HTTPError`, damit `CachedProvider` ihn wie bisher in die Fallback-Kaskade übersetzt."""
+
+    def __init__(self, provider: str, status_code: int | None = None) -> None:
+        reason = f"HTTP {status_code}" if status_code is not None else "Netzwerkfehler oder Timeout"
+        super().__init__(f"{provider}-Abruf fehlgeschlagen ({reason})")
+        self.provider = provider
+        self.status_code = status_code
+
+
+_SECRET_QUERY_PARAM = re.compile(r"(?i)\b(token|apikey|api_key)=[^&\s\"']+")
+
+
+class _RedactSecretsFilter(logging.Filter):
+    """httpx loggt jede Anfrage mit vollständiger URL ("HTTP Request: GET https://...?token=KEY ..."). Der Filter
+    ersetzt Geheimnis-Parameter, bevor ein Handler den Eintrag sieht."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = _SECRET_QUERY_PARAM.sub(r"\1=<redacted>", message)
+        if redacted != message:
+            record.msg, record.args = redacted, None
+        return True
+
+
+logging.getLogger("httpx").addFilter(_RedactSecretsFilter())
+
+
 class PriceQuote(BaseModel):
     ticker: str
     price: float
@@ -115,13 +150,23 @@ class FinnhubProvider:
         self._sleep = sleep
 
     def get_price(self, ticker: str) -> PriceQuote | None:
-        response = _get_with_retry(
-            self._client,
-            self.BASE_URL,
-            params={"symbol": ticker.upper(), "token": self._api_key},
-            rate_limiter=self._rate_limiter,
-            sleep=self._sleep,
-        )
+        # Fehler werden außerhalb des except-Blocks neu geworfen: so hängt weder __cause__ noch __context__
+        # die rohe httpx-Ausnahme an (deren Meldung die URL mit dem Token enthält).
+        failure: MarketDataUnavailable | None = None
+        try:
+            response = _get_with_retry(
+                self._client,
+                self.BASE_URL,
+                params={"symbol": ticker.upper(), "token": self._api_key},
+                rate_limiter=self._rate_limiter,
+                sleep=self._sleep,
+            )
+        except httpx.HTTPStatusError as exc:
+            failure = MarketDataUnavailable("Finnhub", exc.response.status_code)
+        except httpx.HTTPError:
+            failure = MarketDataUnavailable("Finnhub")
+        if failure is not None:
+            raise failure
         data = response.json()
 
         price = data.get("c")

@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.4 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.5 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -434,9 +434,17 @@ Tool-Layer.
 | L2 | `HistoricalValuationNotSupported` | `HISTORICAL_VALUATION_NOT_SUPPORTED` | nein |
 | L2 | `FrameYearUnresolved` | `FRAME_YEAR_UNRESOLVED` | nein |
 
-**Sicherheit:** Fehlerobjekte, Meldungen, Logs und Traces enthalten keine Request-Header — nie den User-Agent
-mit Name und E-Mail — und keine API-Keys; EDGAR-Fehler tragen nur Endpunkt-Pfad und Statuscode und hängen die
-ursprüngliche httpx-Ausnahme nicht an (`tests/unit/test_edgar_errors.py`).
+**Sicherheit (Regel für alle Fehlerobjekte, Meldungen, Logs und Traces):** Sie enthalten keine Request-Header —
+nie den User-Agent mit Name und E-Mail — und keine API-Keys.
+- *EDGAR:* Fehler tragen nur Endpunkt-Pfad und Statuscode und hängen die ursprüngliche httpx-Ausnahme nicht an
+  (`tests/unit/test_edgar_errors.py`).
+- *Finnhub (v1.6.5):* Der Key steht als `token=` im Query-String, und die URL steckt in jeder rohen httpx-
+  Ausnahme. `FinnhubProvider.get_price` wirft deshalb `MarketDataUnavailable` (Unterklasse von
+  `httpx.HTTPError`, damit `CachedProvider` unverändert funktioniert) mit nur Anbieter und Statuscode — ohne URL,
+  ohne Token, ohne `__cause__`/`__context__`. Zusätzlich schwärzt ein Log-Filter am `httpx`-Logger Parameter
+  `token=`/`apikey=` in den Anfragezeilen, die httpx auf INFO-Ebene mit vollständiger URL schreibt
+  (`tests/unit/test_market_provider_secrets.py`). Der Header-Weg (`X-Finnhub-Token`) wurde bewusst nicht gewählt.
+- *Anthropic:* Der Key geht ausschließlich im Header und nie in Fehlertexte oder Traces (Phase-3-Plan, Trace).
 
 **Peer-Suche (Schritt 3):** Der Größenfilter nutzt alle vier Umsatz-Konzepte der Kette, lazy (das Konzept
 höchster Priorität zuerst, weitere nur für noch fehlende Kandidaten; je Firma gewinnt die höchste Priorität) und
@@ -1153,7 +1161,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.2 | 2026-10-08 | Phase 3, Schritt 2: D9 in L2 umgesetzt (`PeriodSelector`, `PeriodNotAvailable`, `HistoricalValuationNotSupported`, `calendar_year` mit Frame-Prüfung, ein Filing je Periode, erstes Filing gewinnt; 7.3/7.3.1). Golden-Set-Seed (5 Firmen) eingetragen; vier bekannte Abweichungen zum Seed dokumentiert und offen (`tests/unit/test_golden_reproduction.py`). |
 | 1.6.3 | 2026-10-08 | Golden-Set: §11.4 neu (Seed, `known_deviations`, vier entschiedene Fälle: ADSK `total_debt` und CDNS-Untergrenze als gepinnte Abweichungen, NVDA-Shares mit `tolerance_abs`, MSFT `d_and_a` als nicht ausgewiesen); §7.3.1: spätere Restatements werden nicht berücksichtigt. Kein Extraktor-Hack, D10/D12 unverändert. |
 | 1.6.4 | 2026-10-08 | Phase 3, Schritt 3 (Daten-Härtung): Periodenprüfung nach Tagen statt Monat (gefalteter Abstand ±14 Tage → "Fiskaljahresende weicht ab"; Peer-Ende ≥ 300 Tage vor dem Ziel → "veraltetes 10-K"; nur Warnungen; D3-Zeile); Größenfilter über alle Umsatz-Konzepte (lazy, Zähler) und Fix `resolve_calendar_year` (Frame des Anker-Konzepts); Frames-Cache (SQLite, 7 Tage); typisierte EDGAR-Fehler inkl. neuem Code `DATA_NOT_FOUND` (7.3.2); keine Header/Keys in Fehlern. |
+| 1.6.5 | 2026-10-08 | Sicherheit: Finnhub-Fehler bereinigt (`MarketDataUnavailable` ohne URL/Token/Ausnahmekette) und httpx-Anfragezeilen im Log geschwärzt — vorher stand der API-Key in `str`/`repr` des Fehlers und in INFO-Logzeilen von httpx (Befund aus Schritt 3; nicht erreichbar, solange `CachedProvider` Fehler verschluckt). Sicherheits-Absatz in 7.3.2 erweitert. |
 
 ---
 
-*Ende Dokumentversion 1.6.4*
+*Ende Dokumentversion 1.6.5*
