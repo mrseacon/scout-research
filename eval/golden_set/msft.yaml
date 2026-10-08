@@ -2,8 +2,9 @@
 # Gepinnt an period_end UND accession_number des 10-K, nicht an "jüngstes 10-K".
 # Werte so eingetragen, wie sie im 10-K stehen; `unit` gibt die Einheit an (millions | thousands | units),
 # die Umrechnung in USD macht eval/golden_seed.py exakt. Ist ein Wert im 10-K nicht ausgewiesen, steht statt
-# `value` ein `absent_reason`. Optional `tolerance` (in der Einheit des Eintrags) für Werte, die das Filing
-# nur gerundet nennt. Quellen: Abschlüsse selbst (GuV, Bilanz, Kapitalflussrechnung, Schuldennote, Deckblatt),
+# `value` ein `absent_reason`. Optional `tolerance_abs` (absolut, in der Einheit des Eintrags) für Werte, die
+# das Filing nur gerundet nennt. `known_deviations` pinnt bekannte Abweichungen des Extraktors (siehe
+# Foundation Doc 11.4). Quellen: Abschlüsse selbst (GuV, Bilanz, Kapitalflussrechnung, Schuldennote, Deckblatt),
 # nicht companyfacts, nicht R-Seiten, nicht der Extraktor.
 status: complete
 ticker: MSFT
@@ -41,15 +42,15 @@ values:
     unit: millions
     source: "10-K FY2026, Bilanz: Cash and cash equivalents"
   d_and_a:
-    value: 38534
-    unit: millions
-    source: "10-K FY2026, Kapitalflussrechnung: Depreciation, amortization, and other"
+    absent_reason: "Kein Gesamtposten D&A. Kapitalflussrechnung nennt 'Depreciation, amortization, and other' 38534 (enthält Sonstiges; Teilposten 34300+4700=39000 stimmen nicht überein)"
+    source: "10-K FY2026, Kapitalflussrechnung: Depreciation, amortization, and other (38534 Mio., Referenz — kein reines D&A)"
   shares_outstanding:
     value: 7425545491
     unit: units
     source: "10-K FY2026, Deckblatt (Stand 2026-07-23)"
 notes: |
-  d_and_a: Das Label lautet "Depreciation, amortization, and other" und enthält "other" — kein reines D&A.
-  Ein abweichender Extraktorwert dafür ist ein Definitionsunterschied (Klasse a).
+  d_and_a: Referenzwert 38534 Mio. (Kapitalflussrechnung, "Depreciation, amortization, and other"); das Label enthält
+  "other", es ist kein reines D&A und es gibt keinen Gesamtposten. Der Extraktor liefert None (D12) — das ist korrekt
+  und keine Abweichung (Entscheidung Sean, 2026-10-08).
   Operating Lease Liabilities gesamt 21925, Total finance lease liabilities 66594 (beide NICHT in total_debt).
   Dadurch liegt total_debt ohne Leasing deutlich unter einer Definition mit Leasing.

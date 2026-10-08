@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.2 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.3 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -369,7 +369,9 @@ Optionaler Parameter `period` an `get_financials` und `compute_comps_table` (fü
 - **Ein Filing je Periode:** Alle Fakten einer Periode stammen aus dem 10-K, das den Umsatz-Anker liefert.
   Steht eine Periode in mehreren 10-Ks (Original und spätere Vergleichswerte, ggf. korrigiert), gilt das
   **zuerst eingereichte** (10-K des Berichtsjahres); ein Wert, den dieses 10-K nicht enthält, gilt als
-  nicht vorhanden und wird nicht aus einem späteren Filing aufgefüllt.
+  nicht vorhanden und wird nicht aus einem späteren Filing aufgefüllt. **Spätere Restatements (korrigierte
+  Vergleichswerte in Folge-10-Ks) werden nicht berücksichtigt** — bestätigt Sean, 2026-10-08. Für die
+  jüngste Periode ist das folgenlos (es gibt kein späteres 10-K).
 - **Historische Perioden** (nicht die jüngste): `CompanyMetrics.is_historical = True`, kein Kurs, keine
   Marktkapitalisierung, kein EV; `compute_multiples` weist alle Multiples mit Grund aus;
   `build_comps_table` wirft `HistoricalValuationNotSupported` (Code `HISTORICAL_VALUATION_NOT_SUPPORTED`).
@@ -835,6 +837,32 @@ alle folgenden Änderungen dagegen messbar werden.
 - **Agent-Level (L4):** Golden-Set-Läufe, manuell bewertet + automatisierte Metriken.
 - **Regression:** Golden Set läuft vor jedem größeren Merge.
 
+### 11.4 Golden-Set-Seed und bekannte Abweichungen (Stand 2026-10-08)
+
+**Seed.** `eval/golden_set/{aapl,msft,nvda,adsk,cdns}.yaml`: von Hand gegen die Abschlüsse der 10-Ks geprüfte
+Werte (GuV, Bilanz, Kapitalflussrechnung, Schuldennote, Deckblatt) — nicht aus `companyfacts`, nicht aus
+R-Seiten, nicht aus dem Extraktor. Der Seed ist das Messlineal und an `period_end` und Accession des 10-K
+gepinnt, nie an "jüngstes 10-K". Einheit: Millionen USD (Shares: Stück; CDNS berichtet in Tausend, der Seed
+führt Millionen). `total_debt` = ausgewiesene Finanzschulden ohne Leasing, `cash` = nur "Cash and cash
+equivalents" (Marketable Securities und Leasingverbindlichkeiten stehen in `notes`). CDNS prüft nur `total_debt`.
+Vergleich: `python eval/seed_compare.py`; Test: `tests/unit/test_golden_reproduction.py` (Toleranz 0, außer
+Seed-Feld `tolerance_abs`).
+
+**Bekannte Abweichungen** werden nicht weggetestet, sondern im Seed unter `known_deviations` je Feld mit
+`seed_value`, `expected_extractor_value`, `class` (a Definitionsunterschied, b Extraktorfehler, c möglicher
+Seedfehler) und `reason` gepinnt. Der Test schlägt an, wenn der Extraktor vom Pin abweicht — wird die
+Abweichung behoben, ist der Eintrag zu entfernen; ändert sich der Wert, ist neu zu bewerten.
+
+| Firma, Feld | Seed | Extraktor | Behandlung |
+|---|---|---|---|
+| ADSK `total_debt` | 2.483 Mio. (Buchwert, Bilanz) | 2.500 Mio. | **Bekannte Abweichung, Klasse (a).** ADSK taggt den Nominalwert unter `us-gaap:LongTermDebt`, dessen Definition den Buchwert ("after unamortized discount") verlangt; der Buchwert steckt in `LongTermNotesPayable`. Kein Fallback auf ein anderes Konzept (Sean, 2026-10-08). |
+| CDNS `total_debt_is_lower_bound` | false | true | **Bekannte Abweichung, Klasse (a).** Wert stimmt; D10 markiert `UnsecuredLongTermDebt` als Untergrenze, weil der kurzfristige Anteil nicht gemeldet ist. Der Seed weiß aus dem 10-K, dass es keinen gibt. D10-Logik unverändert. |
+| NVDA `shares_outstanding` | 24.304 Mio. (Bilanz) | 24,3 Mrd. (Deckblatt) | **Keine Abweichung:** Seed-Feld `tolerance_abs` = 50 Mio., weil das Deckblatt auf 0,1 Mrd. gerundet ist. |
+| MSFT `d_and_a` | nicht ausgewiesen (`absent_reason`) | `None` | **Keine Abweichung.** Kein Gesamtposten D&A; die Kapitalflussrechnung nennt "Depreciation, amortization, and other" 38.534 Mio. (enthält Sonstiges), die Teilposten (34.300 + 4.700 = 39.000) stimmen nicht überein. Der Wert steht als Referenz in `notes`; `None` ist korrekt (D12). |
+
+Außerdem gilt für ADSK `shares_outstanding` eine Toleranz von ±1 Mio. (Deckblatt nur auf Mio. gerundet) und
+für ADSK `d_and_a` ("Depreciation, amortization, and accretion") stimmen Seed und Extraktor überein.
+
 ---
 
 ## 12. Roadmap
@@ -1096,7 +1124,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6 | 2026-10-05 | **Strategische Ausrichtung** als 1.4 eingefügt: Scout ist Zuarbeiter für Private Equity und Deal-Analyse (Valuation, Transaction Advisory), kein Consulting-Framework-Werkzeug; Bausteinfolge (Comps → Precedent Transactions, DCF, LBO-/Returns-Screening → optional Due-Diligence-Support), Prinzipien je Baustein, Consulting-One-Pager als Ausgabeform nach Phase 4, Abgrenzung zu Arcticon (MCP-Server nach Phase 5). Widersprüche abgeglichen: §1.3 Punkt 4, §4 (Precedent/DCF nicht mehr "v2/v3", neue strategische Nicht-Ziele), §8.5, Roadmap "Danach" (Memo-Entwurfsmodul entfällt), §13 Risiko Scope Creep, §14.1 Positionierung. **Neu offen:** D13 (Reihenfolge nach den Comps), D14 (Format One-Pager), D15 (MCP-Server/Arcticon). Kein Code geändert. |
 | 1.6.1 | 2026-10-05 | Phase 3, Schritt 1: Stooq-Reste bereinigt (§8.3 D1-Überschrift, §9 Tech-Stack, §13 D1) — Stooq ist kein Fallback mehr, sondern ein deaktivierter Platzhalter (D7). Neue Config-Felder `anthropic_model` (Default `claude-sonnet-5-5`), `anthropic_compare_model`, `anthropic_effort`, `output_language`; Extra `agent` mit `anthropic>=1,<2`; pytest-Marker `live`. Plan: `docs/decisions/phase-3-plan.md`. |
 | 1.6.2 | 2026-10-08 | Phase 3, Schritt 2: D9 in L2 umgesetzt (`PeriodSelector`, `PeriodNotAvailable`, `HistoricalValuationNotSupported`, `calendar_year` mit Frame-Prüfung, ein Filing je Periode, erstes Filing gewinnt; 7.3/7.3.1). Golden-Set-Seed (5 Firmen) eingetragen; vier bekannte Abweichungen zum Seed dokumentiert und offen (`tests/unit/test_golden_reproduction.py`). |
+| 1.6.3 | 2026-10-08 | Golden-Set: §11.4 neu (Seed, `known_deviations`, vier entschiedene Fälle: ADSK `total_debt` und CDNS-Untergrenze als gepinnte Abweichungen, NVDA-Shares mit `tolerance_abs`, MSFT `d_and_a` als nicht ausgewiesen); §7.3.1: spätere Restatements werden nicht berücksichtigt. Kein Extraktor-Hack, D10/D12 unverändert. |
 
 ---
 
-*Ende Dokumentversion 1.6.2*
+*Ende Dokumentversion 1.6.3*

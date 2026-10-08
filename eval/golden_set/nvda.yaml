@@ -2,8 +2,9 @@
 # Gepinnt an period_end UND accession_number des 10-K, nicht an "jüngstes 10-K".
 # Werte so eingetragen, wie sie im 10-K stehen; `unit` gibt die Einheit an (millions | thousands | units),
 # die Umrechnung in USD macht eval/golden_seed.py exakt. Ist ein Wert im 10-K nicht ausgewiesen, steht statt
-# `value` ein `absent_reason`. Optional `tolerance` (in der Einheit des Eintrags) für Werte, die das Filing
-# nur gerundet nennt. Quellen: Abschlüsse selbst (GuV, Bilanz, Kapitalflussrechnung, Schuldennote, Deckblatt),
+# `value` ein `absent_reason`. Optional `tolerance_abs` (absolut, in der Einheit des Eintrags) für Werte, die
+# das Filing nur gerundet nennt. `known_deviations` pinnt bekannte Abweichungen des Extraktors (siehe
+# Foundation Doc 11.4). Quellen: Abschlüsse selbst (GuV, Bilanz, Kapitalflussrechnung, Schuldennote, Deckblatt),
 # nicht companyfacts, nicht R-Seiten, nicht der Extraktor.
 status: complete
 ticker: NVDA
@@ -47,9 +48,11 @@ values:
   shares_outstanding:
     value: 24304000000
     unit: units
+    tolerance_abs: 50000000   # Deckblatt (dei) nur auf 0,1 Mrd. gerundet = +-50 Mio.
     source: "10-K FY2026, Bilanz: 24304 Mio. Aktien zum 2026-01-25 (NICHT Deckblatt)"
 notes: |
   shares_outstanding: Quelle ist die BILANZ (24304 Mio. Aktien zum 2026-01-25), nicht das Deckblatt. Das Deckblatt nennt
-  nur "24,3 billion" (Stand 2026-02-20). Abweichungen zur Deckblattzahl sind ein Quellen-/Rundungsunterschied (Klasse a).
+  nur "24,3 billion" (Stand 2026-02-20). Der Extraktor liest das Deckblatt (dei); die Differenz ist ein
+  Quellen-/Rundungsunterschied und liegt innerhalb tolerance_abs (50 Mio.), also keine Abweichung (Entscheidung Sean, 2026-10-08).
   Marketable securities 51951 (nicht in cash). Langfristige Operating-Lease-Verbindlichkeiten 2572 (nicht in total_debt).
   Commercial paper: keine ausstehend.

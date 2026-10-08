@@ -99,14 +99,72 @@ def validate_seed(data: dict) -> list[str]:
                 problems.append(f"values.{name}.value muss eine Zahl sein (kein Text, keine Tausenderpunkte)")
             if entry.get("unit") not in UNIT_FACTORS:
                 problems.append(f"values.{name}.unit muss einer von {tuple(UNIT_FACTORS)} sein")
-        tolerance = entry.get("tolerance")
+        tolerance = entry.get("tolerance_abs")
         if tolerance is not None and (isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)) or tolerance < 0):
-            problems.append(f"values.{name}.tolerance muss eine Zahl >= 0 sein (in der Einheit des Eintrags)")
+            problems.append(f"values.{name}.tolerance_abs muss eine Zahl >= 0 sein (in der Einheit des Eintrags)")
         source = entry.get("source")
         if _is_blank(source) or _PLACEHOLDER.search(str(source)):
             problems.append(f"values.{name}.source fehlt oder ist noch ein Platzhalter")
         if name == "total_debt" and not _is_blank(value) and not isinstance(entry.get("is_lower_bound"), bool):
             problems.append("values.total_debt.is_lower_bound muss true oder false sein")
+    problems += _validate_known_deviations(data)
+    return problems
+
+
+DEVIATION_CLASSES = ("a", "b", "c")
+FLAG_FIELD = "total_debt_is_lower_bound"
+_DEVIATION_KEYS = ("seed_value", "expected_extractor_value", "class", "reason")
+
+
+def _validate_known_deviations(data: dict) -> list[str]:
+    """`known_deviations` pinnt bekannte Abweichungen des Extraktors vom Seed. Je Feld: `seed_value` (muss dem
+    Seed-Wert entsprechen), `expected_extractor_value` (muss davon abweichen), `class` (a Definitions-
+    unterschied, b Extraktorfehler, c möglicher Seedfehler), `reason`. Zahlen stehen in der Einheit des
+    Feldes (`unit`); für `total_debt_is_lower_bound` sind es Wahrheitswerte."""
+    deviations = data.get("known_deviations")
+    if deviations is None:
+        return []
+    if not isinstance(deviations, dict):
+        return ["known_deviations muss ein Mapping Feld -> Eintrag sein"]
+
+    problems: list[str] = []
+    values = data.get("values") or {}
+    for field, dev in deviations.items():
+        label = f"known_deviations.{field}"
+        is_flag = field == FLAG_FIELD
+        base = values.get("total_debt" if is_flag else field)
+        if not isinstance(base, dict):
+            problems.append(f"{label}: Feld kommt in values nicht vor")
+            continue
+        if not isinstance(dev, dict):
+            problems.append(f"{label} muss ein Mapping sein")
+            continue
+        for key in _DEVIATION_KEYS:
+            if _is_blank(dev.get(key)) and not (key in ("seed_value", "expected_extractor_value") and dev.get(key) is False):
+                problems.append(f"{label}.{key} fehlt")
+        if dev.get("class") not in DEVIATION_CLASSES:
+            problems.append(f"{label}.class muss einer von {DEVIATION_CLASSES} sein")
+        if any(key not in dev for key in ("seed_value", "expected_extractor_value")):
+            continue
+        seed_value, expected = dev["seed_value"], dev["expected_extractor_value"]
+        if is_flag:
+            if not isinstance(seed_value, bool) or not isinstance(expected, bool):
+                problems.append(f"{label}: seed_value und expected_extractor_value müssen true/false sein")
+            elif seed_value != base.get("is_lower_bound"):
+                problems.append(f"{label}.seed_value passt nicht zu values.total_debt.is_lower_bound")
+            elif seed_value == expected:
+                problems.append(f"{label}: expected_extractor_value gleicht seed_value — keine Abweichung")
+            continue
+        numeric = (
+            isinstance(seed_value, (int, float)) and not isinstance(seed_value, bool)
+            and isinstance(expected, (int, float)) and not isinstance(expected, bool)
+        )
+        if not numeric or _is_blank(base.get("value")):
+            problems.append(f"{label}: seed_value/expected_extractor_value müssen Zahlen sein (und das Feld einen Wert haben)")
+        elif Decimal(str(seed_value)) != Decimal(str(base["value"])):
+            problems.append(f"{label}.seed_value passt nicht zu values.{field}.value")
+        elif Decimal(str(expected)) == Decimal(str(seed_value)):
+            problems.append(f"{label}: expected_extractor_value gleicht seed_value — keine Abweichung")
     return problems
 
 
@@ -119,7 +177,7 @@ def to_usd(entry: dict) -> Decimal | None:
 
 def tolerance_usd(entry: dict) -> Decimal:
     """Zulässige absolute Abweichung (gleiche Einheit wie `to_usd`); 0, wenn der Eintrag keine nennt."""
-    return Decimal(str(entry.get("tolerance", 0))) * UNIT_FACTORS[entry["unit"]]
+    return Decimal(str(entry.get("tolerance_abs", 0))) * UNIT_FACTORS[entry["unit"]]
 
 
 def main() -> None:

@@ -70,8 +70,8 @@ def test_empty_skeleton_reports_every_missing_pin_and_value() -> None:
         (lambda d: d["values"]["revenue"].update(source="TODO: Seite"), "Platzhalter"),
         (lambda d: d["values"]["d_and_a"].update(value=5), "schließen sich aus"),
         (lambda d: d["values"]["total_debt"].pop("is_lower_bound"), "is_lower_bound"),
-        (lambda d: d["values"]["shares_outstanding"].update(tolerance=-1), "tolerance"),
-        (lambda d: d["values"]["shares_outstanding"].update(tolerance="1 Mio"), "tolerance"),
+        (lambda d: d["values"]["shares_outstanding"].update(tolerance_abs=-1), "tolerance_abs"),
+        (lambda d: d["values"]["shares_outstanding"].update(tolerance_abs="1 Mio"), "tolerance_abs"),
         (lambda d: d.update(status="done"), "status"),
     ],
 )
@@ -80,6 +80,57 @@ def test_each_defect_is_reported(mutate, expected: str) -> None:
     mutate(data)
 
     assert any(expected in p for p in validate_seed(data)), validate_seed(data)
+
+
+def _with_deviation(**overrides) -> dict:
+    data = copy.deepcopy(_complete())
+    data["known_deviations"] = {
+        "total_debt": {
+            "seed_value": 1234.5,
+            "expected_extractor_value": 1250,
+            "class": "a",
+            "reason": "Definitionsunterschied",
+            **overrides,
+        }
+    }
+    return data
+
+
+def test_known_deviation_is_valid_when_complete() -> None:
+    assert validate_seed(_with_deviation()) == []
+    data = _complete()
+    data["known_deviations"] = {
+        "total_debt_is_lower_bound": {"seed_value": False, "expected_extractor_value": True, "class": "a", "reason": "D10"}
+    }
+    assert validate_seed(data) == []
+
+
+@pytest.mark.parametrize(
+    "overrides,expected",
+    [
+        ({"class": "x"}, "class"),
+        ({"reason": ""}, "reason"),
+        ({"seed_value": 999}, "passt nicht zu values.total_debt.value"),
+        ({"expected_extractor_value": 1234.5}, "keine Abweichung"),
+        ({"expected_extractor_value": "viel"}, "Zahlen"),
+        ({"expected_extractor_value": None}, "expected_extractor_value fehlt"),
+    ],
+)
+def test_known_deviation_defects_are_reported(overrides: dict, expected: str) -> None:
+    assert any(expected in p for p in validate_seed(_with_deviation(**overrides))), validate_seed(
+        _with_deviation(**overrides)
+    )
+
+
+def test_known_deviation_for_unknown_field_or_wrong_flag_is_reported() -> None:
+    data = _complete()
+    data["known_deviations"] = {"gibt_es_nicht": {"seed_value": 1, "expected_extractor_value": 2, "class": "a", "reason": "x"}}
+    assert any("kommt in values nicht vor" in p for p in validate_seed(data))
+
+    data["known_deviations"] = {
+        "total_debt_is_lower_bound": {"seed_value": True, "expected_extractor_value": False, "class": "a", "reason": "x"}
+    }
+    assert any("passt nicht zu values.total_debt.is_lower_bound" in p for p in validate_seed(data))
 
 
 def test_partial_scope_only_requires_listed_values() -> None:
@@ -99,8 +150,8 @@ def test_to_usd_is_exact_and_handles_units() -> None:
 
 
 def test_tolerance_is_converted_with_the_unit_of_the_entry() -> None:
-    assert tolerance_usd({"unit": "units", "tolerance": 1_000_000}) == Decimal(1_000_000)
-    assert tolerance_usd({"unit": "millions", "tolerance": 0.5}) == Decimal(500_000)
+    assert tolerance_usd({"unit": "units", "tolerance_abs": 1_000_000}) == Decimal(1_000_000)
+    assert tolerance_usd({"unit": "millions", "tolerance_abs": 0.5}) == Decimal(500_000)
     assert tolerance_usd({"unit": "millions"}) == Decimal(0)
 
 

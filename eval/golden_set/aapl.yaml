@@ -2,8 +2,9 @@
 # Gepinnt an period_end UND accession_number des 10-K, nicht an "jüngstes 10-K".
 # Werte so eingetragen, wie sie im 10-K stehen; `unit` gibt die Einheit an (millions | thousands | units),
 # die Umrechnung in USD macht eval/golden_seed.py exakt. Ist ein Wert im 10-K nicht ausgewiesen, steht statt
-# `value` ein `absent_reason`. Optional `tolerance` (in der Einheit des Eintrags) für Werte, die das Filing
-# nur gerundet nennt. Quellen: Abschlüsse selbst (GuV, Bilanz, Kapitalflussrechnung, Schuldennote, Deckblatt),
+# `value` ein `absent_reason`. Optional `tolerance_abs` (absolut, in der Einheit des Eintrags) für Werte, die
+# das Filing nur gerundet nennt. `known_deviations` pinnt bekannte Abweichungen des Extraktors (siehe
+# Foundation Doc 11.4). Quellen: Abschlüsse selbst (GuV, Bilanz, Kapitalflussrechnung, Schuldennote, Deckblatt),
 # nicht companyfacts, nicht R-Seiten, nicht der Extraktor.
 status: complete
 ticker: AAPL

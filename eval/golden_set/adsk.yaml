@@ -2,8 +2,9 @@
 # Gepinnt an period_end UND accession_number des 10-K, nicht an "jüngstes 10-K".
 # Werte so eingetragen, wie sie im 10-K stehen; `unit` gibt die Einheit an (millions | thousands | units),
 # die Umrechnung in USD macht eval/golden_seed.py exakt. Ist ein Wert im 10-K nicht ausgewiesen, steht statt
-# `value` ein `absent_reason`. Optional `tolerance` (in der Einheit des Eintrags) für Werte, die das Filing
-# nur gerundet nennt. Quellen: Abschlüsse selbst (GuV, Bilanz, Kapitalflussrechnung, Schuldennote, Deckblatt),
+# `value` ein `absent_reason`. Optional `tolerance_abs` (absolut, in der Einheit des Eintrags) für Werte, die
+# das Filing nur gerundet nennt. `known_deviations` pinnt bekannte Abweichungen des Extraktors (siehe
+# Foundation Doc 11.4). Quellen: Abschlüsse selbst (GuV, Bilanz, Kapitalflussrechnung, Schuldennote, Deckblatt),
 # nicht companyfacts, nicht R-Seiten, nicht der Extraktor.
 status: complete
 ticker: ADSK
@@ -47,11 +48,17 @@ values:
   shares_outstanding:
     value: 211000000
     unit: units
-    tolerance: 1000000
+    tolerance_abs: 1000000   # absolut, in der Einheit des Eintrags (units)
     source: "10-K FY2026, Deckblatt (Stand 2026-02-23), nur auf Mio. gerundet"
+known_deviations:
+  total_debt:
+    seed_value: 2483           # Buchwert laut Bilanz (Millionen, wie values.total_debt)
+    expected_extractor_value: 2500
+    class: a
+    reason: "Extraktor liefert us-gaap:LongTermDebt = 2.500 (Nominalwert). ADSK taggt den Nominalwert unter einem Konzept, dessen Definition 'after unamortized discount' (Buchwert) verlangt; der Buchwert 2.483 steckt in LongTermNotesPayable. Kein Fallback auf ein anderes Konzept (Entscheidung Sean, 2026-10-08)."
 notes: |
   d_and_a: Das Label lautet "Depreciation, amortization, and accretion" und enthält accretion — kein reines D&A.
   shares_outstanding: Deckblatt (Stand 2026-02-23) nennt nur auf Mio. gerundet 211 Mio.; die Bilanz zeigt 212 Mio. zum 2026-01-31.
-  Vergleich mit Toleranz +-1 Mio. (tolerance 1000000).
+  Vergleich mit Toleranz +-1 Mio. (tolerance_abs 1000000).
   Marketable securities 348 current + 376 long-term (nicht in cash). Operating-Lease-Verbindlichkeiten 52 + 199 = 251 (nicht in total_debt).
   Neue Revolver-Fazilität (2025 Credit Agreement) im Text; in der Bilanz keine gezogene Position.
