@@ -306,3 +306,47 @@ def test_frames_are_cached_in_memory_and_in_sqlite_with_seven_day_ttl(tmp_path: 
         with _client(handler, cache) as client:
             client.get_revenue_frame("Revenues", 2025)
             assert len(requests) == 2
+
+
+# --- F12: SIC-Suche darf nicht still nach max_pages aufhören ---------------------------------------------------
+
+
+def _atom_page(first_cik: int, count: int) -> str:
+    entries = "".join(
+        f"<entry><content><company-info><cik>{first_cik + i}</cik><sic>7372</sic></company-info></content></entry>"
+        for i in range(count)
+    )
+    return f"<feed>{entries}</feed>"
+
+
+def test_sic_search_reports_truncation_when_all_pages_are_full() -> None:
+    pages: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["start"])
+        pages.append(start)
+        return httpx.Response(200, text=_atom_page(1000 + start, 100))
+
+    with _client(handler) as client:
+        page = client.search_companies_by_sic_paged("7372", max_pages=3)
+
+    assert pages == [0, 100, 200] and len(page.candidates) == 300 and page.truncated is True
+
+
+def test_sic_search_is_not_truncated_when_a_short_page_ends_it() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = int(request.url.params["start"])
+        return httpx.Response(200, text=_atom_page(1000 + start, 100 if start == 0 else 40))
+
+    with _client(handler) as client:
+        page = client.search_companies_by_sic_paged("7372", max_pages=5)
+
+    assert len(page.candidates) == 140 and page.truncated is False
+    with _client(handler) as client:  # die alte Schnittstelle liefert weiter nur die Liste
+        assert len(client.search_companies_by_sic("7372", max_pages=5)) == 140
+
+
+def test_sic_search_empty_first_page_is_not_truncated() -> None:
+    with _client(lambda request: httpx.Response(200, text="<feed></feed>")) as client:
+        page = client.search_companies_by_sic_paged("7372")
+    assert page.candidates == [] and page.truncated is False

@@ -158,8 +158,13 @@ def _assert_clean(text: str) -> None:
         _status(400, {"X-Echo": SECRET_HEADER}),
         _status(503, {"X-Echo": SECRET_HEADER}),
         lambda request: (_ for _ in ()).throw(httpx.ConnectError("verbindung", request=request)),
+        # F5b: Ausnahmen, die kein TransportError sind und früher roh (mit .request/Headern) entkamen
+        lambda request: (_ for _ in ()).throw(httpx.DecodingError("kaputte kompression", request=request)),
+        lambda request: (_ for _ in ()).throw(httpx.TooManyRedirects("zu viele umleitungen", request=request)),
+        _status(301, {"Location": "https://data.sec.gov/anderswo", "X-Echo": SECRET_HEADER}),
+        lambda request: httpx.Response(200, text="<html>kein json</html>", headers={"X-Echo": SECRET_HEADER}),
     ],
-    ids=["429", "403", "404", "400", "503", "netzwerk"],
+    ids=["429", "403", "404", "400", "503", "netzwerk", "decoding", "redirects", "3xx", "ungueltiges-json"],
 )
 def test_errors_never_contain_request_headers_user_agent_or_keys(responder, caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
@@ -183,3 +188,36 @@ def test_error_exposes_only_endpoint_path_and_status() -> None:
             client.get_company_facts("320193")
     assert vars(exc.value).keys() <= {"endpoint", "status_code", "retry_after_seconds"}
     assert exc.value.endpoint == "/api/xbrl/companyfacts/CIK0000320193.json"
+
+
+# --- F5b: nicht-Transport-Ausnahmen, Redirects und ungültiges JSON -------------------------------------------
+
+
+def test_decoding_error_is_retried_and_mapped_to_unavailable() -> None:
+    attempts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        raise httpx.DecodingError("kaputt", request=request)
+
+    with _client(handler) as client:
+        with pytest.raises(EdgarUnavailable) as exc:
+            client.get_company_facts("320193")
+    assert len(attempts) == 3 and exc.value.status_code is None
+
+
+def test_redirect_response_maps_to_http_error_without_retry() -> None:
+    limiter = CountingLimiter()
+    with _client(_status(302, {"Location": "https://example.org/"}), limiter=limiter) as client:
+        with pytest.raises(EdgarHttpError) as exc:
+            client.get_company_facts("320193")
+    assert exc.value.status_code == 302 and limiter.acquired == 1
+
+
+def test_invalid_json_maps_to_unavailable_with_endpoint_and_status_only() -> None:
+    with _client(lambda request: httpx.Response(200, text="<html>Wartung</html>")) as client:
+        with pytest.raises(EdgarUnavailable) as exc:
+            client.get_company_facts("320193")
+    error = exc.value
+    assert error.endpoint == "/api/xbrl/companyfacts/CIK0000320193.json" and error.status_code == 200
+    assert error.__cause__ is None and error.__context__ is None

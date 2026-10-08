@@ -167,15 +167,22 @@ class FinnhubProvider:
             failure = MarketDataUnavailable("Finnhub")
         if failure is not None:
             raise failure
-        data = response.json()
 
-        price = data.get("c")
-        timestamp = data.get("t")
-        if not price or not timestamp:
-            return None
-
-        as_of = datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat()
-        return PriceQuote(ticker=ticker.upper(), price=float(price), as_of_date=as_of, source="finnhub")
+        # Eine ungültige Antwort (kein JSON, falsche Struktur oder Werte) wird wie ein Ausfall des Anbieters
+        # behandelt — mit bereinigtem Fehler statt roher JSONDecodeError/ValueError.
+        try:
+            data = response.json()
+            price = data.get("c")
+            timestamp = data.get("t")
+            if not price or not timestamp:
+                return None
+            as_of = datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat()
+            quote = PriceQuote(ticker=ticker.upper(), price=float(price), as_of_date=as_of, source="finnhub")
+        except (ValueError, TypeError, AttributeError, OverflowError, OSError):
+            failure = MarketDataUnavailable("Finnhub")
+        if failure is not None:
+            raise failure
+        return quote
 
 
 class StooqProvider:

@@ -129,3 +129,23 @@ def test_cached_provider_logs_cache_and_errors_never_contain_the_key(
     _assert_no_key(caplog.text, *stored)
     for record in caplog.records:
         _assert_no_key(record.getMessage(), str(record.exc_text or ""))
+
+
+# --- ungültige Antworten: bereinigter Fehler statt roher JSONDecodeError/ValueError --------------------------
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["<html>Wartung</html>", "[1, 2, 3]", '{"c": "abc", "t": 1700000000}', '{"c": 10, "t": 99999999999999999999}'],
+    ids=["kein-json", "liste", "preis-text", "zeitstempel"],
+)
+def test_invalid_finnhub_response_becomes_sanitized_market_data_unavailable(body: str) -> None:
+    provider = _provider(lambda request: httpx.Response(200, text=body))
+
+    with pytest.raises(MarketDataUnavailable) as exc_info:
+        provider.get_price("AAPL")
+
+    error = exc_info.value
+    assert isinstance(error, httpx.HTTPError)
+    _assert_no_key(str(error), repr(error), "".join(traceback.format_exception(error)))
+    assert error.__cause__ is None and error.__context__ is None

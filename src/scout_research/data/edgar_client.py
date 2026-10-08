@@ -68,6 +68,14 @@ class FrameEntry(BaseModel):
     accession_number: str
 
 
+class SicSearchPage(BaseModel):
+    """Ergebnis der SIC-Suche inkl. der Information, ob sie am Seitenlimit abgebrochen wurde."""
+
+    candidates: list[SicCandidate]
+    truncated: bool
+    """True, wenn alle `max_pages` Seiten voll waren — es kann weitere Treffer geben, die nicht geladen wurden."""
+
+
 class TickerNotFoundError(Exception):
     pass
 
@@ -155,7 +163,8 @@ class EdgarClient:
         - Netzwerkfehler, Timeouts und 5xx: bis zu `max_retries` Wiederholungen mit Backoff, danach
           `EdgarUnavailable`. (`browse-edgar` antwortet gelegentlich mit Timeouts.)
         - 429/403: sofort `EdgarRateLimited` (kein Retry; `Retry-After` wird übernommen).
-        - 404: `EdgarDataNotFound`. Andere 4xx: `EdgarHttpError`.
+        - 404: `EdgarDataNotFound`. Andere 4xx und 3xx (Redirects werden nicht verfolgt): `EdgarHttpError`.
+        - Jede `httpx.HTTPError` (auch `DecodingError`, `TooManyRedirects`) zählt wie ein Netzwerkfehler.
         Jeder Versuch läuft durch den Rate Limiter (10 req/s). Fehler enthalten keine Request-Header.
         """
         endpoint = urlsplit(url).path
@@ -164,13 +173,13 @@ class EdgarClient:
             self._rate_limiter.acquire()
             try:
                 response = self._client.get(url)
-            except httpx.TransportError:
+            except httpx.HTTPError:
                 failure = EdgarUnavailable(
                     f"SEC-Abruf {endpoint} fehlgeschlagen (Netzwerkfehler oder Timeout)", endpoint=endpoint
                 )
             else:
                 status = response.status_code
-                if status < 400:
+                if status < 300:
                     return response
                 if status in (429, 403):
                     raise EdgarRateLimited(
@@ -183,7 +192,7 @@ class EdgarClient:
                     raise EdgarDataNotFound(
                         f"SEC-Abruf {endpoint}: keine Daten gefunden (HTTP 404)", endpoint=endpoint, status_code=404
                     )
-                if status < 500:
+                if status < 500:  # 3xx und übrige 4xx
                     raise EdgarHttpError(
                         f"SEC-Abruf {endpoint}: unerwarteter Status HTTP {status}", endpoint=endpoint, status_code=status
                     )
@@ -196,7 +205,18 @@ class EdgarClient:
         raise failure
 
     def _get_json(self, url: str) -> dict:
-        return self._get(url).json()
+        response = self._get(url)
+        endpoint = urlsplit(str(response.url)).path
+        failure: EdgarUnavailable | None = None
+        try:
+            return response.json()
+        except ValueError:  # JSONDecodeError und Verwandte; die Ausnahme selbst wird nicht weitergereicht
+            failure = EdgarUnavailable(
+                f"SEC-Abruf {endpoint} lieferte keine gültige JSON-Antwort",
+                endpoint=endpoint,
+                status_code=response.status_code,
+            )
+        raise failure
 
     def _load_ticker_map(self) -> dict[str, dict]:
         if self._ticker_map_cache is None:
@@ -221,6 +241,14 @@ class EdgarClient:
             ticker=entry["ticker"],
             name=entry["title"],
         )
+
+    def list_companies(self) -> list[CompanyLookup]:
+        """Alle Einträge der SEC-Ticker-Map (ein Eintrag je Ticker; dieselbe CIK kann mehrfach vorkommen,
+        z. B. Mehrklassen-Aktien). Grundlage für den Namensabgleich in `resolve_company`."""
+        return [
+            CompanyLookup(cik=pad_cik(entry["cik_str"]), ticker=entry["ticker"], name=entry["title"])
+            for entry in self._load_ticker_map().values()
+        ]
 
     def get_cik_to_ticker_map(self) -> dict[str, tuple[str, str]]:
         """CIK → (Ticker, Name), abgeleitet aus derselben (gecachten) Ticker-Map wie
@@ -251,13 +279,22 @@ class EdgarClient:
     def search_companies_by_sic(
         self, sic_code: str, form_type: str = "10-K", max_pages: int = 10
     ) -> list[SicCandidate]:
+        return self.search_companies_by_sic_paged(sic_code, form_type, max_pages).candidates
+
+    def search_companies_by_sic_paged(
+        self, sic_code: str, form_type: str = "10-K", max_pages: int = 10
+    ) -> SicSearchPage:
         """Alle Unternehmen mit gegebenem SIC-Code, die aktuell `form_type`-Filings
         einreichen (Foundation Doc 7.4, Schritt 1). Paginiert über `browse-edgar`
         (100 Treffer/Seite). Der Atom-Feed liefert keine brauchbaren Firmennamen —
         siehe `SicCandidate`-Docstring.
+
+        `truncated` meldet, dass das Seitenlimit erreicht wurde, ohne dass eine kurze Seite das Ende anzeigte
+        (bei genau `max_pages * 100` Treffern ein Fehlalarm — sicherer als stilles Abschneiden).
         """
         candidates: list[SicCandidate] = []
         page_size = 100
+        truncated = True
 
         for page in range(max_pages):
             start = page * page_size
@@ -268,6 +305,7 @@ class EdgarClient:
             body = self._get_text(url)
             entries = re.findall(r"<entry[^>]*>.*?</entry>", body, re.DOTALL)
             if not entries:
+                truncated = False
                 break
 
             for entry in entries:
@@ -279,9 +317,10 @@ class EdgarClient:
                     )
 
             if len(entries) < page_size:
+                truncated = False
                 break
 
-        return candidates
+        return SicSearchPage(candidates=candidates, truncated=truncated)
 
     def get_revenue_frame(
         self, concept: str, calendar_year: int, taxonomy: str = "us-gaap", unit: str = "USD"
