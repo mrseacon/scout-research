@@ -279,14 +279,22 @@ schon für `user_requested_additions`. **(Q3, bestätigt.)**
 | `SLOT_UNKNOWN` | nein | unbekannter Ticker, unbekanntes Feld oder falsche Grammatik |
 | `SLOT_VALUE_UNAVAILABLE` | nein | Slot zeigt auf `None`; `details.reason` aus `excluded` |
 | `NAKED_NUMBER` | nein | ausgeschriebene Zahl außerhalb eines Slots |
-| `FRAME_YEAR_UNRESOLVED` | nein | Ziel in keinem Frame ±1 |
-| `UPSTREAM_UNAVAILABLE` | ja | Netz/5xx |
-| `UPSTREAM_RATE_LIMITED` | nein | SEC 429/403 (bewusst keine Wiederholung) |
+| `FRAME_YEAR_UNRESOLVED` | nein | Ziel in keinem Frame ±1 (geprüft gegen den Frame des Umsatz-Konzepts seines Ankers) |
+| `DATA_NOT_FOUND` | nein | SEC 404, z. B. Unternehmen ohne `companyfacts` (entschieden 2026-10-08, Schritt 3) |
+| `UPSTREAM_UNAVAILABLE` | ja | Netz/Timeout/5xx, nach begrenzten Wiederholungen mit Backoff |
+| `UPSTREAM_RATE_LIMITED` | nein | SEC 429/403 (bewusst keine Wiederholung); `details.retry_after_seconds` aus `Retry-After`, falls vorhanden |
 | `TOOL_TIMEOUT` | ja (1×) | Zeitbudget des Tools überschritten |
 | `LOOP_GUARD` | nein | gleicher Aufruf nach nicht wiederholbarem Fehler |
 | `INTERNAL_ERROR` | nein | unerwartete Ausnahme; Meldung bereinigt, Stacktrace nur im Trace |
 
 Fehlende Marktdaten sind kein Fehler, sondern Warnings im Ergebnis.
+
+**L1-Fehlerklassen und Mapping (Schritt 3, entschieden 2026-10-08).** `edgar_client` wirft `EdgarUnavailable`,
+`EdgarRateLimited` (mit `retry_after_seconds`), `EdgarDataNotFound` und `EdgarHttpError` (alle von
+`EdgarError`); L1 kennt keine Tool-Begriffe. Das Mapping auf die Codes dieser Tabelle (`UPSTREAM_UNAVAILABLE`,
+`UPSTREAM_RATE_LIMITED`, `DATA_NOT_FOUND`, sonst `INTERNAL_ERROR`) macht der Tool-Layer (Schritt 5). Fehlerobjekte,
+Meldungen, Logs und Traces enthalten **keine Request-Header** (nie den User-Agent mit Name und E-Mail) und
+keine API-Keys; die Fehler tragen nur Endpunkt-Pfad und Statuscode.
 
 ---
 

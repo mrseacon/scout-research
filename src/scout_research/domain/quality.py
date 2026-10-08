@@ -7,6 +7,7 @@ Jede Warnung ist ein Hinweis für den Menschen, kein Abbruchgrund — das Peer-S
 from __future__ import annotations
 
 import statistics as stats
+from datetime import date
 
 from scout_research.domain.metrics import DEBT_LOWER_BOUND_CONCEPTS
 from scout_research.domain.models import CompanyMetrics, CompanyMultiples, QualityWarning
@@ -71,17 +72,34 @@ def check_outliers(peer_multiples: list[CompanyMultiples], multiple_name: str) -
     return warnings
 
 
+PERIOD_TOLERANCE_DAYS = 14
+"""Zwei Geschäftsjahresenden gelten als periodengleich, wenn ihr über ganze Jahre gefalteter Abstand höchstens
+so groß ist. Fängt 52/53-Wochen-Jahre (31.01. gegen 01.02.) und Monatsgrenzen ab (D3, Sean 2026-10-08)."""
+
+STALE_PERIOD_DAYS = 300
+"""Liegt das Periodenende eines Peers mindestens so viele Tage vor dem des Ziels, ist sein jüngstes 10-K
+ein Geschäftsjahr älter (das Peer-10-K des Zieljahres ist noch nicht eingereicht oder fehlt)."""
+
+
+def folded_offset_days(a: date, b: date) -> int:
+    """Abstand `a − b` in Tagen, auf ein Jahr (365 Tage) gefaltet, im Bereich −182..+182. Ganze Jahre
+    fallen heraus: 31.01.2026 gegen 01.02.2025 ergibt −1, nicht 364."""
+    offset = (a - b).days % 365
+    return offset if offset <= 182 else offset - 365
+
+
 def check_fiscal_year_mismatch(
     target: CompanyMetrics, peers: list[CompanyMetrics]
 ) -> list[QualityWarning]:
-    """Flaggt Peers, deren Fiskaljahresende (Monat) vom Zielunternehmen abweicht —
-    Kennzahlen sind dann nicht exakt periodengleich (Foundation Doc 6.3 Beispiel: Autodesk)."""
-    target_month = target.period_end[5:7]
+    """Warnt bei Peers, deren Geschäftsjahresende nicht zu dem des Ziels passt (gefalteter Abstand über
+    `PERIOD_TOLERANCE_DAYS`) — die Kennzahlen sind dann nicht periodengleich (Foundation Doc 6.3 Beispiel:
+    Autodesk). Nur eine Warnung, kein Ausschluss."""
+    target_end = date.fromisoformat(target.period_end)
     warnings: list[QualityWarning] = []
 
     for peer in peers:
-        peer_month = peer.period_end[5:7]
-        if peer_month == target_month:
+        offset = folded_offset_days(date.fromisoformat(peer.period_end), target_end)
+        if abs(offset) <= PERIOD_TOLERANCE_DAYS:
             continue
         warnings.append(
             QualityWarning(
@@ -89,8 +107,33 @@ def check_fiscal_year_mismatch(
                 company=_company_ticker(peer),
                 message=(
                     f"Fiskaljahresende weicht ab: {peer.company.name} berichtet zum "
-                    f"{peer.period_end}, Ziel zum {target.period_end} — Kennzahlen sind "
-                    f"nicht exakt periodengleich."
+                    f"{peer.period_end}, Ziel zum {target.period_end} (Abstand {offset:+d} Tage, über Jahre "
+                    f"gefaltet; Toleranz ±{PERIOD_TOLERANCE_DAYS}) — Kennzahlen sind nicht periodengleich."
+                ),
+                affected_field="period_end",
+            )
+        )
+    return warnings
+
+
+def check_stale_period(target: CompanyMetrics, peers: list[CompanyMetrics]) -> list[QualityWarning]:
+    """Warnt bei Peers, deren jüngstes 10-K mindestens `STALE_PERIOD_DAYS` Tage vor dem des Ziels endet —
+    auch bei gleichem Monat (ein Jahr altes Peer-10-K). Nur eine Warnung, kein Ausschluss."""
+    target_end = date.fromisoformat(target.period_end)
+    warnings: list[QualityWarning] = []
+
+    for peer in peers:
+        gap = (target_end - date.fromisoformat(peer.period_end)).days
+        if gap < STALE_PERIOD_DAYS:
+            continue
+        warnings.append(
+            QualityWarning(
+                severity="warning",
+                company=_company_ticker(peer),
+                message=(
+                    f"Veraltetes 10-K: das jüngste 10-K von {peer.company.name} endet zum {peer.period_end}, "
+                    f"{gap} Tage vor dem Periodenende des Ziels ({target.period_end}) — der Peer wird mit einer "
+                    f"älteren Periode verglichen."
                 ),
                 affected_field="period_end",
             )
@@ -164,6 +207,7 @@ def run_quality_checks(
     """Orchestriert alle Checks (Foundation Doc 7.3, Tool `run_quality_checks`)."""
     warnings: list[QualityWarning] = []
     warnings += check_fiscal_year_mismatch(target, peers)
+    warnings += check_stale_period(target, peers)
     warnings += check_missing_data(target)
     warnings += check_debt_lower_bound(target)
     for peer in peers:

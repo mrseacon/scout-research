@@ -21,7 +21,7 @@ from scout_research.domain.metrics import (
     build_company_metrics,
 )
 from scout_research.domain.multiples import MULTIPLE_NAMES, compute_multiples
-from scout_research.domain.peers import FrameYearUnresolved, resolve_calendar_year
+from scout_research.domain.peers import REVENUE_FRAME_CONCEPT, FrameYearUnresolved, resolve_calendar_year
 from scout_research.domain.periods import (
     HistoricalValuationNotSupported,
     PeriodNotAvailable,
@@ -81,12 +81,14 @@ def test_derive_calendar_year_is_year_of_period_end_minus_180_days(period_end: s
 
 
 def _frames_client(by_year: dict[int, dict[int, str]]) -> EdgarClient:
-    """`by_year[Jahr][cik] = Periodenende` -> Frame mit einem Eintrag je Firma."""
+    """`by_year[Jahr][cik] = Periodenende` -> Frame mit einem Eintrag je Firma (für jedes Konzept gleich)."""
     requested: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         year = int(str(request.url).rsplit("CY", 1)[1].split(".")[0])
         requested.append(year)
+        if year not in by_year:
+            return httpx.Response(404, text="not found")
         data = [
             {"cik": cik, "entityName": "X", "start": "2025-01-01", "end": end, "val": 1.0, "accn": "0000000000-26-000001"}
             for cik, end in by_year.get(year, {}).items()
@@ -100,16 +102,16 @@ def _frames_client(by_year: dict[int, dict[int, str]]) -> EdgarClient:
 
 def test_resolve_calendar_year_uses_derived_year_when_target_is_in_frame() -> None:
     with _frames_client({2025: {320193: "2025-09-27"}}) as client:
-        resolution, frame = resolve_calendar_year(client, "0000320193", "2025-09-27")
+        resolution = resolve_calendar_year(client, "0000320193", "2025-09-27", REVENUE_FRAME_CONCEPT)
 
     assert (resolution.calendar_year, resolution.frame_check) == (2025, "target_in_frame")
-    assert "0000320193" in frame
+    assert resolution.concept == REVENUE_FRAME_CONCEPT
     assert client.requested_years == [2025]  # kein überflüssiger Abruf
 
 
 def test_resolve_calendar_year_falls_back_to_neighbor_year_and_reports_it() -> None:
     with _frames_client({2024: {789019: "2025-06-30"}, 2025: {789019: "2026-06-30"}}) as client:
-        resolution, _ = resolve_calendar_year(client, "0000789019", "2025-06-30")
+        resolution = resolve_calendar_year(client, "0000789019", "2025-06-30", REVENUE_FRAME_CONCEPT)
 
     assert (resolution.calendar_year, resolution.frame_check) == (2024, "neighbor_year")
 
@@ -118,10 +120,19 @@ def test_resolve_calendar_year_requires_matching_period_end_not_just_presence() 
     # Im abgeleiteten Jahr steht das Ziel, aber mit einem anderen Geschäftsjahresende -> kein Treffer.
     with _frames_client({2025: {320193: "2024-09-28"}}) as client:
         with pytest.raises(FrameYearUnresolved) as exc:
-            resolve_calendar_year(client, "0000320193", "2025-09-27")
+            resolve_calendar_year(client, "0000320193", "2025-09-27", REVENUE_FRAME_CONCEPT)
 
     assert exc.value.code == "FRAME_YEAR_UNRESOLVED"
     assert exc.value.tried_years == [2025, 2024, 2026]
+    assert exc.value.concept == REVENUE_FRAME_CONCEPT
+
+
+def test_resolve_calendar_year_treats_a_missing_frame_year_as_not_containing_the_target() -> None:
+    # Nachbarjahr 2026 hat keinen Frame (404): kein Abbruch, sondern weiter zum nächsten Jahr.
+    with _frames_client({2024: {789019: "2025-06-30"}}) as client:
+        resolution = resolve_calendar_year(client, "0000789019", "2025-06-30", REVENUE_FRAME_CONCEPT)
+
+    assert (resolution.calendar_year, resolution.frame_check) == (2024, "neighbor_year")
 
 
 # --- Auswahl der Periode ------------------------------------------------------------------------------------

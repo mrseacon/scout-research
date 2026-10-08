@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel
 
+from scout_research.data.cache import SqliteCache
+from scout_research.data.http_util import parse_retry_after
 from scout_research.data.rate_limiter import RateLimiter
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -68,6 +72,48 @@ class TickerNotFoundError(Exception):
     pass
 
 
+class EdgarError(Exception):
+    """Basis der typisierten EDGAR-Fehler (L1). Kennt keine Tool-Begriffe: das Mapping auf Tool-Fehlercodes
+    passiert erst im Tool-Layer.
+
+    **Sicherheit:** Fehler tragen nur Endpunkt-Pfad und Statuscode — nie Request-Header (also nie den
+    User-Agent mit Name und E-Mail), nie die ursprüngliche httpx-Ausnahme (`from None`)."""
+
+    def __init__(self, message: str, *, endpoint: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.endpoint = endpoint
+        self.status_code = status_code
+
+
+class EdgarUnavailable(EdgarError):
+    """Netzwerkfehler, Timeout oder 5xx — nach begrenzten Wiederholungen mit Backoff. Wiederholbar."""
+
+
+class EdgarRateLimited(EdgarError):
+    """429 oder 403 (SEC Fair Access): wird *nicht* wiederholt. `retry_after_seconds` aus `Retry-After`, falls
+    vorhanden."""
+
+    def __init__(
+        self, message: str, *, endpoint: str, status_code: int, retry_after_seconds: float | None = None
+    ) -> None:
+        super().__init__(message, endpoint=endpoint, status_code=status_code)
+        self.retry_after_seconds = retry_after_seconds
+
+
+class EdgarDataNotFound(EdgarError):
+    """404: Für diese Anfrage gibt es keine Daten (z. B. Unternehmen ohne `companyfacts`, Frame ohne Daten)."""
+
+
+class EdgarHttpError(EdgarError):
+    """Jeder andere unerwartete HTTP-Status (z. B. 400, 410)."""
+
+
+FRAME_CACHE_NAMESPACE = "edgar_frame"
+FRAME_CACHE_TTL_SECONDS = 7 * 24 * 3600
+"""Frames ändern sich nur mit neuen Filings; 7 Tage sparen dem Golden-Set-Lauf die großen Bulk-Abrufe."""
+_FRAME_MEMO_LIMIT = 8
+
+
 def pad_cik(cik: str | int) -> str:
     """SEC-Endpunkte erwarten eine 10-stellige, nullgepolsterte CIK."""
     return str(cik).zfill(10)
@@ -80,8 +126,13 @@ class EdgarClient:
         rate_limiter: RateLimiter | None = None,
         transport: httpx.BaseTransport | None = None,
         timeout: float = 20.0,
+        cache: SqliteCache | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._rate_limiter = rate_limiter or RateLimiter(max_requests=10, period_seconds=1.0)
+        self._cache = cache
+        self._sleep = sleep
+        self._frame_memo: dict[str, dict[str, FrameEntry]] = {}
         self._client = httpx.Client(
             headers={"User-Agent": user_agent, "Accept-Encoding": "gzip, deflate"},
             transport=transport,
@@ -99,21 +150,50 @@ class EdgarClient:
         self.close()
 
     def _get(self, url: str, max_retries: int = 2) -> httpx.Response:
-        """`browse-edgar` (legacy CGI) reagiert gelegentlich mit Timeouts, obwohl der
-        Endpunkt selbst verfügbar ist — ein einfacher Retry mit Backoff behebt das, ohne
-        die Rate-Limit-Logik zu verändern (jeder Versuch respektiert weiterhin 10 req/s)."""
-        last_error: httpx.TransportError | None = None
+        """GET mit Rate-Limit pro Versuch und typisierten Fehlern.
+
+        - Netzwerkfehler, Timeouts und 5xx: bis zu `max_retries` Wiederholungen mit Backoff, danach
+          `EdgarUnavailable`. (`browse-edgar` antwortet gelegentlich mit Timeouts.)
+        - 429/403: sofort `EdgarRateLimited` (kein Retry; `Retry-After` wird übernommen).
+        - 404: `EdgarDataNotFound`. Andere 4xx: `EdgarHttpError`.
+        Jeder Versuch läuft durch den Rate Limiter (10 req/s). Fehler enthalten keine Request-Header.
+        """
+        endpoint = urlsplit(url).path
+        failure: EdgarUnavailable | None = None
         for attempt in range(max_retries + 1):
             self._rate_limiter.acquire()
             try:
                 response = self._client.get(url)
-                response.raise_for_status()
-                return response
-            except httpx.TransportError as exc:
-                last_error = exc
-                if attempt < max_retries:
-                    time.sleep(0.5 * (attempt + 1))
-        raise last_error  # type: ignore[misc]
+            except httpx.TransportError:
+                failure = EdgarUnavailable(
+                    f"SEC-Abruf {endpoint} fehlgeschlagen (Netzwerkfehler oder Timeout)", endpoint=endpoint
+                )
+            else:
+                status = response.status_code
+                if status < 400:
+                    return response
+                if status in (429, 403):
+                    raise EdgarRateLimited(
+                        f"SEC-Abruf {endpoint} abgelehnt (HTTP {status}, Fair-Access-Limit)",
+                        endpoint=endpoint,
+                        status_code=status,
+                        retry_after_seconds=parse_retry_after(response.headers.get("Retry-After")),
+                    )
+                if status == 404:
+                    raise EdgarDataNotFound(
+                        f"SEC-Abruf {endpoint}: keine Daten gefunden (HTTP 404)", endpoint=endpoint, status_code=404
+                    )
+                if status < 500:
+                    raise EdgarHttpError(
+                        f"SEC-Abruf {endpoint}: unerwarteter Status HTTP {status}", endpoint=endpoint, status_code=status
+                    )
+                failure = EdgarUnavailable(
+                    f"SEC-Abruf {endpoint} fehlgeschlagen (HTTP {status})", endpoint=endpoint, status_code=status
+                )
+            if attempt < max_retries:
+                self._sleep(0.5 * (attempt + 1))
+        assert failure is not None
+        raise failure
 
     def _get_json(self, url: str) -> dict:
         return self._get(url).json()
@@ -208,19 +288,39 @@ class EdgarClient:
     ) -> dict[str, FrameEntry]:
         """Ein XBRL-Konzept über *alle* Filer eines Kalenderjahres in einem Request
         (Foundation Doc 8.2 — "besonders wertvoll für Comps"). Rückgabe als CIK → FrameEntry.
+
+        Frames sind groß (mehrere MB): pro Client im Speicher und — falls ein `cache` übergeben wurde — im
+        SQLite-Cache mit 7 Tagen Gültigkeit gehalten. Ein 404 (kein Frame für dieses Jahr/Konzept) wird als
+        `EdgarDataNotFound` gemeldet.
         """
-        data = self._get_json(
-            FRAMES_URL.format(taxonomy=taxonomy, concept=concept, unit=unit, year=calendar_year)
-        )
-        result: dict[str, FrameEntry] = {}
-        for entry in data.get("data", []):
-            cik = pad_cik(entry["cik"])
-            result[cik] = FrameEntry(
-                cik=cik,
-                entity_name=entry.get("entityName", ""),
-                value=float(entry["val"]),
-                period_start=entry.get("start"),
-                period_end=entry["end"],
-                accession_number=entry.get("accn", ""),
+        key = f"{taxonomy}/{concept}/{unit}/CY{calendar_year}"
+        if key in self._frame_memo:
+            return self._frame_memo[key]
+
+        compact = self._cache.get(FRAME_CACHE_NAMESPACE, key, max_age_seconds=FRAME_CACHE_TTL_SECONDS) if self._cache else None
+        if compact is None:
+            data = self._get_json(FRAMES_URL.format(taxonomy=taxonomy, concept=concept, unit=unit, year=calendar_year))
+            compact = [
+                [
+                    pad_cik(entry["cik"]),
+                    entry.get("entityName", ""),
+                    float(entry["val"]),
+                    entry.get("start"),
+                    entry["end"],
+                    entry.get("accn", ""),
+                ]
+                for entry in data.get("data", [])
+            ]
+            if self._cache:
+                self._cache.set(FRAME_CACHE_NAMESPACE, key, compact)
+
+        result = {
+            cik: FrameEntry(
+                cik=cik, entity_name=name, value=val, period_start=start, period_end=end, accession_number=accn
             )
+            for cik, name, val, start, end, accn in compact
+        }
+        if len(self._frame_memo) >= _FRAME_MEMO_LIMIT:
+            self._frame_memo.pop(next(iter(self._frame_memo)))
+        self._frame_memo[key] = result
         return result

@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.3 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.4 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -418,6 +418,32 @@ class PeriodSelector(BaseModel):         # höchstens ein Feld gesetzt; kein Fel
   Umsetzung:** das Ziel muss selbst im abgeleiteten Frame mit passendem `end` auftauchen, sonst werden
   die Nachbarjahre (±1) geprüft und andernfalls ein Fehler geworfen statt zu raten.
 
+#### 7.3.2 Fehlercodes und typisierte EDGAR-Fehler (Phase 3, Schritt 3)
+
+L1 (`data/edgar_client.py`) wirft typisierte Fehler ohne Tool-Begriffe; L2 wirft die fachlichen Fehler mit
+`code`-Attribut. Das Mapping auf die Tool-Codes (vollständige Liste: `docs/decisions/phase-3-plan.md`) macht der
+Tool-Layer.
+
+| Quelle | Fehler | Tool-Code | Wiederholbar |
+|---|---|---|---|
+| L1 | `EdgarUnavailable` (Netz/Timeout/5xx, 2 Wiederholungen mit Backoff) | `UPSTREAM_UNAVAILABLE` | ja |
+| L1 | `EdgarRateLimited` (429/403, `retry_after_seconds` aus `Retry-After`) | `UPSTREAM_RATE_LIMITED` | nein |
+| L1 | `EdgarDataNotFound` (404, z. B. kein `companyfacts`) | `DATA_NOT_FOUND` | nein |
+| L1 | `EdgarHttpError` (sonstige Statuscodes) | `INTERNAL_ERROR` | nein |
+| L2 | `PeriodNotAvailable` | `PERIOD_NOT_AVAILABLE` | nein |
+| L2 | `HistoricalValuationNotSupported` | `HISTORICAL_VALUATION_NOT_SUPPORTED` | nein |
+| L2 | `FrameYearUnresolved` | `FRAME_YEAR_UNRESOLVED` | nein |
+
+**Sicherheit:** Fehlerobjekte, Meldungen, Logs und Traces enthalten keine Request-Header — nie den User-Agent
+mit Name und E-Mail — und keine API-Keys; EDGAR-Fehler tragen nur Endpunkt-Pfad und Statuscode und hängen die
+ursprüngliche httpx-Ausnahme nicht an (`tests/unit/test_edgar_errors.py`).
+
+**Peer-Suche (Schritt 3):** Der Größenfilter nutzt alle vier Umsatz-Konzepte der Kette, lazy (das Konzept
+höchster Priorität zuerst, weitere nur für noch fehlende Kandidaten; je Firma gewinnt die höchste Priorität) und
+liefert Zähler (`sic_matches`, `without_ticker`, `not_in_revenue_frame`, `outside_size_range`, `returned`,
+geladene Frames). Die Gültigkeit des abgeleiteten `calendar_year` wird gegen den Frame des Konzepts geprüft, das
+der Umsatz-Anker des Ziels tatsächlich benutzt (Regressionsfall: NVDA, `Revenues`).
+
 ### 7.4 Peer-Identifikation — das methodisch heikelste Stück
 
 Naive SIC-Code-Suche liefert schlechte Peers (SIC-Codes sind grob und teils veraltet). Kaskade
@@ -457,7 +483,8 @@ zugänglicher.
 - **Rate Limit:** max. 10 Requests/Sekunde. → Rate Limiter in L1 zwingend einbauen.
   *Umsetzung (v1.5):* gleitendes Fenster, jeder Versuch inklusive Retries läuft durch `acquire()`.
   Das Limit gilt **pro `EdgarClient`-Instanz** (eigener Limiter) — pro Prozess nur eine Instanz
-  verwenden, sonst vervielfacht sich die Rate. SEC-Antworten 429/403 werden **nicht** wiederholt.
+  verwenden, sonst vervielfacht sich die Rate. SEC-Antworten 429/403 werden **nicht** wiederholt. Fehler sind
+  typisiert (siehe 7.3.2); Netzwerkfehler und 5xx werden bis zu zweimal mit Backoff wiederholt.
 - Relevante Endpunkte (Stand der Planung — in Session 1 verifizieren):
   - Company-Tickers-Mapping (Ticker → CIK)
   - `submissions` (Filing-Historie je Unternehmen)
@@ -734,8 +761,8 @@ entspricht der EBITDA-Approximation (8.4): nie stillschweigend, immer gekennzeic
 Bei diesem Nutzungsprofil (Einzelnutzer, wenige Analysen/Tag) sind das geringe Beträge.
 Kostenhebel: aggressives Caching von EDGAR-Daten, kompakte Tool-Ergebnisse (keine Roh-JSONs ins
 Kontextfenster kippen), günstigeres Modell für einfache Schritte.
-*Stand v1.5: EDGAR-Antworten werden **nicht** gecacht (jeder Lauf lädt `companyfacts` neu); gecacht
-werden nur Kurse (siehe 8.3). `pandas` und `openpyxl` sind deklariert, aber bis Phase 4 ungenutzt.*
+*Stand v1.6.4: `companyfacts` werden **nicht** gecacht (jeder Lauf lädt sie neu); gecacht werden Kurse (siehe
+8.3) und die großen `frames`-Abrufe (Speicher je Client + SQLite, 7 Tage Gültigkeit). `pandas` und `openpyxl` sind deklariert, aber bis Phase 4 ungenutzt.*
 
 ### Entwicklungsumgebung (Befund 2026-10-04)
 
@@ -960,7 +987,7 @@ Phase-6-Oberfläche; die Streamlit-Oberfläche aus Phase 4 bleibt wie geplant.
 |---|---|---|
 | ~~D1~~ | ~~Welche Kursdatenquelle?~~ | ✅ **Entschieden:** Finnhub primär. Der ursprünglich vorgesehene Stooq-Fallback ist unverifiziert und deaktiviert (siehe 8.3, D7). |
 | ~~D2~~ | ~~Peer-Suche über `frames`-Endpunkt oder eigener SIC-Index?~~ | ✅ **Entschieden:** `browse-edgar` (SIC-Filter, paginiert) + `frames` (Bulk-Größenfilter), kein selbst gepflegter Index nötig (siehe 7.4, `domain/peers.py`) |
-| D3 | Kalenderjahr- oder Fiskaljahr-Normalisierung bei abweichenden FY-Enden? | Teilweise: Mismatch wird erkannt und geflaggt (`check_fiscal_year_mismatch`, Phase 2). Echte Normalisierung (z. B. Trailing-Twelve-Months-Angleichung) bleibt offen — Phase 3+ |
+| D3 | Kalenderjahr- oder Fiskaljahr-Normalisierung bei abweichenden FY-Enden? | Teilweise: Abweichungen werden erkannt und geflaggt (nur Warnungen, kein Ausschluss): Fiskaljahresende weicht ab (gefalteter Abstand der Periodenenden > ±14 Tage) und veraltetes 10-K (Peer-Ende ≥ 300 Tage vor dem des Ziels) — `check_fiscal_year_mismatch`, `check_stale_period`. Echte Normalisierung (z. B. Trailing-Twelve-Months-Angleichung) bleibt offen. |
 | ~~D4~~ | ~~Ausreißer-Definition (IQR-basiert? feste Schwellen?)~~ | ✅ **Entschieden:** IQR-basiert (Tukey-Fences, 1,5×), ab n≥4 Datenpunkten je Multiple — siehe `domain/quality.py` |
 | ~~D5~~ | ~~Projektname final~~ | ✅ **Entschieden:** **Scout Research** (siehe Änderungshistorie 1.2; der Tabelleneintrag war veraltet) |
 | D6 | Alpha-Vantage-Bildungslizenz beantragen, sobald Repo öffentlich? | offen — Phase 5 |
@@ -1125,7 +1152,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.1 | 2026-10-05 | Phase 3, Schritt 1: Stooq-Reste bereinigt (§8.3 D1-Überschrift, §9 Tech-Stack, §13 D1) — Stooq ist kein Fallback mehr, sondern ein deaktivierter Platzhalter (D7). Neue Config-Felder `anthropic_model` (Default `claude-sonnet-5-5`), `anthropic_compare_model`, `anthropic_effort`, `output_language`; Extra `agent` mit `anthropic>=1,<2`; pytest-Marker `live`. Plan: `docs/decisions/phase-3-plan.md`. |
 | 1.6.2 | 2026-10-08 | Phase 3, Schritt 2: D9 in L2 umgesetzt (`PeriodSelector`, `PeriodNotAvailable`, `HistoricalValuationNotSupported`, `calendar_year` mit Frame-Prüfung, ein Filing je Periode, erstes Filing gewinnt; 7.3/7.3.1). Golden-Set-Seed (5 Firmen) eingetragen; vier bekannte Abweichungen zum Seed dokumentiert und offen (`tests/unit/test_golden_reproduction.py`). |
 | 1.6.3 | 2026-10-08 | Golden-Set: §11.4 neu (Seed, `known_deviations`, vier entschiedene Fälle: ADSK `total_debt` und CDNS-Untergrenze als gepinnte Abweichungen, NVDA-Shares mit `tolerance_abs`, MSFT `d_and_a` als nicht ausgewiesen); §7.3.1: spätere Restatements werden nicht berücksichtigt. Kein Extraktor-Hack, D10/D12 unverändert. |
+| 1.6.4 | 2026-10-08 | Phase 3, Schritt 3 (Daten-Härtung): Periodenprüfung nach Tagen statt Monat (gefalteter Abstand ±14 Tage → "Fiskaljahresende weicht ab"; Peer-Ende ≥ 300 Tage vor dem Ziel → "veraltetes 10-K"; nur Warnungen; D3-Zeile); Größenfilter über alle Umsatz-Konzepte (lazy, Zähler) und Fix `resolve_calendar_year` (Frame des Anker-Konzepts); Frames-Cache (SQLite, 7 Tage); typisierte EDGAR-Fehler inkl. neuem Code `DATA_NOT_FOUND` (7.3.2); keine Header/Keys in Fehlern. |
 
 ---
 
-*Ende Dokumentversion 1.6.3*
+*Ende Dokumentversion 1.6.4*

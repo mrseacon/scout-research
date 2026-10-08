@@ -10,9 +10,7 @@ ein Kurs geschätzt.
 from __future__ import annotations
 
 import csv
-import email.utils
 import io
-import math
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -22,6 +20,7 @@ import httpx
 from pydantic import BaseModel
 
 from scout_research.data.cache import SqliteCache
+from scout_research.data.http_util import parse_retry_after as _parse_retry_after
 from scout_research.data.rate_limiter import RateLimiter
 
 FINNHUB_DEFAULT_REQUESTS_PER_MINUTE = 55
@@ -34,27 +33,6 @@ Aufrufer (CachedProvider -> Fallback bzw. "Marktdaten nicht verfügbar")."""
 
 _DEFAULT_429_BACKOFF_SECONDS = 5.0
 """Wartezeit (mal Versuchsnummer), wenn ein 429 ohne verwertbaren Retry-After kommt."""
-
-
-def _parse_retry_after(value: str | None, now: datetime | None = None) -> float | None:
-    """`Retry-After` ist laut HTTP entweder eine Zahl Sekunden oder ein HTTP-Datum."""
-    if not value:
-        return None
-    value = value.strip()
-    try:
-        seconds = float(value)
-    except ValueError:
-        seconds = None
-    if seconds is not None:
-        return max(seconds, 0.0) if math.isfinite(seconds) else None
-
-    try:
-        when = email.utils.parsedate_to_datetime(value)
-    except (TypeError, ValueError):
-        return None
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-    return max((when - (now or datetime.now(timezone.utc))).total_seconds(), 0.0)
 
 
 def _get_with_retry(

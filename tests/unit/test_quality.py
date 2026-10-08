@@ -1,8 +1,16 @@
+from datetime import date
+
+import pytest
+
 from scout_research.domain.multiples import compute_multiples
 from scout_research.domain.quality import (
+    PERIOD_TOLERANCE_DAYS,
+    STALE_PERIOD_DAYS,
     check_fiscal_year_mismatch,
     check_missing_data,
     check_outliers,
+    check_stale_period,
+    folded_offset_days,
     run_quality_checks,
 )
 from tests.unit.factories import make_metrics
@@ -48,16 +56,89 @@ def test_check_outliers_no_data_returns_empty() -> None:
     assert check_outliers(peer_multiples, "pe") == []
 
 
-def test_check_fiscal_year_mismatch_flags_different_month_only() -> None:
+def test_folded_offset_ignores_whole_years() -> None:
+    assert folded_offset_days(date(2026, 1, 31), date(2025, 2, 1)) == -1  # 52/53-Wochen-Jahr, 364 Tage
+    assert folded_offset_days(date(2026, 2, 1), date(2025, 1, 31)) == 1
+    assert folded_offset_days(date(2025, 12, 31), date(2025, 9, 27)) == 95
+    assert folded_offset_days(date(2025, 12, 31), date(2025, 12, 31)) == 0
+    assert -182 <= folded_offset_days(date(2025, 6, 30), date(2025, 12, 31)) <= 182
+
+
+@pytest.mark.parametrize(
+    "peer_end,expect_warning",
+    [
+        ("2025-12-28", False),  # 3 Tage: 52/53-Wochen-Jitter
+        ("2026-01-01", False),  # Monatsgrenze, 1 Tag
+        ("2026-01-14", False),  # genau an der Toleranz (14 Tage)
+        ("2026-01-15", True),   # 15 Tage: darüber
+        ("2026-01-31", True),   # 31 Tage
+        ("2025-06-30", True),   # ~halbes Jahr versetzt
+    ],
+)
+def test_check_fiscal_year_mismatch_uses_a_day_tolerance_not_the_month(peer_end: str, expect_warning: bool) -> None:
     target = make_metrics(ticker="TGT", period_end="2025-12-31")
-    same_month_peer = make_metrics(ticker="SAME", period_end="2025-12-28")
-    different_month_peer = make_metrics(ticker="DIFF", period_end="2026-01-31")
+    peer = make_metrics(ticker="PEER", period_end=peer_end, cik="0000000002")
 
-    warnings = check_fiscal_year_mismatch(target, [same_month_peer, different_month_peer])
+    warnings = check_fiscal_year_mismatch(target, [peer])
 
-    assert len(warnings) == 1
-    assert warnings[0].company == "DIFF"
-    assert "Fiskaljahresende" in warnings[0].message
+    assert (len(warnings) == 1) == expect_warning
+    if warnings:
+        assert warnings[0].company == "PEER" and warnings[0].severity == "warning"
+        assert "Fiskaljahresende weicht ab" in warnings[0].message
+        assert warnings[0].affected_field == "period_end"
+
+
+def test_52_53_week_year_ends_across_a_month_boundary_raise_no_false_alarm() -> None:
+    # Ziel endet am 01.02.2026 (53-Wochen-Jahr), Peer am 31.01.2026 bzw. 25.01.2026 (letzte Sonntage/Samstage)
+    target = make_metrics(ticker="TGT", period_end="2026-02-01")
+    peers = [
+        make_metrics(ticker="JAN31", period_end="2026-01-31", cik="0000000002"),
+        make_metrics(ticker="JAN25", period_end="2026-01-25", cik="0000000003"),
+    ]
+    assert check_fiscal_year_mismatch(target, peers) == []
+    assert check_stale_period(target, peers) == []
+
+
+def test_peer_with_previous_years_10k_in_the_same_month_is_flagged_as_stale_not_as_misaligned() -> None:
+    target = make_metrics(ticker="TGT", period_end="2025-09-27")
+    old_peer = make_metrics(ticker="OLD", period_end="2024-09-28", cik="0000000002")  # ein Jahr alt, gleicher Monat
+
+    assert check_fiscal_year_mismatch(target, [old_peer]) == []  # Abstand gefaltet 1 Tag: ausgerichtet
+    warnings = check_stale_period(target, [old_peer])
+
+    assert len(warnings) == 1 and warnings[0].company == "OLD" and warnings[0].severity == "warning"
+    assert "Veraltetes 10-K" in warnings[0].message and "2024-09-28" in warnings[0].message
+
+
+@pytest.mark.parametrize(
+    "peer_end,expect_stale",
+    [("2025-03-04", False), ("2025-03-03", True), ("2025-12-31", False), ("2026-06-30", False)],
+)
+def test_stale_threshold_is_300_days_and_ignores_newer_peers(peer_end: str, expect_stale: bool) -> None:
+    target = make_metrics(ticker="TGT", period_end="2025-12-28")  # 300 Tage nach 2025-03-03
+    peer = make_metrics(ticker="PEER", period_end=peer_end, cik="0000000002")
+
+    assert bool(check_stale_period(target, [peer])) == expect_stale
+
+
+def test_misaligned_and_stale_peer_gets_both_warnings() -> None:
+    target = make_metrics(ticker="TGT", period_end="2025-12-31")
+    peer = make_metrics(ticker="BOTH", period_end="2024-06-30", cik="0000000002")
+
+    messages = [w.message for w in check_fiscal_year_mismatch(target, [peer]) + check_stale_period(target, [peer])]
+    assert any("Fiskaljahresende weicht ab" in m for m in messages)
+    assert any("Veraltetes 10-K" in m for m in messages)
+
+
+def test_thresholds_are_the_decided_values() -> None:
+    assert (PERIOD_TOLERANCE_DAYS, STALE_PERIOD_DAYS) == (14, 300)
+
+
+def test_run_quality_checks_includes_the_stale_period_check() -> None:
+    target = make_metrics(ticker="TGT", period_end="2025-12-31")
+    old_peer = make_metrics(ticker="OLD", period_end="2024-12-31", cik="0000000002")
+    warnings = run_quality_checks(target, [old_peer], [compute_multiples(old_peer)])
+    assert any("Veraltetes 10-K" in w.message for w in warnings)
 
 
 def test_check_missing_data_flags_none_fields_with_correct_severity() -> None:
