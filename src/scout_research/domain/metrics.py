@@ -15,6 +15,7 @@ from datetime import date, datetime, timezone
 from scout_research.data.edgar_client import CompanyMetadata
 from scout_research.data.market_provider import PriceQuote
 from scout_research.domain.models import CompanyMetrics, FinancialFact, MarketSnapshot
+from scout_research.domain.periods import PeriodNotAvailable, PeriodSelector
 
 # Fallback-Ketten: XBRL-Tagging ist zwischen Unternehmen uneinheitlich (Risikotabelle, Abschnitt 13).
 # Reihenfolge = Priorität bei gleicher Periode. Eine Kette darf nie ein *älteres* Konzept
@@ -141,6 +142,9 @@ def extract_latest_annual_concept(
       Kettenreihenfolge entscheidet nur bei Gleichstand. (Früher gewann das erste Konzept mit
       irgendeiner Historie — das lieferte z. B. 2022er Umsatz für NVDA.)
     - Mit `period_end`: nur Fakten exakt dieser Periode; ältere Werte zählen als fehlend.
+    - Mehrere Einträge für dasselbe Konzept und Periodenende (das 10-K des Berichtsjahres und spätere
+      10-Ks mit Vergleichswerten, ggf. korrigiert): es gilt der **zuerst eingereichte**, also das 10-K des
+      Berichtsjahres selbst.
     - Mit `accession_number`: nur Fakten aus genau diesem Filing (für Cover-Page-Daten).
     """
     taxonomy_facts = company_facts.get("facts", {}).get(taxonomy, {})
@@ -152,7 +156,8 @@ def extract_latest_annual_concept(
         )
         if not annual:
             continue
-        latest = max(annual, key=lambda e: e["end"])
+        latest_end = max(e["end"] for e in annual)
+        latest = min((e for e in annual if e["end"] == latest_end), key=lambda e: e["filed"])
         rank = (latest["end"], -priority)
         if best is None or rank > best[0]:
             best = (rank, concept, latest)
@@ -307,15 +312,84 @@ def compute_ebitda(ebit: FinancialFact | None, d_and_a: FinancialFact | None) ->
     return ebit.value + d_and_a.value, True
 
 
-def _revenue_growth_yoy(series: list[FinancialFact]) -> float | None:
-    """YoY nur zwischen zwei direkt aufeinanderfolgenden Geschäftsjahren — eine Lücke im
-    Datenbestand würde sonst als "Jahreswachstum" ausgegeben."""
-    if len(series) < 2 or not series[1].value:
-        return None
-    gap = (date.fromisoformat(series[0].period_end) - date.fromisoformat(series[1].period_end)).days
-    if not (_YOY_GAP_DAYS[0] <= gap <= _YOY_GAP_DAYS[1]):
-        return None
-    return (series[0].value - series[1].value) / series[1].value
+def available_period_ends(company_facts: dict) -> list[str]:
+    """Geschäftsjahresenden mit Jahresumsatz in einem 10-K (über die ganze Umsatz-Kette), neueste zuerst.
+    Nur für diese Perioden lässt sich ein Periodenanker bilden."""
+    taxonomy_facts = company_facts.get("facts", {}).get("us-gaap", {})
+    ends = {
+        e["end"]
+        for concept in REVENUE_CONCEPTS
+        for e in _annual_entries(taxonomy_facts, concept, "USD", "10-K", "FY", None, None)
+    }
+    return sorted(ends, reverse=True)
+
+
+def select_revenue_anchor(cik: str, company_facts: dict, period: PeriodSelector | None = None) -> FinancialFact:
+    """Der Umsatz-Anker der gewählten Periode (Foundation Doc 7.3.1, 8.6).
+
+    Ohne Auswahl: das jüngste Geschäftsjahr (wie bisher). Mit `period_end`: exakt dieses Ende. Mit
+    `fiscal_year` (Best Effort, SEC-Feld `fy`): das Ende des 10-K-Jahresabschlusses mit diesem `fy` — die
+    Vergleichswerte der Vorjahre in einem 10-K tragen dasselbe `fy`, daher zählt das jüngste Ende darunter.
+    Fehlt die Periode, wird `PeriodNotAvailable` mit den verfügbaren Enden geworfen — nie ein anderes Jahr.
+    """
+    if period is None or period.is_latest:
+        return extract_latest_annual_revenue(cik, company_facts)
+
+    if period.period_end is not None:
+        wanted_end = period.period_end.isoformat()
+    else:
+        taxonomy_facts = company_facts.get("facts", {}).get("us-gaap", {})
+        ends_for_fy = [
+            e["end"]
+            for concept in REVENUE_CONCEPTS
+            for e in _annual_entries(taxonomy_facts, concept, "USD", "10-K", "FY", None, None)
+            if e.get("fy") == period.fiscal_year
+        ]
+        wanted_end = max(ends_for_fy) if ends_for_fy else None
+
+    fact = (
+        extract_latest_annual_concept(cik, company_facts, REVENUE_CONCEPTS, period_end=wanted_end)
+        if wanted_end is not None
+        else None
+    )
+    if fact is None:
+        raise PeriodNotAvailable(cik, period, available_period_ends(company_facts))
+    return fact
+
+
+def restrict_to_filing(company_facts: dict, accession_number: str) -> dict:
+    """Nur Einträge aus genau einem Filing. Verhindert, dass zu einer Periode Werte aus verschiedenen
+    10-Ks gemischt werden (Originalwert aus dem Berichtsjahr + korrigierter Vergleichswert aus einem
+    späteren 10-K). Für die jüngste Periode ändert das nichts — es gibt kein späteres 10-K."""
+    return {
+        **company_facts,
+        "facts": {
+            taxonomy: {
+                concept: {
+                    **data,
+                    "units": {
+                        unit: [e for e in entries if e.get("accn") == accession_number]
+                        for unit, entries in data.get("units", {}).items()
+                    },
+                }
+                for concept, data in concepts.items()
+            }
+            for taxonomy, concepts in company_facts.get("facts", {}).items()
+        },
+    }
+
+
+def _yoy_growth(anchor: FinancialFact, series: list[FinancialFact]) -> float | None:
+    """Wachstum des Ankerumsatzes gegenüber dem direkt vorhergehenden Geschäftsjahr (350–380 Tage
+    Abstand der Periodenenden). Ohne Vorjahr in der Reihe: `None`."""
+    anchor_end = date.fromisoformat(anchor.period_end)
+    for previous in series:
+        gap = (anchor_end - date.fromisoformat(previous.period_end)).days
+        if _YOY_GAP_DAYS[0] <= gap <= _YOY_GAP_DAYS[1]:
+            if not previous.value:
+                return None
+            return (anchor.value - previous.value) / previous.value
+    return None
 
 
 def build_company_metrics(
@@ -323,26 +397,34 @@ def build_company_metrics(
     company: CompanyMetadata,
     company_facts: dict,
     price_quote: PriceQuote | None,
+    period: PeriodSelector | None = None,
 ) -> CompanyMetrics:
     """Orchestriert die Extraktion aller v1-Kennzahlen für ein Unternehmen (Foundation Doc 3.2).
 
     Fehlende Einzelwerte blockieren nicht den gesamten Aufbau — sie werden als `None`
     durchgereicht, damit Nutzer sehen, was fehlt, statt einen Absturz zu erleben. Alle Werte
-    gehören zur Periode des jüngsten Umsatzes (Anker, siehe Modul-Docstring).
+    gehören zur Periode des Ankers (siehe Modul-Docstring) und stammen aus **dem 10-K, das den Umsatz-
+    Anker liefert**.
+
+    `period` wählt das Geschäftsjahr (D9); ohne Angabe das jüngste. Für eine **historische** Periode
+    (nicht die jüngste) werden Kurs und Marktkapitalisierung nicht verwendet — der Kurs ist der heutige,
+    Multiples gibt es nur für die aktuelle Periode (`CompanyMetrics.is_historical`).
     """
-    revenue = extract_latest_annual_revenue(cik, company_facts)
+    revenue = select_revenue_anchor(cik, company_facts, period)
     anchor = revenue.period_end
+    is_historical = anchor != available_period_ends(company_facts)[0]
+    filing_facts = restrict_to_filing(company_facts, revenue.accession_number)
 
     def at_anchor(chain: list[str]) -> FinancialFact | None:
-        return extract_latest_annual_concept(cik, company_facts, chain, period_end=anchor)
+        return extract_latest_annual_concept(cik, filing_facts, chain, period_end=anchor)
 
     ebit = at_anchor(EBIT_CONCEPTS)
     net_income = at_anchor(NET_INCOME_CONCEPTS)
     total_assets = at_anchor(TOTAL_ASSETS_CONCEPTS)
-    total_debt = extract_total_debt(cik, company_facts, anchor)
+    total_debt = extract_total_debt(cik, filing_facts, anchor)
     total_debt_is_lower_bound = False
     if total_debt is None:
-        total_debt = extract_debt_lower_bound(cik, company_facts, anchor)
+        total_debt = extract_debt_lower_bound(cik, filing_facts, anchor)
         total_debt_is_lower_bound = total_debt is not None
     cash = at_anchor(CASH_CONCEPTS)
     d_and_a = at_anchor(DEPRECIATION_AMORTIZATION_CONCEPTS)
@@ -350,7 +432,7 @@ def build_company_metrics(
     # dasselbe 10-K-Filing wie der Umsatz statt an das Periodenende.
     shares = extract_latest_annual_concept(
         cik,
-        company_facts,
+        filing_facts,
         SHARES_OUTSTANDING_CONCEPTS,
         unit="shares",
         taxonomy="dei",
@@ -365,7 +447,7 @@ def build_company_metrics(
 
     market: MarketSnapshot | None = None
     enterprise_value: float | None = None
-    if price_quote is not None and shares is not None:
+    if price_quote is not None and shares is not None and not is_historical:
         market_cap = price_quote.price * shares.value
         market = MarketSnapshot(
             ticker=price_quote.ticker,
@@ -378,7 +460,7 @@ def build_company_metrics(
         if total_debt is not None and cash is not None:
             enterprise_value = market_cap + total_debt.value - cash.value
 
-    revenue_growth_yoy = _revenue_growth_yoy(extract_annual_series(cik, company_facts, REVENUE_CONCEPTS))
+    revenue_growth_yoy = _yoy_growth(revenue, extract_annual_series(cik, company_facts, REVENUE_CONCEPTS))
 
     margins = {
         "ebit_margin": (ebit.value / revenue.value) if ebit and revenue.value else None,
@@ -402,6 +484,7 @@ def build_company_metrics(
         market=market,
         enterprise_value=enterprise_value,
         enterprise_value_is_lower_bound=total_debt_is_lower_bound and enterprise_value is not None,
+        is_historical=is_historical,
         margins=margins,
         growth_rates=growth_rates,
         source_facts=source_facts,

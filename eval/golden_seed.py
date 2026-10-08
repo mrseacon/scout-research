@@ -99,6 +99,9 @@ def validate_seed(data: dict) -> list[str]:
                 problems.append(f"values.{name}.value muss eine Zahl sein (kein Text, keine Tausenderpunkte)")
             if entry.get("unit") not in UNIT_FACTORS:
                 problems.append(f"values.{name}.unit muss einer von {tuple(UNIT_FACTORS)} sein")
+        tolerance = entry.get("tolerance")
+        if tolerance is not None and (isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)) or tolerance < 0):
+            problems.append(f"values.{name}.tolerance muss eine Zahl >= 0 sein (in der Einheit des Eintrags)")
         source = entry.get("source")
         if _is_blank(source) or _PLACEHOLDER.search(str(source)):
             problems.append(f"values.{name}.source fehlt oder ist noch ein Platzhalter")
@@ -112,6 +115,11 @@ def to_usd(entry: dict) -> Decimal | None:
     if _is_blank(entry.get("value")):
         return None
     return Decimal(str(entry["value"])) * UNIT_FACTORS[entry["unit"]]
+
+
+def tolerance_usd(entry: dict) -> Decimal:
+    """Zulässige absolute Abweichung (gleiche Einheit wie `to_usd`); 0, wenn der Eintrag keine nennt."""
+    return Decimal(str(entry.get("tolerance", 0))) * UNIT_FACTORS[entry["unit"]]
 
 
 def main() -> None:

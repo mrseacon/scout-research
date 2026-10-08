@@ -1,3 +1,6 @@
+import tomllib
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -47,6 +50,11 @@ def test_invalid_choices_are_rejected(field, value):
         _settings(**{field: value})
 
 
-@pytest.mark.live
-def test_live_marker_is_deselected_by_default():
-    pytest.fail("Tests mit Marker 'live' dürfen in der Standardsuite nicht laufen (addopts -m 'not live').")
+def test_pytest_is_configured_to_deselect_live_tests_by_default() -> None:
+    """Standardsuite ohne Live-Aufrufe (Plan: kein Live-LLM-Call): `addopts` enthält "not live", der Marker
+    `live` ist registriert. Prüft die Konfiguration selbst und nicht, ob ein Test zufällig fehlschlägt."""
+    pyproject = tomllib.loads((Path(__file__).parent.parent.parent / "pyproject.toml").read_text(encoding="utf-8"))
+    options = pyproject["tool"]["pytest"]["ini_options"]
+
+    assert "not live" in options["addopts"]
+    assert any(marker.startswith("live:") for marker in options["markers"])

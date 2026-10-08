@@ -1,50 +1,54 @@
 # Golden-Set-Seed AAPL — von Hand aus dem 10-K geprüft (Messlineal, nicht aus dem Extraktor).
 # Gepinnt an period_end UND accession_number des 10-K, nicht an "jüngstes 10-K".
-# Werte so eintragen, wie sie im 10-K stehen; `unit` gibt die Einheit an (millions | thousands | units),
-# die Umrechnung in USD macht eval/golden_seed.py exakt. Ist ein Wert im 10-K nicht ausgewiesen, statt
-# `value` einen `absent_reason` setzen (z. B. "kein Gesamt-D&A im Cashflow ausgewiesen").
-# `status: complete` erst setzen, wenn alles geprüft ist; `python eval/golden_seed.py` listet die Lücken.
-status: skeleton            # skeleton | complete
+# Werte so eingetragen, wie sie im 10-K stehen; `unit` gibt die Einheit an (millions | thousands | units),
+# die Umrechnung in USD macht eval/golden_seed.py exakt. Ist ein Wert im 10-K nicht ausgewiesen, steht statt
+# `value` ein `absent_reason`. Optional `tolerance` (in der Einheit des Eintrags) für Werte, die das Filing
+# nur gerundet nennt. Quellen: Abschlüsse selbst (GuV, Bilanz, Kapitalflussrechnung, Schuldennote, Deckblatt),
+# nicht companyfacts, nicht R-Seiten, nicht der Extraktor.
+status: complete
 ticker: AAPL
 cik: "0000320193"
 form: 10-K
-period_end:                 # JJJJ-MM-TT, Geschäftsjahresende laut 10-K
-fiscal_year:                # ganze Zahl (DocumentFiscalYearFocus)
-accession_number:           # 0000000000-00-000000, das 10-K, aus dem die Werte stammen
-checked_by:
-checked_on:                 # JJJJ-MM-TT
+period_end: 2025-09-27
+fiscal_year: 2025
+accession_number: 0000320193-25-000079
+checked_by: Sean
+checked_on: 2026-10-08
 values:
   revenue:
-    value:
+    value: 416161
     unit: millions
-    source: "TODO: Umsatz — Seite/Statement im 10-K"
+    source: "10-K FY2025, Konzern-GuV: Total net sales"
   ebit:
-    value:
+    value: 133050
     unit: millions
-    source: "TODO: Operating Income — Seite/Statement im 10-K"
+    source: "10-K FY2025, Konzern-GuV: Operating income"
   net_income:
-    value:
+    value: 112010
     unit: millions
-    source: "TODO: Net Income — Seite/Statement im 10-K"
+    source: "10-K FY2025, Konzern-GuV: Net income"
   total_assets:
-    value:
+    value: 359241
     unit: millions
-    source: "TODO: Total Assets (Bilanz) — Seite im 10-K"
+    source: "10-K FY2025, Bilanz: Total assets"
   total_debt:
-    value:
+    value: 98657
     unit: millions
-    is_lower_bound:         # true/false: ist der Seed-Wert selbst nur eine Untergrenze?
-    source: "TODO: Gesamtschuld inkl. kurzfristigem Anteil, ohne Leasing — Seite/Anhang im 10-K"
+    is_lower_bound: false
+    source: "10-K FY2025, Bilanz/Schuldennote: Commercial paper 7979 + Term debt current 12350 + Term debt non-current 78328 (Term debt gesamt laut Note: 90678)"
   cash:
-    value:
+    value: 35934
     unit: millions
-    source: "TODO: Cash and Cash Equivalents (Bilanz) — Seite im 10-K"
+    source: "10-K FY2025, Bilanz: Cash and cash equivalents"
   d_and_a:
-    value:
+    value: 11698
     unit: millions
-    source: "TODO: Depreciation & Amortization (Kapitalflussrechnung) — Seite im 10-K"
+    source: "10-K FY2025, Kapitalflussrechnung: Depreciation and amortization"
   shares_outstanding:
-    value:
+    value: 14776353000
     unit: units
-    source: "TODO: Cover Page — Seite im 10-K"
-notes: ""
+    source: "10-K FY2025, Deckblatt (Stand 2025-10-17)"
+notes: |
+  Marketable securities: current 18763, non-current 77723 (nicht in cash).
+  Operating-Lease-ROU 11205, Finance-Lease-ROU 1033; Leasingverbindlichkeiten stehen in Other liabilities und sind NICHT in total_debt.
+  total_debt = ausgewiesene Finanzschulden ohne Leasing (is_lower_bound false).

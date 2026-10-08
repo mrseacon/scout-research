@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from eval.golden_seed import CORE_VALUES, SEED_DIR, load_seed, seed_files, to_usd, validate_seed
+from eval.golden_seed import CORE_VALUES, load_seed, seed_files, to_usd, tolerance_usd, validate_seed
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 EXPECTED = ["aapl", "adsk", "cdns", "msft", "nvda"]
@@ -70,6 +70,8 @@ def test_empty_skeleton_reports_every_missing_pin_and_value() -> None:
         (lambda d: d["values"]["revenue"].update(source="TODO: Seite"), "Platzhalter"),
         (lambda d: d["values"]["d_and_a"].update(value=5), "schließen sich aus"),
         (lambda d: d["values"]["total_debt"].pop("is_lower_bound"), "is_lower_bound"),
+        (lambda d: d["values"]["shares_outstanding"].update(tolerance=-1), "tolerance"),
+        (lambda d: d["values"]["shares_outstanding"].update(tolerance="1 Mio"), "tolerance"),
         (lambda d: d.update(status="done"), "status"),
     ],
 )
@@ -94,6 +96,12 @@ def test_to_usd_is_exact_and_handles_units() -> None:
     assert to_usd({"value": 1234, "unit": "thousands"}) == Decimal(1_234_000)
     assert to_usd({"value": 14776353000, "unit": "units"}) == Decimal(14_776_353_000)
     assert to_usd({"absent_reason": "nicht ausgewiesen"}) is None
+
+
+def test_tolerance_is_converted_with_the_unit_of_the_entry() -> None:
+    assert tolerance_usd({"unit": "units", "tolerance": 1_000_000}) == Decimal(1_000_000)
+    assert tolerance_usd({"unit": "millions", "tolerance": 0.5}) == Decimal(500_000)
+    assert tolerance_usd({"unit": "millions"}) == Decimal(0)
 
 
 def test_all_expected_seed_files_exist() -> None:

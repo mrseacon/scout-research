@@ -143,12 +143,14 @@ def test_find_peer_candidates_orchestrates_sic_and_size_filter() -> None:
             return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"></feed>')
         if "frames" in url:
             # AAA (1111111111) passt in die Groessenspanne, BBB (2222222222) nicht
-            return httpx.Response(200, text=_make_frames_body({1111111111: 900.0, 2222222222: 50_000.0}))
+            return httpx.Response(
+                200, text=_make_frames_body({9999999999: 1000.0, 1111111111: 900.0, 2222222222: 50_000.0})
+            )
         raise AssertionError(f"unerwartete URL: {url}")
 
     with _client(handler) as client:
         peers = find_peer_candidates(
-            client, target_cik="9999999999", target_sic="7372", target_revenue=1000.0, calendar_year=2024
+            client, target_cik="9999999999", target_sic="7372", target_revenue=1000.0, target_period_end="2024-12-31"
         )
 
     assert [p.ticker for p in peers] == ["AAA"]

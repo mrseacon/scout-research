@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.1 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.2 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -348,18 +348,36 @@ selbst (L3) noch nicht (Phase 3). Bekannte Abweichungen zwischen Katalog und L2-
 - `resolve_company`: nur **exakter Ticker** (`EdgarClient.resolve_cik`); Fuzzy-Match und
   Mehrdeutigkeits-Kandidatenliste fehlen.
 - `find_peer_candidates`: liefert **keine Begründung** (bewusst Phase 3, LLM-Ranking). Die L2-Funktion
-  hat noch `calendar_year` als Pflichtparameter; im Tool-Schema entfällt er und wird aus der Zielperiode
-  abgeleitet (siehe 7.3.1).
-- `get_financials` / `compute_comps_table`: **keine Perioden-/Konzeptauswahl** — immer das jüngste
-  10-K je Unternehmen. Schema für `period` freigegeben, Umsetzung steht aus (7.3.1, D9).
+  leitet `calendar_year` seit Phase 3, Schritt 2 aus dem Periodenende des Ziels ab und prüft es gegen den
+  Frame (7.3.1); der Parameter entfällt auch im Tool-Schema.
+- `get_financials` / `compute_comps_table`: L2 unterstützt die Periodenauswahl seit Phase 3, Schritt 2
+  (`build_company_metrics(..., period=PeriodSelector)`, 7.3.1, D9); die Tools (L3) stehen noch aus.
+  Keine Konzeptauswahl.
   `get_financials` ohne Konzeptliste: feste v1-Kennzahlen.
 - `get_market_data`: Kurs aus Finnhub, Shares aus `companyfacts`; bei **Mehrklassen-Aktien** sind
   Shares so nicht ermittelbar (siehe 8.6, D11).
 
-#### 7.3.1 Periodenauswahl (D9 — Schema freigegeben, **noch nicht implementiert**)
+#### 7.3.1 Periodenauswahl (D9 — in L2 umgesetzt, Phase 3 Schritt 2; Tools stehen aus)
 
 Optionaler Parameter `period` an `get_financials` und `compute_comps_table` (für das Ziel). Ohne
 `period` bleibt es beim heutigen Verhalten: jüngstes 10-K (FY) je Unternehmen.
+
+**Umsetzung in L2 (Phase 3, Schritt 2)** — `domain/periods.py`, `domain/metrics.py`, `domain/peers.py`:
+- `build_company_metrics(..., period: PeriodSelector | None)`; `PeriodNotAvailable` (Code
+  `PERIOD_NOT_AVAILABLE`) nennt die verfügbaren Geschäftsjahresenden (Perioden mit Jahresumsatz in einem
+  10-K).
+- **Ein Filing je Periode:** Alle Fakten einer Periode stammen aus dem 10-K, das den Umsatz-Anker liefert.
+  Steht eine Periode in mehreren 10-Ks (Original und spätere Vergleichswerte, ggf. korrigiert), gilt das
+  **zuerst eingereichte** (10-K des Berichtsjahres); ein Wert, den dieses 10-K nicht enthält, gilt als
+  nicht vorhanden und wird nicht aus einem späteren Filing aufgefüllt.
+- **Historische Perioden** (nicht die jüngste): `CompanyMetrics.is_historical = True`, kein Kurs, keine
+  Marktkapitalisierung, kein EV; `compute_multiples` weist alle Multiples mit Grund aus;
+  `build_comps_table` wirft `HistoricalValuationNotSupported` (Code `HISTORICAL_VALUATION_NOT_SUPPORTED`).
+- **YoY-Wachstum** bezieht sich auf den Anker der gewählten Periode (nicht auf das jüngste Jahr).
+- `peers.resolve_calendar_year` leitet `calendar_year` ab, verlangt das Ziel im Frame mit **genau seinem
+  Periodenende**, prüft sonst ±1 und wirft `FrameYearUnresolved` (Code `FRAME_YEAR_UNRESOLVED`).
+- Gemessen am Golden-Set-Seed (`eval/golden_set/`, 5 Firmen, gepinnt an `period_end` + Accession):
+  siehe `tests/unit/test_golden_reproduction.py`.
 
 ```python
 class PeriodSelector(BaseModel):         # höchstens ein Feld gesetzt; kein Feld = "latest"
@@ -920,7 +938,7 @@ Phase-6-Oberfläche; die Streamlit-Oberfläche aus Phase 4 bleibt wie geplant.
 | D6 | Alpha-Vantage-Bildungslizenz beantragen, sobald Repo öffentlich? | offen — Phase 5 |
 | D7 | Stooq ist unverifiziert/deaktiviert (nie funktionierender Fallback, siehe 8.3) — Ersatz nötig? | offen — vor Phase 5, Finnhub trägt v1 allein |
 | D8 | UI-Vision (Phase 6): Entwurf/Prototyp mit **Claude Design** — Exportformat und Übernahme in den Code offen; Frontend-Technik: Streamlit (Phase 4) vs. eigenes Frontend (z. B. Next.js/TypeScript) über eine API-Schicht (Phase 6). Siehe 12.1. | offen — vor Phase 6 |
-| ~~D9~~ | ~~Periodenauswahl: optionaler `period`-Parameter~~ | ✅ **Schema freigegeben** (7.3.1): `period_end` kanonisch, `fiscal_year` Best Effort; Multiples nur für die aktuelle Periode, historische Perioden nur Financials/Margen/Wachstum; `calendar_year` aus dem Tool-Schema, Ableitung `Jahr(Periodenende − 180 Tage)` gegen `frames` geprüft. **Umsetzung steht aus** (mit den Phase-3-Tools). |
+| ~~D9~~ | ~~Periodenauswahl: optionaler `period`-Parameter~~ | ✅ **Schema freigegeben** (7.3.1): `period_end` kanonisch, `fiscal_year` Best Effort; Multiples nur für die aktuelle Periode, historische Perioden nur Financials/Margen/Wachstum; `calendar_year` aus dem Tool-Schema, Ableitung `Jahr(Periodenende − 180 Tage)` gegen `frames` geprüft. **In L2 umgesetzt** (Phase 3, Schritt 2, siehe 7.3.1); die Tools stehen aus. |
 | ~~D10~~ | ~~Gesamtschuld bei fehlendem kurzfristigem Anteil~~ | ✅ **Entschieden und implementiert:** gekennzeichnete Untergrenze (`total_debt_is_lower_bound`), nur für Konzepte mit ausdrücklichem Ausschluss des kurzfristigen Anteils; sichtbar in EV, EV-Multiples, Statistik und als QualityWarning; Export-Kennzeichnung ist Phase-4-Anforderung (8.6). |
 | D11 | Shares bei Mehrklassen-Aktien (GOOGL, META, TEAM, DDOG, CRWD, WDAY): Cover Page (`R1.htm`) parsen oder Finnhub `profile2` nutzen? | **zurückgestellt** (Sean, 2026-10-04). `profile2` ist im Free-Tier verfügbar und plausibel, aber ohne Stichtag/Accession (8.3). Nichts eingebaut. |
 | ~~D12~~ | ~~EBITDA ohne Gesamt-D&A-Konzept~~ | ✅ **Entschieden:** bleibt `None`, keine Teilposten addieren (8.4). |
@@ -1077,7 +1095,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.5 | 2026-10-04 | **Härtungs-Session vor Phase 3.** Nachgeführte Abweichungen (§0-Regel): Net Debt/EBITDA nicht implementiert (3.2); Tool-Katalog vs. L2-Stand (7.3); Rate-Limit pro Client-Instanz (8.2); Cache-Schlüssel = UTC-Kalendertag statt Handelstag, `/quote` = letzter Kurs statt EOD, `PriceQuote` statt `MarketSnapshot` aus Providern (8.3); Datenmodell-Abweichungen (10); EDGAR nicht gecacht, pandas/openpyxl ungenutzt (9); Repo-Struktur (15). **Korrekturen:** Stooq ist unverifiziert/deaktiviert, der Quote-Endpunkt hat nie funktioniert (8.3, D7); D5 geschlossen. **Neu:** 8.6 — Befund *veraltete Fakten aus falscher Periode* (8/30 Firmen, u. a. ADBE-Schuld aus 2019), Periodenanker, Schuldenregel mit Definitionsbelegen; Finnhub-Throttle (55/min, jeder Versuch zählt) und 429/`Retry-After`; Entwicklungsumgebung (iCloud setzt `hidden` auf Punkt-Dateien → Editable-Install bricht); D8–D12 aufgenommen. Phase-1/2-Live-Ergebnisse für Adobe sind ungültig (Nachtrag in 12). **Entscheidungen (Sean, 2026-10-04):** D12 `None` ohne Teilposten; D9 Periodenschema freigegeben (`period_end` kanonisch, `fiscal_year` Best Effort, Multiples nur aktuelle Periode, `calendar_year` aus dem Tool-Schema, Ableitung `Jahr(Periodenende − 180 Tage)` gegen `frames` geprüft: 31/31 — 7.3.1), noch nicht implementiert; D10 **implementiert** — gekennzeichnete Schuld-Untergrenze (`total_debt_is_lower_bound`, sichtbar in EV, EV-Multiples, Statistik, QualityWarning; 8.6); D11 zurückgestellt, `profile2`-Befund in 8.3; UI-Vision (Phase 6) als 12.1 eingefügt, D8 konkretisiert; zweite harte Regel in 7.1 (L1–L5 wissen nichts über die UI). **Live-Gate (≥ 4/5 Peers mit EV-Multiples):** vor D10 verfehlt (3/5), nach D10 **4/5, davon 1 mit Flag**. |
 | 1.6 | 2026-10-05 | **Strategische Ausrichtung** als 1.4 eingefügt: Scout ist Zuarbeiter für Private Equity und Deal-Analyse (Valuation, Transaction Advisory), kein Consulting-Framework-Werkzeug; Bausteinfolge (Comps → Precedent Transactions, DCF, LBO-/Returns-Screening → optional Due-Diligence-Support), Prinzipien je Baustein, Consulting-One-Pager als Ausgabeform nach Phase 4, Abgrenzung zu Arcticon (MCP-Server nach Phase 5). Widersprüche abgeglichen: §1.3 Punkt 4, §4 (Precedent/DCF nicht mehr "v2/v3", neue strategische Nicht-Ziele), §8.5, Roadmap "Danach" (Memo-Entwurfsmodul entfällt), §13 Risiko Scope Creep, §14.1 Positionierung. **Neu offen:** D13 (Reihenfolge nach den Comps), D14 (Format One-Pager), D15 (MCP-Server/Arcticon). Kein Code geändert. |
 | 1.6.1 | 2026-10-05 | Phase 3, Schritt 1: Stooq-Reste bereinigt (§8.3 D1-Überschrift, §9 Tech-Stack, §13 D1) — Stooq ist kein Fallback mehr, sondern ein deaktivierter Platzhalter (D7). Neue Config-Felder `anthropic_model` (Default `claude-sonnet-5-5`), `anthropic_compare_model`, `anthropic_effort`, `output_language`; Extra `agent` mit `anthropic>=1,<2`; pytest-Marker `live`. Plan: `docs/decisions/phase-3-plan.md`. |
+| 1.6.2 | 2026-10-08 | Phase 3, Schritt 2: D9 in L2 umgesetzt (`PeriodSelector`, `PeriodNotAvailable`, `HistoricalValuationNotSupported`, `calendar_year` mit Frame-Prüfung, ein Filing je Periode, erstes Filing gewinnt; 7.3/7.3.1). Golden-Set-Seed (5 Firmen) eingetragen; vier bekannte Abweichungen zum Seed dokumentiert und offen (`tests/unit/test_golden_reproduction.py`). |
 
 ---
 
-*Ende Dokumentversion 1.6.1*
+*Ende Dokumentversion 1.6.2*

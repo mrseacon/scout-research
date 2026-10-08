@@ -75,6 +75,10 @@ class CompanyMetrics(BaseModel):
     """True, wenn `enterprise_value` berechnet wurde und `total_debt` eine Untergrenze ist —
     der EV ist dann ebenfalls eine Untergrenze (zu niedrig)."""
 
+    is_historical: bool = False
+    """True, wenn die Periode nicht das jüngste Geschäftsjahr ist (D9). Dann gibt es weder Kurs noch
+    Marktkapitalisierung noch EV: Multiples nur für die aktuelle Periode (Foundation Doc 7.3.1)."""
+
     margins: dict[str, float | None]
     growth_rates: dict[str, float | None]
 

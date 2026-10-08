@@ -10,7 +10,12 @@ from datetime import datetime, timezone
 
 from scout_research.domain.models import CompanyMetrics, CompsTable
 from scout_research.domain.multiples import MULTIPLE_NAMES, compute_multiple_statistics, compute_multiples
+from scout_research.domain.periods import HistoricalValuationNotSupported
 from scout_research.domain.quality import run_quality_checks
+
+
+def _ticker(metrics: CompanyMetrics) -> str:
+    return metrics.company.tickers[0] if metrics.company.tickers else metrics.company.cik
 
 
 def build_comps_table(target: CompanyMetrics, peers: list[CompanyMetrics]) -> CompsTable:
@@ -19,6 +24,10 @@ def build_comps_table(target: CompanyMetrics, peers: list[CompanyMetrics]) -> Co
     """
     if not peers:
         raise ValueError("build_comps_table benötigt mindestens einen Peer.")
+
+    historical = [_ticker(m) for m in (target, *peers) if m.is_historical]
+    if historical:
+        raise HistoricalValuationNotSupported(historical)
 
     target_multiples = compute_multiples(target)
     peer_multiples = [compute_multiples(peer) for peer in peers]

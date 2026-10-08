@@ -33,6 +33,17 @@ def compute_multiples(metrics: CompanyMetrics) -> CompanyMultiples:
     excluded_reasons: dict[str, str] = {}
     ev = metrics.enterprise_value
 
+    if metrics.is_historical:
+        reason = "Historische Periode: Multiples nur für die aktuelle Periode (der Kurs ist der heutige)"
+        return CompanyMultiples(
+            company_ticker=_company_ticker(metrics),
+            ev_revenue=None,
+            ev_ebitda=None,
+            ev_ebit=None,
+            pe=None,
+            excluded_reasons={name: reason for name in MULTIPLE_NAMES},
+        )
+
     def _ev_missing_reason() -> str:
         # EV = Market Cap + Total Debt - Cash: die Ursache nennen, die tatsächlich fehlt.
         if metrics.market is None:
