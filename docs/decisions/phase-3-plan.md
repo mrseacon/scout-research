@@ -2,7 +2,7 @@
 
 **Status:** freigegeben (Sean, 2026-10-05), Revision 3 — Q1–Q3 entschieden. Umsetzung in einer neuen Session (Sonnet).
 Ergänzt durch das Review der Tool-Verträge (Schritt 4, Opus, 2026-10-08): eindeutige Korrekturen eingearbeitet,
-Befunde und **offene Entscheidungen E1–E7 in Abschnitt 10** — vor Schritt 5 zu entscheiden.
+Befunde und Entscheidungen E1–E7 (entschieden von Sean, 2026-10-08) in Abschnitt 10.
 **Bezug:** `docs/foundation.md` v1.6 (§3.1, §6.2, §7, §11, 1.4 Strategische Ausrichtung).
 **Harte Regeln:** Provenance lückenlos · keine Schätzungen · kein direkter L1-Zugriff aus L4 ·
 Human-in-the-Loop-Gate nicht optional · kein Live-LLM-Call in der Standardsuite.
@@ -183,13 +183,15 @@ nie eine automatische Auflösung.
 ```ts
 // 2 find_peer_candidates (Modell-Tool)
 in : { target_cik, period?: PeriodSelector, size_range?: { min: 0.05..1, max: 1..20 } }   // Default 0,2–5
+//     target_cik: nur Firmen nach Allowlist (c), siehe unten (E1)
 out: { candidate_set_id,
        target: { cik, ticker, name, sic_code, sic_description, period_end, fiscal_year, revenue_musd },
        calendar_year_used, frame_check: "target_in_frame"|"neighbor_year",
        size_range: { min, max },                                                  // tatsächlich verwendet
        candidates: [{ cik, ticker, name, sic_code, revenue_musd, size_ratio }],   // sortiert, max. 40 (s. u.)
        counts: { sic_matches, without_ticker, not_in_revenue_frame, outside_size_range,
-                 passed_filters, returned, truncated } }
+                 passed_filters, returned, truncated, sic_search_truncated },
+       warnings: [{ id, severity, kind, text }] }          // z. B. kind "sic_search_truncated" (F12)
 ```
 
 `calendar_year = Jahr(period_end − 180 Tage)` mit Frame-Prüfung (±1, sonst Fehler), wie Foundation 7.3.1.
@@ -213,9 +215,18 @@ out: { candidate_set_id,
   des Menschen ins Set.
 - Bei `truncated > 0` zeigt die deterministische Vorschlagsdarstellung (Abschnitt 5) "N weitere Kandidaten wegen
   des Limits nicht gezeigt", zusammen mit `size_range`.
+- **Ziel (E1 A):** `target_cik` muss die Allowlist-Regel (c) erfüllen (per `resolve_company` aufgelöst, `query`
+  wörtlich in einer Nutzernachricht); sonst `NOT_IN_ALLOWLIST`. Damit schaltet ein Ziel nichts frei, was der Nutzer
+  nicht genannt hat; Allowlist-Regel (a) entfällt.
+- **Historische Periode (E3 A):** Liegt die gewählte Periode vor dem jüngsten Geschäftsjahr des Ziels, endet der
+  Aufruf sofort mit `HISTORICAL_VALUATION_NOT_SUPPORTED` (kein Kandidatenset). Für historische Zahlen gibt es
+  `get_financials`.
+- **SIC-Suche (F12):** Die Suche über `browse-edgar` kann nach `max_pages` Seiten abbrechen. L1 meldet das;
+  `counts.sic_search_truncated = true` und eine Warnung (`kind: "sic_search_truncated"`, Stufe `warning`) im Ergebnis.
+- **Ziel ohne SIC-Code oder mit Umsatz ≤ 0 (E7 A):** Fehler `PEER_SEARCH_NOT_POSSIBLE` (nicht wiederholbar) mit
+  `details.reason` ∈ `no_sic_code` | `non_positive_revenue`.
 - Fehler: `PeriodNotAvailable` → `PERIOD_NOT_AVAILABLE`, `RevenueNotFoundError` → `TARGET_REVENUE_NOT_FOUND`,
-  `FrameYearUnresolved` → `FRAME_YEAR_UNRESOLVED`, `EdgarError` → Mapping unten. Ziel ohne SIC-Code: offen (E7).
-- Wer als `target_cik` zulässig ist: offen (E1).
+  `FrameYearUnresolved` → `FRAME_YEAR_UNRESOLVED`, `EdgarError` → Mapping unten.
 
 ```ts
 // 3 propose_peer_set (NEU, Modell-Tool — das Gate)
@@ -235,13 +246,13 @@ Validierung von `propose_peer_set`:
 
 ```ts
 // 4 compute_comps_table (Modell-Tool)
-in : { peer_set_id, period?: PeriodSelector }          // peer_period_mode nur "own_latest" (A4)
+in : { peer_set_id }          // kein period (E3 A): Periode = jüngstes Geschäftsjahr; peer_period_mode nur "own_latest" (A4)
 out: { comps_table_id,
        basis: { target_period_end, target_fiscal_year, price_as_of,   // price_as_of: null, wenn die Kursdaten abweichen
                 units: { money: "Mio. USD", multiple: "x", pct: "%" }, n_peers, n_peers_with_ev_multiples },
        target: Row, peers: Row[],
        statistics: [{ multiple, min, median, mean, max, n, excluded: [ticker], lower_bound: [ticker] }],
-       warnings: [{ id: "W1", severity, company, field, message }], n_warnings_by_severity,
+       warnings: [{ id: "W1", severity, kind, company, field, text, params }], n_warnings_by_severity,
        skipped_peers: [{ ticker, code, reason }] }
 Row = { cik, ticker, name, period_end, fiscal_year, price, price_as_of, revenue, ebit, ebitda, ebitda_approximated,
         net_income, total_debt, total_debt_is_lower_bound, cash, market_cap, enterprise_value, ev_is_lower_bound,
@@ -257,9 +268,19 @@ Namenswelt lernen.
 - `Row.ticker` ist der **eine** Ticker, den die Sitzung für diese CIK verwendet (Review 10, F9) — nicht
   `CompanyMultiples.company_ticker` (der ist mit Marktdaten der abgefragte Kurs-Ticker, ohne Marktdaten `company.tickers[0]`
   — beide können auseinanderlaufen).
-- Periode vor dem jüngsten Geschäftsjahresende des Ziels → `HISTORICAL_VALUATION_NOT_SUPPORTED`
-  (entscheidet das offene Detail aus 7.3.1).
-- Scheitert ein einzelner Peer, steht er in `skipped_peers`; bleibt keiner, folgt `NO_VALID_PEERS`.
+- Es gibt keinen `period`-Parameter (E3 A). `HISTORICAL_VALUATION_NOT_SUPPORTED` kommt schon aus
+  `find_peer_candidates`; `compute_comps_table` rechnet immer das jüngste Geschäftsjahr.
+- **Fehlerverhalten je Peer (E5 A):** Netz-/Upstream-Fehler (`EdgarUnavailable`, `EdgarRateLimited`, auch beim
+  Ziel) lassen das **ganze Tool** scheitern (`UPSTREAM_UNAVAILABLE`, wiederholbar; bzw. `UPSTREAM_RATE_LIMITED`).
+  Fehlen dagegen Daten für einen Peer (`EdgarDataNotFound`, `RevenueNotFoundError`), steht er in `skipped_peers`
+  **und** erzeugt eine **Pflicht-Warnung** der Stufe `warning` (`kind: "peer_skipped"`, `company` = Ticker). Sie
+  steht in `warnings` vor allen anderen, ist in der Tabellendarstellung sichtbar und muss im Kommentar
+  angesprochen werden (Warnungs-Abdeckung, Abschnitt 3). Bleibt kein Peer, folgt `NO_VALID_PEERS`.
+- **Warnungen ohne Zahlen (E4 A):** Das Modell sieht je Warnung `kind`, `company`, `field`, einen Text **ohne
+  Ziffern** (Vorlage je `kind`, ohne Firmennamen) und nur **nicht-numerische** `params` (z. B. `multiple`,
+  `direction`, `concept`). Die ausführlichen Texte mit Zahlen (Abstand in Tagen, Spannbreite) und die numerischen
+  Parameter bleiben im gespeicherten Ergebnis und im Trace; die feste Warnungsliste der Anwendung zeigt sie. Dasselbe
+  gilt für `Row.excluded`: Text je Ausschlussgrund ohne Ziffern (`<= 0` heißt dort „nicht positiv“).
 
 ```ts
 // 5 submit_commentary (NEU, Modell-Tool — siehe Abschnitt 3)
@@ -283,12 +304,19 @@ out: { ticker, price, price_as_of, price_source, price_note: "letzter Kurs, wäh
 ```
 
 **Zugriffsregel für 6 und 7: Allowlist (R3).** Erlaubt sind nur:
-(a) das Ziel eines Kandidatensets dieser Sitzung,
 (b) Firmen in einem **bestätigten** Peer-Set,
 (c) Firmen, die in dieser Sitzung per `resolve_company` mit `status: "resolved"` aufgelöst wurden **und
 deren `query` wörtlich in einer Nutzernachricht vorkommt**.
 
-Alles andere → `NOT_IN_ALLOWLIST`.
+Alles andere → `NOT_IN_ALLOWLIST`. (Die frühere Regel (a) „Ziel eines Kandidatensets“ entfällt mit E1 A: Das Ziel
+muss selbst (c) erfüllen.) `get_market_data` nimmt weiter einen `ticker`; er wird über die SEC-Ticker-Map auf die CIK
+abgebildet, die Allowlist prüft die CIK.
+
+**Wörtlichkeit (E2 A).** Sie gilt für die **Anfrage (`query`), die an `resolve_company` ging** — nicht für den
+SEC-Namen. Ganze Wörter bzw. Wortfolgen (Wortgrenzen); bei Namen ist Groß-/Kleinschreibung egal; ein Ticker mit
+höchstens fünf Zeichen zählt nur, wenn der Nutzer ihn **groß** oder mit **`$`** geschrieben hat; nur exakte Treffer
+(`match` = `ticker_exact` oder `name_exact`). Als Nutzernachricht zählt nur, was der Host beim Eingang protokolliert
+hat — nie ein Tool-Ergebnis.
 
 Begründung für den Zusatz in (c): Ohne ihn könnte das Modell einen Kandidaten selbst per
 `resolve_company` auflösen und damit freischalten — das Gate wäre umgangen. Dieselbe Wörtlich-Regel gilt
@@ -319,6 +347,7 @@ schon für `user_requested_additions`. **(Q3, bestätigt.)**
 | `PERIOD_NOT_AVAILABLE` | nein | mit verfügbaren Periodenenden |
 | `HISTORICAL_VALUATION_NOT_SUPPORTED` | nein | historische Periode in `compute_comps_table` |
 | `TARGET_REVENUE_NOT_FOUND` | nein | kein Umsatz-Konzept für das Ziel |
+| `PEER_SEARCH_NOT_POSSIBLE` | nein | Ziel ohne SIC-Code oder mit Umsatz ≤ 0; `details.reason` (E7 A) |
 | `NO_VALID_PEERS` | nein | kein Peer übrig |
 | `PEER_SET_NOT_CONFIRMED` | nein | `compute_comps_table` ohne bestätigtes Set |
 | `NOT_IN_ALLOWLIST` | nein | `get_financials`/`get_market_data` außerhalb der Allowlist |
@@ -542,6 +571,18 @@ Kanal und Zeitstempel.
 
 **Rückmeldung an das Modell:** Host-Nachricht mit `peer_set_id`.
 
+**Gate-Regeln (Entscheidung Sean, 2026-10-08, F8):**
+- Eine Chatnachricht ist **nie** eine Bestätigung — nur die Host-API `confirm_peer_set` bestätigt. Eine Chatnachricht
+  lässt den Vorschlag unbestätigt und hebt die Sperre für weitere Tool-Aufrufe auf (neuer Zug).
+- Nur der **jüngste** Vorschlag ist bestätigbar; je Vorschlag höchstens eine Bestätigung. Ein neuer Vorschlag macht
+  das Handle des alten ungültig.
+- Nach erfolgreichem `propose_peer_set` bekommt jeder weitere Tool-Aufruf bis zur nächsten Nutzernachricht oder
+  Bestätigung `AWAITING_PEER_CONFIRMATION`.
+- Handles tragen ein Typpräfix (`cs_` Kandidatenset, `pp_` Vorschlag, `ps_` bestätigtes Peer-Set, `ct_`
+  Comps-Tabelle, `fin_` Financials) und einen Zufallsteil; gültig für die Sitzung. Falscher Typ oder unbekannt →
+  `UNKNOWN_HANDLE` mit dem erwarteten Typ im `hint`; ein bekannter, noch unbestätigter `pp_`-Handle in
+  `compute_comps_table` → `PEER_SET_NOT_CONFIRMED`.
+
 **Der Vorschlag wird deterministisch gerendert.** Jede Begründung trägt sichtbar das Label
 **"Modell-Einschätzung, nicht belegt"** (R6).
 
@@ -721,6 +762,7 @@ Geprüft am 2026-10-05 gegen die offizielle Dokumentation.
 | Sonnet 5.5 unterstützt Systemnachrichten mitten im Gespräch | **belegt** (in der Liste der unterstützten Modelle) | https://platform.claude.com/docs/en/build-with-claude/prompt-caching |
 | Sonnet 5.5: `tool_choice` `any`/`tool` → 400; `auto` und `none` unterstützt | **belegt** | https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools#forcing-tool-use |
 | Sonnet 5.5: Thinking-Blöcke an Modell und Konversation gebunden (Verlauf nur anhängen) | **ungeprüft gegen Live-Doku** (aus der gebündelten SDK-Referenz) | — |
+| `strict: true`: Längen-, Wertebereichs- und `maxItems`-Grenzen werden nicht unterstützt; `minItems` nur 0/1; `format: date`, `enum`, `anyOf`, einfaches `pattern` unterstützt | **belegt** (Seite gelesen am 2026-10-08) | https://platform.claude.com/docs/en/build-with-claude/structured-outputs#json-schema-limitations |
 | Sonnet 5.5: Mindestlänge für Caching | **ungeprüft** | — |
 | Datumslose IDs ab der 4.6-Generation sind feste Snapshots | **belegt:** *"Every Claude model ID is a pinned snapshot, including the dateless IDs used from the 4.6 generation on."* | https://platform.claude.com/docs/en/about-claude/models/overview |
 | SDK-Defaults: Timeout 10 min, `max_retries` 2 | **ungeprüft gegen Live-Doku** (aus der gebündelten SDK-Referenz) | — |
@@ -800,14 +842,42 @@ Comps-Tabelle** schreibt, existiert nicht: alle Werte kommen über Handles aus L
 - Prompt: bei `counts.truncated > 0` dem Nutzer sagen, dass nicht alle Kandidaten gezeigt wurden; Ziel nur aus
   Nutzernennung (E1); Zahlenregel für freien Text passend zu E6; Umgang mit Warnungen passend zu E4.
 
-### Offene Entscheidungen (Sean)
+### Entscheidungen (Sean, 2026-10-08)
 
-| # | Frage | Optionen | Empfehlung |
-|---|---|---|---|
-| E1 | Wer darf Ziel von `find_peer_candidates` sein? | **A** nur Firmen, die Allowlist (c) erfüllen (vom Nutzer genannt, per `resolve_company` aufgelöst); (a) wird damit überflüssig · **B** jede CIK, aber (a) schaltet nicht mehr frei · **C** wie geplant | A |
-| E2 | Wie genau ist "wörtlich"? | **A** ganze Wörter/Wortfolgen; Namen ohne Rücksicht auf Groß/klein; Ticker mit höchstens fünf Zeichen nur, wenn der Nutzer sie groß oder mit `$` geschrieben hat; nur Treffer `ticker_exact`/`name_exact` · **B** ganze Wörter ohne Groß-/Kleinregel (Restrisiko "an", "es") · **C** Host fragt bei jeder genannten Firma nach ("Meinst du Intuit (INTU)?") und markiert sie | A |
-| E3 | Perioden in `compute_comps_table` | **A** kein `period`-Parameter; Periode = Zielperiode des Kandidatensets; `find_peer_candidates` mit historischer Periode → sofort `HISTORICAL_VALUATION_NOT_SUPPORTED` · **B** historische Kandidatensuche erlaubt (Recherche), Tabelle abgelehnt · **C** wie geplant | A |
-| E4 | Zahlen in Warnungen und Ausschlussgründen | **A** Modell bekommt zahlenfreie Texte plus `kind` und strukturierte Parameter; Zahlen zeigt nur die deterministische Warnings-Liste · **B** neue Slot-Art `[[warn:W3:<param>]]` · **C** Zahlen aus Warnungstexten im Backstop erlauben | A |
-| E5 | Peer scheitert in `compute_comps_table` | **A** Upstream-Fehler (`UPSTREAM_*`) lassen das Tool scheitern; Datenfehler (`DATA_NOT_FOUND`, kein Umsatz) → `skipped_peers` **und** eine Warnung der Stufe `warning` · **B** alles überspringen, je Peer eine Warnung · **C** wie geplant | A |
-| E6 | Zahlen in Folgeantworten nach der Tabelle | **A** Slots in jedem Modelltext, sobald eine Comps-Tabelle existiert (gerendert wie der Kommentar), Regex für den Rest; Prompt angleichen · **B** Zahlen in Folgeantworten nur über `submit_commentary` · **C** wie geplant (nur Regex) | A |
-| E7 | Ziel ohne SIC-Code oder mit Umsatz ≤ 0 | **A** neuer Code `PEER_SEARCH_NOT_POSSIBLE` (nicht wiederholbar) mit `details.reason` · **B** vorhandene Codes (`DATA_NOT_FOUND` bzw. `TARGET_REVENUE_NOT_FOUND`) mit `details.reason` | A |
+| # | Frage | Entscheidung |
+|---|---|---|
+| E1 | Wer darf Ziel von `find_peer_candidates` sein? | **A:** nur Firmen, die Allowlist (c) erfüllen; Regel (a) entfällt |
+| E2 | Wie genau ist „wörtlich“? | **A**, präzisiert: gilt für die `query` an `resolve_company`, nicht für den SEC-Namen; ganze Wörter, Namen ohne Groß-/Kleinregel, Ticker bis 5 Zeichen nur groß oder mit `$`, nur exakte Treffer; Nutzernachricht = nur vom Host protokollierter Eingang, nie Tool-Ergebnisse |
+| E3 | Perioden in `compute_comps_table` | **A:** kein `period`; historische Periode in `find_peer_candidates` → sofort `HISTORICAL_VALUATION_NOT_SUPPORTED` |
+| E4 | Zahlen in Warnungen und Ausschlussgründen | **A:** zahlenfreie Texte plus `kind` und Parameter; Zahlen nur in der festen Warnungsliste |
+| E5 | Peer scheitert | **A**, präzisiert: Netzfehler → ganzes Tool scheitert (`UPSTREAM_UNAVAILABLE`, wiederholbar); fehlende Daten → `skipped_peers` plus Pflicht-Warnung, sichtbar in Kommentar und Tabelle |
+| E6 | Zahlen in Folgeantworten | **A:** Slots in jedem Modelltext, sobald eine Tabelle existiert (Schritt 6/7) |
+| E7 | Ziel ohne SIC-Code / Umsatz ≤ 0 | **A:** neuer Code `PEER_SEARCH_NOT_POSSIBLE` mit `details.reason` |
+
+Zusätze (Sean, 2026-10-08): F8 wie vorgeschlagen, dazu „Chatnachricht ist nie Bestätigung“, „neuer Vorschlag
+macht altes Handle ungültig“, „weitere Tool-Aufrufe → `AWAITING_PEER_CONFIRMATION`“; F12 mit Zähler und Warnung;
+F11 vor dem Verlass auf `strict: true` gegen die Doku prüfen (maßgeblich bleibt Pydantic auf dem Server); F5b in
+Schritt 5 beheben.
+
+### Status je Befund (Stand Schritt 5)
+
+| # | Status |
+|---|---|
+| F1 | umgesetzt (Nutzerprotokoll im `ToolContext`, Wörtlichkeit nach E2); T13 |
+| F2 | umgesetzt (E1 A) |
+| F3 | umgesetzt (Bereinigung auch in Warnungstexten bzw. Warnungstexte ohne Namen; Ticker-Prüfung) |
+| F4 | umgesetzt (E4 A: `kind`/`params` an `QualityWarning`, `excluded_codes` an `CompanyMultiples`; zahlenfreie Vorlagen) |
+| F5 | (a) umgesetzt (kein Query-String/Header im Trace-Vertrag, T12); (b) umgesetzt: L1 fängt alle `httpx.HTTPError`, 3xx und ungültiges JSON → typisierte Fehler, Finnhub: ungültige Antwort → `MarketDataUnavailable`; Tests |
+| F6 | umgesetzt (E3 A) |
+| F7 | umgesetzt (E5 A) |
+| F8 | umgesetzt (Gate-Regeln in Abschnitt 5) |
+| F9 | umgesetzt ohne L2-Änderung: `ToolContext.ticker_for(cik)` (erster Ticker gewinnt); der Handler setzt ihn als ersten Eintrag von `CompanyMetadata.tickers` und fragt damit den Kurs ab |
+| F10 | durch E6 A entschieden; Umsetzung in Schritt 6/7 |
+| F11 | geprüft gegen die Doku (2026-10-08, https://platform.claude.com/docs/en/build-with-claude/structured-outputs, Abschnitt „JSON Schema limitations“). **Nicht unterstützt** (400-Fehler): `minLength`/`maxLength`, `minimum`/`maximum`/`multipleOf`, Array-Grenzen außer `minItems` 0 oder 1 (also auch `maxItems`), rekursive Schemas. **Unterstützt:** `enum`, `const`, `anyOf`, internes `$ref`/`$defs`, `format: date`, einfaches `pattern`, `additionalProperties: false`. Folge: Der Schema-Generator entfernt die nicht unterstützten Grenzen aus dem gesendeten Schema und schreibt sie in die `description` des Feldes; **maßgeblich bleibt die Pydantic-Prüfung auf dem Server** (Test `test_schemas.py`) |
+| F12 | umgesetzt (`sic_search_truncated`, Warnung) |
+| F13–F15, F21 | im Plan eingearbeitet |
+| F16 | umgesetzt (Vorlagen je Code, `details.problems`, `UNKNOWN_TOOL`) |
+| F17 | umgesetzt (E7 A) |
+| F18 | Empfehlung umgesetzt: Namen/Ticker des Kandidatensets von der Ziffernprüfung ausgenommen; `notable_exclusions.cik` muss im Kandidatenset liegen |
+| F19 | **nicht übernommen:** der Vertrag bleibt `get_market_data { ticker }`; Ticker → CIK über die SEC-Ticker-Map, Allowlist nach CIK |
+| F20 | Empfehlung umgesetzt (Prozent als Prozentzahl mit einer Stelle, `size_ratio` zwei Stellen, ein Wert ≠ 0 wird nie als 0 ausgegeben) |
