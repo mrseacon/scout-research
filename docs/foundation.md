@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.5 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.6 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -433,6 +433,7 @@ Tool-Layer.
 | L2 | `PeriodNotAvailable` | `PERIOD_NOT_AVAILABLE` | nein |
 | L2 | `HistoricalValuationNotSupported` | `HISTORICAL_VALUATION_NOT_SUPPORTED` | nein |
 | L2 | `FrameYearUnresolved` | `FRAME_YEAR_UNRESOLVED` | nein |
+| L2 | `RevenueNotFoundError` (Ziel ohne Umsatz-Konzept; bei einem Peer: `skipped_peers`) | `TARGET_REVENUE_NOT_FOUND` | nein |
 
 **Sicherheit (Regel für alle Fehlerobjekte, Meldungen, Logs und Traces):** Sie enthalten keine Request-Header —
 nie den User-Agent mit Name und E-Mail — und keine API-Keys.
@@ -1162,7 +1163,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.3 | 2026-10-08 | Golden-Set: §11.4 neu (Seed, `known_deviations`, vier entschiedene Fälle: ADSK `total_debt` und CDNS-Untergrenze als gepinnte Abweichungen, NVDA-Shares mit `tolerance_abs`, MSFT `d_and_a` als nicht ausgewiesen); §7.3.1: spätere Restatements werden nicht berücksichtigt. Kein Extraktor-Hack, D10/D12 unverändert. |
 | 1.6.4 | 2026-10-08 | Phase 3, Schritt 3 (Daten-Härtung): Periodenprüfung nach Tagen statt Monat (gefalteter Abstand ±14 Tage → "Fiskaljahresende weicht ab"; Peer-Ende ≥ 300 Tage vor dem Ziel → "veraltetes 10-K"; nur Warnungen; D3-Zeile); Größenfilter über alle Umsatz-Konzepte (lazy, Zähler) und Fix `resolve_calendar_year` (Frame des Anker-Konzepts); Frames-Cache (SQLite, 7 Tage); typisierte EDGAR-Fehler inkl. neuem Code `DATA_NOT_FOUND` (7.3.2); keine Header/Keys in Fehlern. |
 | 1.6.5 | 2026-10-08 | Sicherheit: Finnhub-Fehler bereinigt (`MarketDataUnavailable` ohne URL/Token/Ausnahmekette) und httpx-Anfragezeilen im Log geschwärzt — vorher stand der API-Key in `str`/`repr` des Fehlers und in INFO-Logzeilen von httpx (Befund aus Schritt 3; nicht erreichbar, solange `CachedProvider` Fehler verschluckt). Sicherheits-Absatz in 7.3.2 erweitert. |
+| 1.6.6 | 2026-10-08 | Phase 3, Schritt 4: Review der Tool-Verträge gegen den Code (Plan, Abschnitt 10: Befunde F1–F21, offene Entscheidungen E1–E7). Eindeutige Korrekturen nur im Plan; hier ergänzt: `RevenueNotFoundError` → `TARGET_REVENUE_NOT_FOUND` in 7.3.2. Kein Code geändert. |
 
 ---
 
-*Ende Dokumentversion 1.6.5*
+*Ende Dokumentversion 1.6.6*

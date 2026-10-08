@@ -1,6 +1,8 @@
 # Phase 3 — Agent-Schicht: Umsetzungsplan
 
 **Status:** freigegeben (Sean, 2026-10-05), Revision 3 — Q1–Q3 entschieden. Umsetzung in einer neuen Session (Sonnet).
+Ergänzt durch das Review der Tool-Verträge (Schritt 4, Opus, 2026-10-08): eindeutige Korrekturen eingearbeitet,
+Befunde und **offene Entscheidungen E1–E7 in Abschnitt 10** — vor Schritt 5 zu entscheiden.
 **Bezug:** `docs/foundation.md` v1.6 (§3.1, §6.2, §7, §11, 1.4 Strategische Ausrichtung).
 **Harte Regeln:** Provenance lückenlos · keine Schätzungen · kein direkter L1-Zugriff aus L4 ·
 Human-in-the-Loop-Gate nicht optional · kein Live-LLM-Call in der Standardsuite.
@@ -19,6 +21,7 @@ Human-in-the-Loop-Gate nicht optional · kein Live-LLM-Call in der Standardsuite
 | R8 | A7 präzisiert: Kanal `eval` nur über die Eval-Harness, nie aus dem Agent-Loop, Läufe im Trace markiert | 5, 6 |
 | R9 | Ausgabesprache als Konfigurationswert (Default Deutsch) | 1, 3, 8 |
 | R10 | Entscheidungen Q1–Q3 (Sean, 2026-10-05): Default-Modell **`claude-sonnet-5-5`** (ersetzt R1, Haiku 4.5 nur als Vergleich), zwei Korrekturrunden für `submit_commentary`, Allowlist-Zusatz mit wörtlicher Fundstelle | 3, 4, 8 |
+| R11 | Review Schritt 4 (2026-10-08): `find_peer_candidates` an `PeerSearchResult` angepasst (Sortierung, Kürzung, Zähler); `basis.price_as_of`; Einheit in `get_financials`; "Nutzernachricht" definiert; Codes `UNKNOWN_TOOL`, `AWAITING_PEER_CONFIRMATION`; Fehlermeldungen nur aus Vorlagen; Block-Zählung korrigiert; Trace ohne Query-Strings und Secrets | 2, 3, 6, 10 |
 
 **Befund bei der Prüfung von R5:** Claude Haiku 4.5 hat laut Modellübersicht eine Retirement-Zusage von
 *"Not sooner than October 15, 2026"* — zehn Tage nach diesem Plan. Daher Default **Claude Sonnet 5.5**
@@ -48,6 +51,9 @@ als Vergleich, solange verfügbar (Q1, entschieden).
   9. Kosmetik: `compute_ebitda` liefert `approximated=True` auch bei `None`; Docstring von
      `extract_total_debt` vor D10.
   10. `SqliteCache` ist nicht thread-sicher nutzbar (relevant erst für MCP, D15).
+
+  **Stand nach Schritt 3 (2026-10-08):** 1, 4, 5, 7 und 8 erledigt (Schritte 1–3), 6 durch A4 umgangen, 2 und 3
+  durch die Tool-Verträge unten. Offen: 9 (`compute_ebitda` liefert weiterhin `approximated=True` bei `None`) und 10.
 
 ---
 
@@ -147,7 +153,14 @@ Grundsätze:
   expliziten Anzahlfeldern, damit nichts gezählt werden muss.
 - **Externe Strings (R7):** Firmennamen, SIC-Beschreibungen und Konzeptnamen werden vor der Ausgabe an
   das Modell bereinigt: Steuerzeichen entfernt, Länge begrenzt, die Slot-Begrenzer `[[`/`]]` maskiert
-  (sonst könnte ein Firmenname einen Slot einschleusen).
+  (sonst könnte ein Firmenname einen Slot einschleusen). Das gilt auch für **Texte, in die L2 externe Strings
+  einbettet** — z. B. Warnungstexte aus `quality.py` mit `company.name`. Ticker aus der SEC-Ticker-Map werden
+  gegen `^[A-Z0-9.\-]{1,10}$` geprüft; ein Ticker, der das nicht erfüllt, wird nicht ausgegeben (Review 10, F3).
+- **Nutzernachricht** (für die Wörtlich-Regeln in `user_requested_additions` und Allowlist (c)) heißt: Text, den
+  der Mensch eingegeben hat, vom Host beim Eingang in ein Protokoll in `ToolContext` geschrieben. **Nicht** dazu
+  gehören Nachrichten mit `role: "user"`, die `tool_result`-Blöcke tragen (die API transportiert Tool-Ergebnisse in
+  `user`-Nachrichten — sie enthalten jeden Kandidatennamen), Host-/Systemnachrichten und der markierte
+  `user`-Fallback für Haiku 4.5. Der Handler liest dieses Protokoll, nie die Message-Liste (Review 10, F1).
 
 ```ts
 PeriodSelector = { period_end?: date, fiscal_year?: int }   // höchstens eins; leer = jüngstes 10-K
@@ -173,11 +186,36 @@ in : { target_cik, period?: PeriodSelector, size_range?: { min: 0.05..1, max: 1.
 out: { candidate_set_id,
        target: { cik, ticker, name, sic_code, sic_description, period_end, fiscal_year, revenue_musd },
        calendar_year_used, frame_check: "target_in_frame"|"neighbor_year",
-       candidates: [{ cik, ticker, name, sic_code, revenue_musd, size_ratio }],   // sortiert nach |log size_ratio|, max. 40
-       counts: { sic_matches, without_ticker, not_in_revenue_frame, outside_size_range, returned, truncated } }
+       size_range: { min, max },                                                  // tatsächlich verwendet
+       candidates: [{ cik, ticker, name, sic_code, revenue_musd, size_ratio }],   // sortiert, max. 40 (s. u.)
+       counts: { sic_matches, without_ticker, not_in_revenue_frame, outside_size_range,
+                 passed_filters, returned, truncated } }
 ```
 
 `calendar_year = Jahr(period_end − 180 Tage)` mit Frame-Prüfung (±1, sonst Fehler), wie Foundation 7.3.1.
+
+**Abgleich mit L2 (Stand Schritt 3):**
+- Handler-Komposition: `get_company_metadata` (SIC) → `get_company_facts` → `select_revenue_anchor(cik, facts,
+  period)`; daraus `target_revenue = anchor.value`, `target_period_end = anchor.period_end` und
+  **`target_revenue_concept = anchor.concept`** → `peers.find_peer_candidates(...)` → `PeerSearchResult`.
+  `calendar_year_used`/`frame_check` kommen aus `PeerSearchResult.calendar_year`.
+- **Sortierung und Kürzung** (L2 liefert die Kandidaten in SIC-Trefferreihenfolge, ungekürzt): aufsteigend nach
+  `|ln size_ratio|` (0,5× und 2× gelten als gleich weit entfernt), Gleichstand nach Ticker, dann CIK; höchstens
+  **40** (`MAX_PEER_CANDIDATES`). Empfehlung: als reine L2-Funktion neben `find_peer_candidates`, damit testbar.
+- **Zähler:** L2-`counts.returned` (Kandidaten nach beiden Filtern) heißt im Tool **`passed_filters`**;
+  `returned` ist die Länge von `candidates` (≤ 40); **`truncated = passed_filters − returned`** als Ganzzahl.
+  Es gilt `sic_matches = without_ticker + not_in_revenue_frame + outside_size_range + passed_filters` — außer bei
+  Zielumsatz ≤ 0: Dort liefert `classify_candidates_by_size` nur Nullen (Review 10, F17).
+  `frames_loaded` geht nur in den Trace.
+- **Das gespeicherte Kandidatenset enthält nur die zurückgegebenen Kandidaten.** `propose_peer_set` prüft gegen
+  genau die Liste, die das Modell gesehen hat — sonst könnte es einen abgeschnittenen Kandidaten per CIK aus dem
+  Vorwissen benennen. Abgeschnittene Firmen kommen nur über `user_requested_additions` oder die `add_queries`
+  des Menschen ins Set.
+- Bei `truncated > 0` zeigt die deterministische Vorschlagsdarstellung (Abschnitt 5) "N weitere Kandidaten wegen
+  des Limits nicht gezeigt", zusammen mit `size_range`.
+- Fehler: `PeriodNotAvailable` → `PERIOD_NOT_AVAILABLE`, `RevenueNotFoundError` → `TARGET_REVENUE_NOT_FOUND`,
+  `FrameYearUnresolved` → `FRAME_YEAR_UNRESOLVED`, `EdgarError` → Mapping unten. Ziel ohne SIC-Code: offen (E7).
+- Wer als `target_cik` zulässig ist: offen (E1).
 
 ```ts
 // 3 propose_peer_set (NEU, Modell-Tool — das Gate)
@@ -199,13 +237,13 @@ Validierung von `propose_peer_set`:
 // 4 compute_comps_table (Modell-Tool)
 in : { peer_set_id, period?: PeriodSelector }          // peer_period_mode nur "own_latest" (A4)
 out: { comps_table_id,
-       basis: { target_period_end, target_fiscal_year, units: { money: "Mio. USD", multiple: "x", pct: "%" },
-                n_peers, n_peers_with_ev_multiples },
+       basis: { target_period_end, target_fiscal_year, price_as_of,   // price_as_of: null, wenn die Kursdaten abweichen
+                units: { money: "Mio. USD", multiple: "x", pct: "%" }, n_peers, n_peers_with_ev_multiples },
        target: Row, peers: Row[],
        statistics: [{ multiple, min, median, mean, max, n, excluded: [ticker], lower_bound: [ticker] }],
        warnings: [{ id: "W1", severity, company, field, message }], n_warnings_by_severity,
        skipped_peers: [{ ticker, code, reason }] }
-Row = { ticker, name, period_end, fiscal_year, price, price_as_of, revenue, ebit, ebitda, ebitda_approximated,
+Row = { cik, ticker, name, period_end, fiscal_year, price, price_as_of, revenue, ebit, ebitda, ebitda_approximated,
         net_income, total_debt, total_debt_is_lower_bound, cash, market_cap, enterprise_value, ev_is_lower_bound,
         ebit_margin, net_margin, revenue_yoy,
         ev_revenue, ev_ebitda, ev_ebit, pe, excluded: { <field>: reason } }
@@ -213,6 +251,12 @@ Row = { ticker, name, period_end, fiscal_year, price, price_as_of, revenue, ebit
 
 Die Feldnamen in `Row` sind identisch mit den Slot-Feldern (Abschnitt 3); das Modell muss keine zweite
 Namenswelt lernen.
+- `basis.price_as_of` ist das gemeinsame Kursdatum aller Zeilen mit Kurs; weichen die Daten ab, ist es `null`
+  (Slot → `SLOT_VALUE_UNAVAILABLE` mit Grund), das Datum je Zeile steht in `price_as_of`. Kein "jüngstes" Datum
+  als Ersatz. (Der Prompt verlangt das Kursdatum in der Basis; vorher gab es dafür keinen Slot.)
+- `Row.ticker` ist der **eine** Ticker, den die Sitzung für diese CIK verwendet (Review 10, F9) — nicht
+  `CompanyMultiples.company_ticker` (der ist mit Marktdaten der abgefragte Kurs-Ticker, ohne Marktdaten `company.tickers[0]`
+  — beide können auseinanderlaufen).
 - Periode vor dem jüngsten Geschäftsjahresende des Ziels → `HISTORICAL_VALUATION_NOT_SUPPORTED`
   (entscheidet das offene Detail aus 7.3.1).
 - Scheitert ein einzelner Peer, steht er in `skipped_peers`; bleibt keiner, folgt `NO_VALID_PEERS`.
@@ -225,8 +269,12 @@ out: { status: "accepted", slots_used, warnings_addressed: [id], warnings_not_ad
 // 6 get_financials (Modell-Tool, Allowlist)
 in : { cik, period?: PeriodSelector, metrics?: ("revenue"|"ebit"|"ebitda"|"net_income"|"total_assets"|"total_debt"|"cash"|"shares_outstanding")[] }
 out: { financials_id, cik, ticker, name, period_end, fiscal_year,
-       values: { <metric>: { value_musd, flags[], concept, accession_number } | { unavailable_reason } },
+       values: { <metric>: { value, unit: "Mio. USD"|"Mio. Stück", flags[], concept, accession_number }
+                         | { unavailable_reason } },
        ebit_margin, net_margin, revenue_yoy }
+//   unit "Mio. Stück" nur für shares_outstanding. ebitda: concept "OperatingIncomeLoss+<D&A-Konzept>",
+//   flags ["approximated"]; total_debt mit Untergrenze: flags ["lower_bound"]. shares_outstanding kommt aus
+//   source_facts (dei), nicht aus CompanyMetrics.market — sonst fehlte es bei historischen Perioden.
 
 // 7 get_market_data (Modell-Tool, Allowlist)
 in : { ticker }
@@ -285,9 +333,22 @@ schon für `user_requested_additions`. **(Q3, bestätigt.)**
 | `UPSTREAM_RATE_LIMITED` | nein | SEC 429/403 (bewusst keine Wiederholung); `details.retry_after_seconds` aus `Retry-After`, falls vorhanden |
 | `TOOL_TIMEOUT` | ja (1×) | Zeitbudget des Tools überschritten |
 | `LOOP_GUARD` | nein | gleicher Aufruf nach nicht wiederholbarem Fehler |
+| `UNKNOWN_TOOL` | nein | Tool-Name nicht in der Tool-Liste (z. B. ein halluziniertes `confirm_peer_set`); jeder `tool_use`-Block braucht ein `tool_result` |
+| `AWAITING_PEER_CONFIRMATION` | nein | weiterer `tool_use`-Block in derselben Antwort nach erfolgreichem `propose_peer_set`; wird nicht ausgeführt |
 | `INTERNAL_ERROR` | nein | unerwartete Ausnahme; Meldung bereinigt, Stacktrace nur im Trace |
 
 Fehlende Marktdaten sind kein Fehler, sondern Warnings im Ergebnis.
+
+**Meldungen an das Modell (Review 10, F16):** `message`, `hint` und `details` entstehen aus einer **Vorlage je
+Code** mit freigegebenen Feldern (z. B. `available_period_ends`, `retry_after_seconds`, `tickers`), nie aus
+`str(exc)`. Insbesondere gehen der Endpunkt-Pfad eines `EdgarError`, Ausnahme-Texte und Stacktraces nur in den
+Trace. `INVALID_ARGUMENTS`: `details` nur `[{loc, msg}]` aus der Pydantic-Validierung — ohne `input` und ohne
+Doku-URLs. Mehrere Probleme in einem Aufruf (z. B. drei falsche Slots) stehen **alle** in `details.problems`,
+damit eine Korrekturrunde reicht.
+
+**L2-Fehler im Mapping:** `RevenueNotFoundError` → `TARGET_REVENUE_NOT_FOUND`, wenn es das Ziel betrifft (bei einem
+Peer: `skipped_peers`); `ValueError` aus `build_comps_table` (keine Peers) wird nie erreicht, weil der Handler vorher
+`NO_VALID_PEERS` prüft.
 
 **L1-Fehlerklassen und Mapping (Schritt 3, entschieden 2026-10-08).** `edgar_client` wirft `EdgarUnavailable`,
 `EdgarRateLimited` (mit `retry_after_seconds`), `EdgarDataNotFound` und `EdgarHttpError` (alle von
@@ -311,7 +372,9 @@ Slots, der Code setzt die Werte aus der gespeicherten `CompsTable` (volle Präzi
 |---|---|
 | `[[co:<TICKER>:<feld>]]` | Wert eines Unternehmens; `<feld>` ∈ Felder von `Row` (revenue, ebit, ebitda, net_income, total_debt, cash, market_cap, enterprise_value, price, price_as_of, period_end, fiscal_year, ebit_margin, net_margin, revenue_yoy, ev_revenue, ev_ebitda, ev_ebit, pe) |
 | `[[stat:<multiple>:<min\|median\|mean\|max\|n>]]` | Peer-Statistik |
-| `[[basis:<n_peers\|n_peers_with_ev_multiples\|target_period_end\|target_fiscal_year>]]` | Basisangaben |
+| `[[basis:<n_peers\|n_peers_with_ev_multiples\|target_period_end\|target_fiscal_year\|price_as_of>]]` | Basisangaben |
+
+`<TICKER>` ist `Row.ticker` in der Schreibweise der Tabelle (`[A-Z0-9.\-]`, z. B. `BRK-B` aus der SEC-Ticker-Map).
 
 **Rendering durch den Code:**
 - Einheit und Format nach `output_language`: `de` → `6.210 Mio. USD`, `25,1x`, `34,2 %`, `28.11.2025`.
@@ -332,9 +395,11 @@ Slots, der Code setzt die Werte aus der gespeicherten `CompsTable` (volle Präzi
 
 **Reaktion und Ablauf:**
 - Abweisung ist ein normaler Tool-Fehler; das Modell korrigiert im selben Zug.
-- Nach **zwei** Abweisungen folgt der **Block**: Der Kommentar wird nicht gezeigt, stattdessen erscheinen
-  der feste Hinweis "Kommentar zurückgehalten", die deterministisch gerenderte Tabelle und die
-  Warnings-Liste. (Q2, bestätigt: zwei Korrekturen, weil Slot-Tippfehler erwartbar sind.)
+- Nach **zwei erfolglosen Korrekturrunden**, also bei der **dritten** Abweisung, folgt der **Block**: Der
+  Kommentar wird nicht gezeigt, stattdessen erscheinen der feste Hinweis "Kommentar zurückgehalten", die
+  deterministisch gerenderte Tabelle und die Warnings-Liste. (Q2, bestätigt: zwei Korrekturen, weil
+  Slot-Tippfehler erwartbar sind. Korrigiert im Review Schritt 4: vorher stand hier "nach zwei Abweisungen",
+  das wäre nur eine Korrekturrunde gewesen.)
 - Nach `accepted` endet der Zug; angezeigt wird der **gerenderte** Text, nicht der Modelltext.
 
 **Backstop für alle übrigen Modelltexte** (Rückfragen, Text nach `propose_peer_set`, Erklärungen ohne
@@ -503,9 +568,9 @@ derzeit im iCloud-Desktop (Foundation §9).
 
 | Ereignis | Inhalt |
 |---|---|
-| Kopf | `run_id`, `session_id`, `run_mode` (`interactive` / `eval`), Git-Commit, Modell-ID, `output_language`, Hash von System-Prompt und Tool-Schemas, Parameter |
+| Kopf | `run_id`, `session_id`, `run_mode` (`interactive` / `eval`), Git-Commit, Modell-ID, `output_language`, Hash von System-Prompt und Tool-Schemas, Parameter (**Whitelist**: Modell, Effort, Limits, Budgets — nie `Settings` als Ganzes: es enthält API-Keys und die EDGAR-Kontaktadresse) |
 | Modellaufruf | Anzahl Nachrichten, `usage` (Input, Output, Cache-Read/-Write), `stop_reason`, Latenz, `request_id` |
-| Tool-Aufruf | Name, Input, vollständiges Ergebnis inkl. Provenance, kompakte Fassung für das Modell, Fehlercode, Dauer, Upstream-Requests, Cache-Treffer |
+| Tool-Aufruf | Name, Input, vollständiges Ergebnis inkl. Provenance, kompakte Fassung für das Modell, Fehlercode, Dauer, Upstream-Requests (Host, Pfad, Status — **ohne Query-String**, dort steht der Finnhub-Key, und ohne Header, dort steht der User-Agent), Cache-Treffer; Stacktraces ohne lokale Variablen |
 | Gate | Kandidatenset, Vorschlag mit Begründungen (`rationale_source`), Bestätigung mit Kanal und Abweichung |
 | Kommentar | je Einreichung: Rohtext mit Slots, Slot → Feldpfad, Ablehnungsgrund; am Ende gerenderter Text, Abdeckung der Warnings, Endaktion (`accepted` / `accepted_after_n` / `blocked`) |
 | Backstop | extrahierte Zahlen mit Fundstelle, Verstöße, Endaktion |
@@ -525,7 +590,9 @@ derzeit im iCloud-Desktop (Foundation §9).
 
 **Testaufbau:**
 - `ScriptedModelClient` liefert festgelegte Antworten und zeichnet die Anfragen auf.
-- Tools laufen gegen Fake-`EdgarClient`/Provider (`tests/unit/factories.py`) und companyfacts-Fixtures.
+- Tools laufen gegen einen `EdgarClient` mit `httpx.MockTransport` (wie in `tests/unit/test_peers.py`), einen
+  Fake-`MarketDataProvider` und die companyfacts-Fixtures. `tests/unit/factories.py` enthält bisher nur
+  `make_metrics`; Fake-Provider und Transport-Helfer legt Schritt 5 dort an.
 - Der SDK-Adapter wird nur gegen ein Fake-`messages.create` getestet (keine Bindung an SDK-Interna).
 
 | # | Pflichttest |
@@ -541,6 +608,8 @@ derzeit im iCloud-Desktop (Foundation §9).
 | T9 | Trace eines geskripteten Laufs ist schema-valide; enthält Gate-Ereignis, Kommentar-Einreichungen, `run_mode` |
 | T10 | Warnung für veraltete Periode bei Peer mit älterem Geschäftsjahr im selben Monat; kein Fehlalarm bei 52/53-Wochen-Jitter |
 | T11 | Kanal `eval` wird ohne `EvalSessionConfig` abgelehnt; Eval-Läufe tragen `run_mode: "eval"` |
+| T12 | **Secrets (Review 10):** geskripteter Lauf mit Fake-Finnhub-Key und Fake-Kontaktadresse, inkl. aller Upstream-Fehlerarten und einer unerwarteten Ausnahme: weder Key noch Adresse noch User-Agent in Tool-Ergebnissen, Modell-Payloads, Trace oder Logs |
+| T13 | **Wörtlich-Regel:** Kandidatenname, der nur in einem `tool_result` steht, zählt nicht als Nutzernachricht; Host-Nachricht zählt nicht |
 
 ---
 
@@ -553,10 +622,10 @@ derzeit im iCloud-Desktop (Foundation §9).
 | 2 | **D9 in L2:** `build_company_metrics(period_end=…)`, `PeriodSelector`-Auflösung, `PeriodNotAvailable`, Ableitung `calendar_year` mit Frame-Prüfung. **Periodentests:** AAPL und NVDA (52/53-Wochen-Jahre; Ende letzter Samstag im September bzw. letzter Sonntag im Januar), MSFT (30. Juni), ADSK (31. Januar); Golden-Set-Seed als Referenzwerte | Sonnet | T6 grün; Seed-Werte exakt reproduziert (Toleranz 0); 114 Alt-Tests grün |
 | 3 | L2/L1-Härtung: Check auf veraltete Periode, Frames über alle Umsatz-Konzepte mit Zählern, typisierte EDGAR-Fehler | Sonnet | T10 grün, Fehler-Mapping-Tests |
 | 4 | Tool-Verträge fixieren: Fehlertaxonomie, Handles, Payload-Rundung, Bereinigung externer Strings, Sitzungsspeicher | Opus-Review, dann Sonnet | Schemas aus Pydantic, Snapshot-Tests, T7 |
-| 5 | Handler für die 7 Modell-Tools inkl. Allowlist und `resolve_company`-Namensabgleich | Sonnet | T1, T3, T4 |
+| 5 | Handler für die 7 Modell-Tools inkl. Allowlist und `resolve_company`-Namensabgleich | Sonnet | T1, T3, T4, T13; T12 für Tool-Ergebnisse; vorher E1–E7 entschieden |
 | 6 | **Slot-Renderer, `submit_commentary`, Backstop** | Opus (Grammatik, Korpus, Grenzfälle), dann Sonnet | T2 mit ≥ 40 Fällen |
 | 7 | System-Prompt und Loop: Zustandsmaschine, Gate- und Kommentar-Ende, Budgets, Adapter | Opus (Prompt), Loop Sonnet | T3, T5, geskripteter End-to-End-Lauf |
-| 8 | Trace (JSONL), `EvalSessionConfig` | Sonnet | T9, T11 |
+| 8 | Trace (JSONL), `EvalSessionConfig` | Sonnet | T9, T11, T12 für Trace und Logs |
 | 9 | CLI-Chat mit Gate-Abfrage (Host-API) | Sonnet | manueller Live-Lauf ADBE (API-Key nötig), Kosten im Trace |
 | 10 | Live-Review: 3 Läufe (ADBE + 2 Branchen), Prompt-Tuning, Go/No-go Slots (Abschnitt 3), Foundation Doc v1.7 (§7.3 neu, D9-Detail, `submit_commentary`) | Opus | Gate eingehalten; 0 falsche Zahlen im gerenderten Output; Verstöße vor Korrektur dokumentiert |
 
@@ -657,3 +726,88 @@ Geprüft am 2026-10-05 gegen die offizielle Dokumentation.
 | SDK-Defaults: Timeout 10 min, `max_retries` 2 | **ungeprüft gegen Live-Doku** (aus der gebündelten SDK-Referenz) | — |
 | Token-Mengen je Lauf, Payload-Größen | **ungeprüft (Schätzung)**; wird in Schritt 9/10 gemessen | — |
 | Verfügbarkeit einer veröffentlichten `anthropic`-1.x-Version | **ungeprüft**; Schritt 1 prüft `pip index versions anthropic` vor dem Pin | — |
+
+---
+
+## 10. Review der Tool-Verträge (Schritt 4, Opus, 2026-10-08)
+
+Geprüft gegen den Code auf `main` nach Schritt 3 (`72dd7b9`): `domain/peers.py`, `periods.py`, `metrics.py`,
+`comps.py`, `multiples.py`, `quality.py`, `models.py`, `data/edgar_client.py`, `market_provider.py`, `config.py`.
+"Eingearbeitet" heißt: eindeutige Korrektur, steht oben im Plan. "E*n*" heißt: Entscheidung Sean, offen.
+
+### Befunde nach Schweregrad
+
+| # | Schwere | Befund | Folge | Status / Empfehlung |
+|---|---|---|---|---|
+| F1 | hoch (Gate) | "Wörtlich in einer Nutzernachricht" war undefiniert. Die API transportiert `tool_result` in `role: "user"`-Nachrichten; eine naive Suche über die Message-Liste findet jeden Kandidatennamen. Zusätzlich treffen Teilstrings kurze Ticker in deutschem Fließtext ("an" → AN, "es" → ES, "on" → ON, "a" → A). `ToolContext` hatte kein Nutzerprotokoll. | Allowlist (c) und `user_requested_additions` wären ohne Mensch freischaltbar. | Definition und Protokoll eingearbeitet (Abschnitt 2); Abgleichsregel: **E2**; Test T13 |
+| F2 | hoch (Gate) | `find_peer_candidates` nimmt jede `target_cik`. Damit wird jede Firma "Ziel eines Kandidatensets" und nach Allowlist (a) für `get_financials`/`get_market_data` frei. | Umgeht Q3. | **E1** |
+| F3 | hoch (Injektion) | `quality.py` bettet `company.name` (aus `submissions`) in Warnungstexte ein; die Bereinigung war nur für Namensfelder vorgesehen. Ticker aus der SEC-Map sind unvalidiert. | Slot-Begrenzer oder Anweisungen über einen Firmennamen im Warnungstext. | eingearbeitet (Abschnitt 2) |
+| F4 | hoch (Zahlen) | Warnungstexte und Ausschlussgründe enthalten Zahlen: `ev_ebitda=45.20 … [1.20, 30.00]`, `Abstand +31 Tage`, `Nur 3 Datenpunkt(e)`, `<= 0`, Toleranzen — mit Dezimalpunkt und nur auf Deutsch. | Das Modell übernimmt sie in den Kommentar → `NAKED_NUMBER`-Runden; im freien Text gehen sie als "steht im Payload" durch. | **E4** |
+| F5 | hoch (Secrets) | (a) Trace-Feld "Upstream-Requests" hätte URLs mit `token=` (Finnhub) protokolliert; "Parameter" hätte `Settings` mit Keys und Kontaktadresse enthalten können. (b) `EdgarClient._get` fängt nur `httpx.TransportError`; `DecodingError` (ein `RequestError`, kein `TransportError`, geprüft) und `JSONDecodeError` aus `.json()` entkommen roh — Letzteres z. B. bei einer 3xx-Antwort, die `_get` als Erfolg durchlässt (`follow_redirects` ist aus). Rohe httpx-Ausnahmen tragen `.request` mit den Headern (User-Agent mit E-Mail). Im Finnhub-Pfad entkommt `JSONDecodeError` auch `CachedProvider` (fängt nur `httpx.HTTPError`). | Leck in Trace oder Fehlerpfad. | (a) eingearbeitet (Abschnitt 6), T12; (b) Schritt 5: in L1 alle `RequestError` und ungültiges JSON auf `EdgarUnavailable` bzw. `MarketDataUnavailable` abbilden, Test analog `test_edgar_errors.py` |
+| F6 | mittel | `compute_comps_table.period` ist redundant (gültig ist nur die jüngste Periode) und kann der Periode des Kandidatensets widersprechen; `find_peer_candidates` mit historischer Periode erzeugt ein Set, aus dem nie eine Tabelle werden kann. | Unnötige Fehlerpfade, Modell probiert herum. | **E3** |
+| F7 | mittel | Scheitert ein Peer an einem Upstream-Fehler, landet er laut Plan in `skipped_peers` — das bestätigte Set schrumpft wegen eines Netzwackers. `skipped_peers` sind keine Warnungen und fallen nicht unter die Warnungs-Abdeckung. | Statistik über ein anderes Set als bestätigt, ohne Pflicht zur Erwähnung. | **E5** |
+| F8 | mittel | Gate-Mechanik unvollständig: (a) weitere `tool_use`-Blöcke in derselben Antwort nach `propose_peer_set` brauchen ein `tool_result`; (b) mehrere Vorschläge — welcher ist bestätigbar?; (c) Nutzer schreibt während `AWAITING_PEER_CONFIRMATION` eine Chatnachricht statt zu bestätigen; (d) Handles: Typ, Format, Gültigkeit ("abgelaufen" nie definiert); (e) Ziel oder Dubletten im Vorschlag bzw. in `add_queries`. | Lücken für Schritt 5/7. | (a) eingearbeitet (`AWAITING_PEER_CONFIRMATION`). Vorschlag für (b)–(e), gilt ohne Einwand: nur der jüngste Vorschlag ist bestätigbar, je Vorschlag höchstens eine Bestätigung; eine Chatnachricht lässt den Vorschlag unbestätigt und setzt `RUNNING`; Handles mit Typpräfix (`cs_`, `pp_`, `ps_`, `ct_`, `fin_`) plus Zufallsteil, gültig für die Sitzung, falscher Typ → `UNKNOWN_HANDLE` mit erwartetem Typ im `hint`; Ziel-CIK und Dubletten → `INVALID_ARGUMENTS` bzw. Ablehnung in `confirm_peer_set`, mehrdeutige `add_queries` → Rückfrage durch den Host |
+| F9 | mittel | Ticker-Identität: Kandidaten bekommen den Ticker aus `get_cik_to_ticker_map` (bei Mehrklassen-Aktien gewinnt der letzte Eintrag der Datei, z. B. GOOG statt GOOGL — geprüft); `CompanyMultiples`/Warnungen nutzen `market.ticker` oder `company.tickers[0]` aus `submissions`. Slots und Warnungs-Abdeckung hängen am Ticker. `resolve_company` würde "Alphabet" zwischen GOOGL und GOOG "mehrdeutig" nennen; `BRK.B` (Nutzer) gegen `BRK-B` (SEC). | `SLOT_UNKNOWN` trotz korrektem Ticker, falsche Abdeckung. | Eine Regel je CIK in `ToolContext` (`ticker_for(cik)`), dieser Ticker geht an `get_price` und wird `Row.ticker` (eingearbeitet); L2-Warnungen müssen denselben Ticker nutzen (kleine L2-Änderung in Schritt 5); `resolve_company` dedupliziert nach CIK und normalisiert `.`↔`-`. Ob Finnhub `BRK.B` oder `BRK-B` erwartet: ungeprüft |
+| F10 | mittel | Folgefragen nach der Comps-Tabelle ("Wie hoch ist INTUs EV/EBIT?") laufen als freier Text nur durch den Regex-Backstop — Zuordnungsfehler (INTU-Wert als ADBE-Wert) gehen durch. Außerdem sagt der Prompt "Texte mit ausgeschriebenen Zahlen werden abgewiesen", der Backstop erlaubt im freien Text aber Payload-Zahlen. | Widerspruch Prompt ↔ Prüfung; Restrisiko genau dort, wo Slots es vermeiden sollten. | **E6** |
+| F11 | mittel | `strict: true`: Längen-, Anzahl- und Wertebereichsgrenzen (`string(1..100)`, `(1..15)`, `0.05..1`), "höchstens eins" in `PeriodSelector` und `format: date` werden vermutlich nicht alle vom Schema erzwungen — **ungeprüft gegen die Doku**. | Grenzen gelten nur, wenn serverseitig geprüft. | Pydantic-Validierung bleibt die maßgebliche Prüfung (steht im Plan); Schritt 5 prüft die Strict-Einschränkungen gegen die Doku und generiert das Schema passend |
+| F12 | mittel | `search_companies_by_sic` bricht nach `max_pages=10` (1.000 Treffer) still ab — eine Kürzung vor allen Zählern. | `sic_matches` wäre zu niedrig, ohne Hinweis. | Schritt 5: L1 meldet, ob die Seiten ausgeschöpft wurden; Tool-Zähler `sic_search_truncated` |
+| F13 | niedrig | Prompt verlangt das Kursdatum in der Basis, es gab keinen Slot. | — | eingearbeitet (`basis.price_as_of`, `null` bei abweichenden Daten) |
+| F14 | niedrig | `get_financials`: `value_musd` auch für Aktienanzahl; EBITDA hat kein einzelnes Konzept; Aktienanzahl für historische Perioden nicht über `market` erreichbar. | — | eingearbeitet |
+| F15 | niedrig | "Nach zwei Abweisungen folgt der Block" widersprach Q2/A5 (zwei Korrekturrunden). | — | eingearbeitet (Block bei der dritten Abweisung) |
+| F16 | niedrig | Kein Code für unbekannte Tools; Meldungen hätten aus `str(exc)` entstehen können (Endpunkt-Pfade, Pydantic-`input` und Doku-URLs). | — | eingearbeitet (`UNKNOWN_TOOL`, Vorlagen je Code, `details.problems`) |
+| F17 | niedrig | Ziel ohne SIC-Code (`sic_code` ist `None` möglich) hat keinen Code; Zielumsatz ≤ 0 lässt `classify_candidates_by_size` nur Nullen zurückgeben. | Stiller leerer Kandidatensatz. | **E7** |
+| F18 | niedrig | Ziffernverbot in `rationale` trifft Firmennamen mit Ziffern ("3M", "1-800-Flowers"); `notable_exclusions` mit `cik` außerhalb der Liste verlangt eine CIK aus dem Vorwissen. | Fehlalarme; Modell-erzeugte IDs. | Empfehlung: Namen und Ticker des Kandidatensets sind von der Ziffernprüfung ausgenommen; `notable_exclusions.cik` muss im Kandidatenset liegen, Firmen außerhalb nennt das Modell nur namentlich im Text |
+| F19 | niedrig | `get_market_data` nimmt `ticker`, die Allowlist ist nach CIK geführt. | Zweite Zuordnung Ticker → CIK nötig. | Empfehlung: Eingabe `cik` wie bei `get_financials`, Ausgabe nennt den verwendeten Ticker |
+| F20 | niedrig | Kompakt-Payload: offen, ob Prozent als `34.2` oder `0.342` erscheint, wie viele Stellen `size_ratio` hat und ob kleine Beträge zu `0` gerundet werden. | Abweichende Darstellung zwischen Payload und Renderer. | Empfehlung: Prozent als Prozentzahl mit einer Stelle, `size_ratio` mit zwei Stellen, kein Wert ≠ 0 wird als 0 ausgegeben |
+| F21 | niedrig | Plan nannte einen Fake-`EdgarClient` in `factories.py` (gibt es nicht); Abschnitt 0 war auf dem Stand vor Schritt 1. | — | eingearbeitet |
+
+**Geprüft, ohne Befund:** `PeriodSelector` (`extra: forbid`, höchstens ein Feld) passt zum Schema;
+`PERIOD_NOT_AVAILABLE` trägt `available_period_ends`, `HISTORICAL_VALUATION_NOT_SUPPORTED` trägt `tickers`;
+`EdgarRateLimited.retry_after_seconds` passt zu `details.retry_after_seconds`; L1-Fehler tragen nur Pfad und Status;
+`MarketDataUnavailable` ohne URL/Token; `PeerSearchResult` liefert alle im Vertrag genannten Zähler außer
+`passed_filters`/`truncated`, die der Tool-Layer ableitet. Ein Weg, auf dem das Modell eine **Zahl in die
+Comps-Tabelle** schreibt, existiert nicht: alle Werte kommen über Handles aus L2; Modell-Eingaben mit Zahlen sind nur
+`size_range` und Perioden.
+
+### Was für Schritt 5–7 fehlt
+
+**Schritt 5 (Handler):**
+- `ToolContext`: Clients, `Deadline`, `output_language`, Sitzungsspeicher (Kandidatensets, Vorschläge, bestätigte
+  Sets, Comps-Tabellen, Financials, aufgelöste Firmen mit `query` und `match`), **Nutzerprotokoll** (F1),
+  `ticker_for(cik)` (F9), companyfacts-LRU (16), Gate-Zustand.
+- Dispatch mit `UNKNOWN_TOOL`, Catch-all → `INTERNAL_ERROR`, **eine** Mapping-Funktion Ausnahme → Code mit Vorlagen
+  (F16); T1 je Code.
+- Kompakte Serialisierer mit Rundungsregeln (F20) und Bereinigung (F3).
+- Kleine L1-Korrekturen: `RequestError`/JSON (F5b), SIC-Seitenlimit (F12); L2: Ticker-Quelle der Warnungen (F9),
+  Sortierung/Kürzung der Kandidaten.
+- Pydantic-Eingabemodelle, Schema-Erzeugung, Abgleich mit den Strict-Einschränkungen (F11).
+
+**Schritt 6 (Number-Check, Opus):**
+- Ticker-Zeichensatz im Slot-Regex, `basis:price_as_of`, alle Probleme einer Einreichung in `details.problems`.
+- **Mechanismus der Warnungs-Abdeckung** ist noch nicht festgelegt ("mit ihrem Ticker vorkommen" ist unscharf, und
+  Info-Warnungen haben `company: "Peer-Set"`). Vorschlag für Schritt 6: Verweis-Marker `[[warn:W3]]`, den der
+  Renderer als Fußnotenverweis ausgibt — dann ist die Abdeckung deterministisch.
+- Ausnahmen der Ziffernprüfung: Listennummern, `W<n>`, Ticker/Namen mit Ziffern (F18), `FY<jahr>` aus den Ergebnissen;
+  Daten nur als Slot (das Modell sieht ISO-Daten, der Renderer schreibt `28.11.2025` — ein "exakter" Abgleich wäre
+  formatabhängig).
+- Ergebnis von E4 und E6.
+
+**Schritt 7 (Prompt und Loop):**
+- Host füllt das Nutzerprotokoll; Haiku-Fallback-Nachrichten gehen nicht hinein.
+- Gate-Zustände nach F8 (b)–(c); parallele `tool_use`-Blöcke nach dem Vorschlag.
+- Zug-Definition: Die Host-Nachricht nach der Bestätigung startet einen neuen Zug mit eigenem Budget (10 Modell-
+  aufrufe, 12 Tools, 5 min).
+- Prompt: bei `counts.truncated > 0` dem Nutzer sagen, dass nicht alle Kandidaten gezeigt wurden; Ziel nur aus
+  Nutzernennung (E1); Zahlenregel für freien Text passend zu E6; Umgang mit Warnungen passend zu E4.
+
+### Offene Entscheidungen (Sean)
+
+| # | Frage | Optionen | Empfehlung |
+|---|---|---|---|
+| E1 | Wer darf Ziel von `find_peer_candidates` sein? | **A** nur Firmen, die Allowlist (c) erfüllen (vom Nutzer genannt, per `resolve_company` aufgelöst); (a) wird damit überflüssig · **B** jede CIK, aber (a) schaltet nicht mehr frei · **C** wie geplant | A |
+| E2 | Wie genau ist "wörtlich"? | **A** ganze Wörter/Wortfolgen; Namen ohne Rücksicht auf Groß/klein; Ticker mit höchstens fünf Zeichen nur, wenn der Nutzer sie groß oder mit `$` geschrieben hat; nur Treffer `ticker_exact`/`name_exact` · **B** ganze Wörter ohne Groß-/Kleinregel (Restrisiko "an", "es") · **C** Host fragt bei jeder genannten Firma nach ("Meinst du Intuit (INTU)?") und markiert sie | A |
+| E3 | Perioden in `compute_comps_table` | **A** kein `period`-Parameter; Periode = Zielperiode des Kandidatensets; `find_peer_candidates` mit historischer Periode → sofort `HISTORICAL_VALUATION_NOT_SUPPORTED` · **B** historische Kandidatensuche erlaubt (Recherche), Tabelle abgelehnt · **C** wie geplant | A |
+| E4 | Zahlen in Warnungen und Ausschlussgründen | **A** Modell bekommt zahlenfreie Texte plus `kind` und strukturierte Parameter; Zahlen zeigt nur die deterministische Warnings-Liste · **B** neue Slot-Art `[[warn:W3:<param>]]` · **C** Zahlen aus Warnungstexten im Backstop erlauben | A |
+| E5 | Peer scheitert in `compute_comps_table` | **A** Upstream-Fehler (`UPSTREAM_*`) lassen das Tool scheitern; Datenfehler (`DATA_NOT_FOUND`, kein Umsatz) → `skipped_peers` **und** eine Warnung der Stufe `warning` · **B** alles überspringen, je Peer eine Warnung · **C** wie geplant | A |
+| E6 | Zahlen in Folgeantworten nach der Tabelle | **A** Slots in jedem Modelltext, sobald eine Comps-Tabelle existiert (gerendert wie der Kommentar), Regex für den Rest; Prompt angleichen · **B** Zahlen in Folgeantworten nur über `submit_commentary` · **C** wie geplant (nur Regex) | A |
+| E7 | Ziel ohne SIC-Code oder mit Umsatz ≤ 0 | **A** neuer Code `PEER_SEARCH_NOT_POSSIBLE` (nicht wiederholbar) mit `details.reason` · **B** vorhandene Codes (`DATA_NOT_FOUND` bzw. `TARGET_REVENUE_NOT_FOUND`) mit `details.reason` | A |
