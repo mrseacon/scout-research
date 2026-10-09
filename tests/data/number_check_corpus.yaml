@@ -1,0 +1,2226 @@
+# Prüfkorpus Number-Check (Phase-3-Plan, Abschnitt 11) — Schritt 6, Phase A (Opus, 2026-10-09)
+#
+# Status: Entwurf. Erwartungen gelten unter den Empfehlungen zu O1–O7 (Plan 11.7). Fälle mit `depends_on`
+# werden nach Seans Entscheidung angepasst; alle übrigen sind unabhängig davon.
+#
+# Felder je Fall:
+#   id          eindeutig; Präfix = Gruppe (ST-A akzeptiert, ST-B nackte Zahl, ST-C Slot-Fehler, RA Begründungen,
+#               FT freier Text mit typisiertem Abgleich)
+#   lang        Sprache des Texts (de|en); muss zur output_language der Session-Variante passen
+#   profile     slot_text | rationale | free_text (Plan 11.1)
+#   session     Variante aus `session.variants`
+#   text        Modelltext (Rohtext, wie eingereicht)
+#   expect      accepted | Liste der Problem-Codes (Reihenfolge egal; Aufruf-Code = erstes nach Plan 11.1)
+#   findings    erwartete Fundstellen als Ausschnitte des Rohtexts. String = Code ist der einzige in `expect`;
+#               sonst {code, match}. Abgleich je Code über Überlappung: jede erwartete Fundstelle überlappt genau
+#               ein gemeldetes Problem, jedes gemeldete Problem mindestens eine erwartete Fundstelle.
+#               Ein Ausschnitt wird an seinem ersten Vorkommen im Text verortet.
+#   rendered    (optional, nur bei accepted) gerenderter Körper ohne Basiszeile, Fußnotentexte und Warnungsblock
+#   footnotes   (optional) erwartete Fußnotenmarken in Reihenfolge * † ‡ §
+#   category    Kurzname der Klasse (Plan 11.2) bzw. des Angriffs
+#   reason      warum das Ergebnis so sein muss
+#   depends_on  (optional) offene Entscheidungen, von denen die Erwartung abhängt
+#   residual    (optional) true = der Check lässt das bewusst durch (dokumentierte Grenze, Plan 11.2/11.3)
+#
+# Alle Werte der Sitzung sind synthetisch (keine echten Kennzahlen der genannten Firmen).
+
+version: 1
+
+session:
+  # Gilt in allen Varianten: was vor der Tabelle in der Sitzung passiert ist.
+  shared:
+    user_messages:
+      - "Mach mir bitte Comps für Adobe."
+      - "Nimm bitte auch Autodesk dazu. Wie hoch war der Umsatz von ADBE im FY2024?"
+      - "Ich habe gelesen, das EV/EBITDA liegt bei 25x – stimmt das?"
+      - "Und wie sah es im FY2022 aus?"
+    resolved:
+      - {query: "Adobe", match: name_exact, cik: "0000796343", ticker: ADBE, name: "Adobe Inc."}
+      - {query: "Autodesk", match: name_exact, cik: "0000769397", ticker: ADSK, name: "Autodesk, Inc."}
+    candidate_set:          # kompakte Fassung, wie das Modell sie sah
+      candidate_set_id: cs_0001
+      target: {cik: "0000796343", ticker: ADBE, name: "Adobe Inc.", sic_code: "7372",
+               sic_description: "Services-Prepackaged Software", period_end: "2025-11-28", fiscal_year: 2025,
+               revenue_musd: 21505}
+      calendar_year_used: 2025
+      frame_check: target_in_frame
+      size_range: {min: 0.05, max: 5.0}
+      candidates:           # Auszug (counts.returned = 40)
+        - {cik: "0000896878", ticker: INTU, name: "Intuit Inc.", sic_code: "7372", revenue_musd: 18831, size_ratio: 0.88}
+        - {cik: "0001108524", ticker: CRM, name: "Salesforce, Inc.", sic_code: "7372", revenue_musd: 41200, size_ratio: 1.92}
+        - {cik: "0001373715", ticker: NOW, name: "ServiceNow, Inc.", sic_code: "7372", revenue_musd: 13280, size_ratio: 0.62}
+        - {cik: "0000813672", ticker: CDNS, name: "Cadence Design Systems, Inc.", sic_code: "7372", revenue_musd: 5230, size_ratio: 0.24}
+        - {cik: "0001327811", ticker: WDAY, name: "Workday, Inc.", sic_code: "7372", revenue_musd: 9550, size_ratio: 0.44}
+        - {cik: "0000769397", ticker: ADSK, name: "Autodesk, Inc.", sic_code: "7372", revenue_musd: 6131, size_ratio: 0.29}
+        - {cik: "0000066740", ticker: MMM, name: "3M Co", sic_code: "7372", revenue_musd: 24575, size_ratio: 1.14}
+        - {cik: "0001084869", ticker: FLWS, name: "1-800-FLOWERS.COM, Inc.", sic_code: "7372", revenue_musd: 1830, size_ratio: 0.09}
+      counts: {sic_matches: 212, without_ticker: 61, not_in_revenue_frame: 18, outside_size_range: 81,
+               passed_filters: 52, returned: 40, truncated: 12, sic_search_truncated: true}
+      warnings:
+        - {id: P1, severity: warning, kind: sic_search_truncated, company: Peer-Set, field: null}
+    financials:             # volle Werte (USD, Anteile); Kompaktfassung nach payloads.py
+      - financials_id: fin_0001
+        cik: "0000796343"
+        ticker: ADBE
+        period_end: "2024-11-29"
+        fiscal_year: 2024
+        values:
+          revenue: {value: 19410000000, accession_number: "0000796343-25-000004"}
+          ebit: {value: 6735000000, accession_number: "0000796343-25-000004"}
+          net_income: {value: 5428000000, accession_number: "0000796343-25-000004"}
+        ebit_margin: 0.34698      # kompakt 34.7
+        net_margin: 0.27965       # kompakt 28.0
+        revenue_yoy: 0.1082       # kompakt 10.8
+      - financials_id: fin_0002
+        cik: "0000769397"
+        ticker: ADSK
+        period_end: "2026-01-31"
+        fiscal_year: 2026
+        values:
+          revenue: {value: 6131000000, accession_number: "0000769397-26-000011"}
+          ebit: {value: 1373000000, accession_number: "0000769397-26-000011"}
+        ebit_margin: 0.22394      # kompakt 22.4
+    market_data:
+      - {ticker: ADBE, price: 350.0, price_as_of: "2026-10-08", shares_outstanding_mio: 425.0, market_cap_musd: 148750}
+    errors:
+      - code: PERIOD_NOT_AVAILABLE
+        details: {available_period_ends: ["2025-11-28", "2024-11-29", "2023-12-01"]}
+
+  # Comps-Tabelle ct_0001 aus dem bestätigten Set ps_0001 (INTU, CRM, NOW, CDNS, WDAY, ADSK).
+  # Volle Werte, wie im Speicher: Geld in USD, Margen/Wachstum als Anteil, Multiples als Faktor.
+  comps_table:
+    comps_table_id: ct_0001
+    basis: {target_period_end: "2025-11-28", target_fiscal_year: 2025, price_as_of: "2026-10-08",
+            n_peers: 5, n_peers_with_ev_multiples: 5}
+    target:
+      {ticker: ADBE, name: "Adobe Inc.", period_end: "2025-11-28", fiscal_year: 2025, price: 350.0,
+       price_as_of: "2026-10-08", revenue: 21505000000, ebit: 7741800000, ebitda: 8633100000,
+       ebitda_approximated: true, net_income: 5560000000, total_debt: 6210000000, total_debt_is_lower_bound: false,
+       cash: 7890000000, market_cap: 148750000000, enterprise_value: 147070000000, ev_is_lower_bound: false,
+       ebit_margin: 0.36, net_margin: 0.2587, revenue_yoy: 0.1046,
+       ev_revenue: 6.8389, ev_ebitda: 17.0353, ev_ebit: 18.9969, pe: 26.754, excluded: {}}
+    peers:
+      - {ticker: INTU, name: "Intuit Inc.", period_end: "2025-07-31", fiscal_year: 2025, price: 640.5,
+         price_as_of: "2026-10-08", revenue: 18831000000, ebit: 4920000000, ebitda: 5880000000,
+         ebitda_approximated: true, net_income: 3870000000, total_debt: 6050000000, total_debt_is_lower_bound: false,
+         cash: 3610000000, market_cap: 178900000000, enterprise_value: 181340000000, ev_is_lower_bound: false,
+         ebit_margin: 0.2613, net_margin: 0.2056, revenue_yoy: 0.1563,
+         ev_revenue: 9.6299, ev_ebitda: 32.0789, ev_ebit: 36.858, pe: 46.227, excluded: {}}
+      - {ticker: CRM, name: "Salesforce, Inc.", period_end: "2026-01-31", fiscal_year: 2026, price: 255.2,
+         price_as_of: "2026-10-08", revenue: 41200000000, ebit: 8240000000, ebitda: 11870000000,
+         ebitda_approximated: true, net_income: 6200000000, total_debt: 10800000000, total_debt_is_lower_bound: false,
+         cash: 8800000000, market_cap: 245000000000, enterprise_value: 247000000000, ev_is_lower_bound: false,
+         ebit_margin: 0.2, net_margin: 0.1506, revenue_yoy: 0.0874,
+         ev_revenue: 5.9951, ev_ebitda: 20.8087, ev_ebit: 29.9757, pe: 39.5161, excluded: {}}
+      - {ticker: NOW, name: "ServiceNow, Inc.", period_end: "2025-12-31", fiscal_year: 2025, price: 870.0,
+         price_as_of: "2026-10-08", revenue: 13280000000, ebit: 1810000000, ebitda: 2650000000,
+         ebitda_approximated: true, net_income: 1720000000, total_debt: 2290000000, total_debt_is_lower_bound: false,
+         cash: 3370000000, market_cap: 180100000000, enterprise_value: 179020000000, ev_is_lower_bound: false,
+         ebit_margin: 0.1363, net_margin: 0.1296, revenue_yoy: 0.2046,
+         ev_revenue: 13.4804, ev_ebitda: 67.5547, ev_ebit: 98.9061, pe: 104.7093, excluded: {}}
+      - {ticker: CDNS, name: "Cadence Design Systems, Inc.", period_end: "2025-12-31", fiscal_year: 2025, price: 312.4,
+         price_as_of: "2026-10-08", revenue: 5230000000, ebit: 1490000000, ebitda: 1700000000,
+         ebitda_approximated: true, net_income: 1150000000, total_debt: 2480000000, total_debt_is_lower_bound: true,
+         cash: 2640000000, market_cap: 85300000000, enterprise_value: 85140000000, ev_is_lower_bound: true,
+         ebit_margin: 0.2849, net_margin: 0.2199, revenue_yoy: 0.1269,
+         ev_revenue: 16.2792, ev_ebitda: 50.0824, ev_ebit: 57.1409, pe: 74.1739, excluded: {}}
+      - {ticker: WDAY, name: "Workday, Inc.", period_end: "2026-01-31", fiscal_year: 2026, price: 228.9,
+         price_as_of: "2026-10-08", revenue: 9550000000, ebit: 640000000, ebitda: null,
+         ebitda_approximated: false, net_income: -120000000, total_debt: 3000000000, total_debt_is_lower_bound: false,
+         cash: 7200000000, market_cap: 61000000000, enterprise_value: 56800000000, ev_is_lower_bound: false,
+         ebit_margin: 0.067, net_margin: -0.0126, revenue_yoy: 0.1618,
+         ev_revenue: 5.9476, ev_ebitda: null, ev_ebit: 88.7531, pe: null,
+         excluded: {ev_ebitda: "EBITDA nicht verfügbar.", pe: "Net Income nicht positiv; Multiple nicht aussagekräftig."}}
+    skipped_peers:
+      - {ticker: ADSK, code: REVENUE_NOT_FOUND, reason: "in den Filings wurde kein Umsatz gefunden"}
+    statistics:   # über die Peers (ohne Ziel); kompakt in Klammern
+      - {multiple: ev_revenue, min: 5.9476, median: 9.6299, mean: 10.26644, max: 16.2792, n: 5,
+         excluded: [], lower_bound: [CDNS]}                          # 5,9 / 9,6 / 10,3 / 16,3
+      - {multiple: ev_ebitda, min: 20.8087, median: 41.08065, mean: 42.631175, max: 67.5547, n: 4,
+         excluded: [WDAY], lower_bound: [CDNS]}                      # 20,8 / 41,1 / 42,6 / 67,6
+      - {multiple: ev_ebit, min: 29.9757, median: 57.1409, mean: 62.32676, max: 98.9061, n: 5,
+         excluded: [], lower_bound: [CDNS]}                          # 30,0 / 57,1 / 62,3 / 98,9
+      - {multiple: pe, min: 39.5161, median: 60.20045, mean: 66.156575, max: 104.7093, n: 4,
+         excluded: [WDAY], lower_bound: []}                          # 39,5 / 60,2 / 66,2 / 104,7
+    warnings:     # Modellfassung (zahlenfrei)
+      - {id: W1, severity: warning, kind: peer_skipped, company: ADSK, field: null}
+      - {id: W2, severity: warning, kind: fiscal_year_mismatch, company: INTU, field: period_end}
+      - {id: W3, severity: warning, kind: fiscal_year_mismatch, company: CRM, field: period_end}
+      - {id: W4, severity: warning, kind: debt_lower_bound, company: CDNS, field: total_debt}
+      - {id: W5, severity: warning, kind: outlier, company: NOW, field: pe}
+      - {id: W6, severity: info, kind: missing_data, company: WDAY, field: ebitda}
+
+  variants:
+    pre_table:    {output_language: de, comps_table: false}
+    pre_table_en: {output_language: en, comps_table: false}
+    base:         {output_language: de, comps_table: true}
+    base_en:      {output_language: en, comps_table: true}
+    dates_differ:
+      output_language: de
+      comps_table: true
+      overrides:
+        peers.INTU.price_as_of: "2026-10-07"
+        basis.price_as_of: null
+
+cases:
+
+  # ===============================================================================================================
+  # ST-A — Slot-Text, muss durchgehen (Fehlalarm-Schutz) und richtig rendern
+  # ===============================================================================================================
+
+  - id: ST-A01
+    lang: de
+    profile: slot_text
+    session: base
+    text: "- Basis: GJ [[basis:target_fiscal_year]], Periodenende [[basis:target_period_end]], Kurs vom [[basis:price_as_of]], [[basis:n_peers]] Peers."
+    expect: accepted
+    rendered: "- Basis: GJ 2025, Periodenende 28.11.2025, Kurs vom 08.10.2026, 5 Peers."
+    category: basis_slots
+    reason: "Basisangaben vollständig als Slots; Datum im de-Format, Jahr ohne Präfix."
+
+  - id: ST-A02
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt beim EV/EBITDA mit [[co:ADBE:ev_ebitda]] unter dem Peer-Median von [[stat:ev_ebitda:median]]."
+    expect: accepted
+    rendered: "ADBE liegt beim EV/EBITDA mit 17,0x* unter dem Peer-Median von 41,1x (n = 4)*†‡."
+    footnotes: ["*", "†", "‡"]
+    category: co_and_stat_slots
+    reason: "EBITDA-Marke an Einzelwert und Statistik; Statistik enthält Untergrenze (CDNS) und Ausschluss (WDAY)."
+
+  - id: ST-A03
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die Schuld von CDNS ist nur eine Untergrenze ([[co:CDNS:total_debt]]), siehe [[warn:W4]]."
+    expect: accepted
+    rendered: "Die Schuld von CDNS ist nur eine Untergrenze (≥ 2.480 Mio. USD), siehe [W4: CDNS]."
+    category: lower_bound
+    reason: "Untergrenze rendert mit ≥; Warnungs-Marker nennt die Firma."
+
+  - id: ST-A04
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Für ADSK enthält das 10-K keinen Umsatz; der Peer fehlt in Tabelle und Statistik [[warn:W1]]."
+    expect: accepted
+    rendered: "Für ADSK enthält das 10-K keinen Umsatz; der Peer fehlt in Tabelle und Statistik [W1: ADSK]."
+    category: form_name
+    reason: "Formname mit Bindestrich ist keine Zahl (Klasse 1); übersprungener Peer über Marker adressiert."
+
+  - id: ST-A05
+    lang: de
+    profile: slot_text
+    session: base
+    text: |-
+      1. Basis siehe oben
+      2. Warnungen: [[warn:W2]], [[warn:W3]]
+      3. Offene Punkte: Periodengleichheit prüfen
+    expect: accepted
+    rendered: |-
+      1. Basis siehe oben
+      2. Warnungen: [W2: INTU], [W3: CRM]
+      3. Offene Punkte: Periodengleichheit prüfen
+    category: list_marker
+    reason: "Listennummern am Zeilenanfang ohne folgende Einheit sind erlaubt (Klasse 3)."
+
+  - id: ST-A06
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Siehe W2 und W3: abweichende Geschäftsjahresenden bei INTU und CRM."
+    expect: accepted
+    category: warning_id
+    reason: "Existierende Warnungs-IDs sind Verweise (Klasse 2); zählen aber nicht als Abdeckung."
+
+  - id: ST-A07
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Erstens liegt ADBE beim P/E unter dem Median, zweitens auch beim EV/EBIT."
+    expect: accepted
+    category: enumeration_adverb
+    reason: "Aufzählungsadverbien sind keine Rangangabe (Klasse 13)."
+
+  - id: ST-A08
+    lang: de
+    profile: slot_text
+    session: base
+    text: "NOW hat das höchste P/E im Peer-Set ([[co:NOW:pe]]), siehe [[warn:W5]]."
+    expect: accepted
+    rendered: "NOW hat das höchste P/E im Peer-Set (104,7x), siehe [W5: NOW]."
+    category: superlative
+    reason: "Superlativ ohne Zahl ist Richtungsaussage, kein Zahlenwert (Klasse 13)."
+
+  - id: ST-A09
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Bei beiden Peers mit abweichendem Geschäftsjahresende (INTU, CRM) sind die Kennzahlen nicht periodengleich."
+    expect: accepted
+    category: number_word_allowed
+    reason: "„beide“ bezieht sich auf genannte Firmen und ist erlaubt (Klasse 11)."
+
+  - id: ST-A10
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die Mehrheit der Peers liegt beim EV/EBIT über ADBE."
+    expect: accepted
+    residual: true
+    category: qualitative_quantity
+    reason: "Qualitative Menge ohne Zahl; Richtigkeit prüft erst der Phase-5-Check für Richtungsaussagen."
+
+  - id: ST-A11
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Nichts wurde doppelt gezählt; EBITDA ist überall eine Näherung."
+    expect: accepted
+    category: fixed_phrase
+    reason: "„doppelt gezählt“ ist kein multiplikativer Vergleich (Klasse 14 erfasst nur Vergleichswendungen)."
+
+  - id: ST-A12
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Alle Beträge in Mio. USD, Multiples als x, Margen in %."
+    expect: accepted
+    category: unit_without_number
+    reason: "Einheiten-Abkürzungen ohne Zahl sind Bezeichnungen (Klasse 12)."
+
+  - id: ST-A13
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Für ADBE ergibt sich ein [[co:ADBE:ev_ebit]]-Multiple unterhalb des Medians."
+    expect: accepted
+    rendered: "Für ADBE ergibt sich ein 19,0x-Multiple unterhalb des Medians."
+    category: slot_adjacency_allowed
+    reason: "Bindestrich nach einem Slot ist erlaubt (Nachbarschaftsregel 11.4)."
+
+  - id: ST-A14
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "ADBE trades at [[co:ADBE:pe]] earnings versus a peer median of [[stat:pe:median]]."
+    expect: accepted
+    rendered: "ADBE trades at 26.8x earnings versus a peer median of 60.2x (n = 4)‡."
+    footnotes: ["‡"]
+    category: en_format
+    reason: "en-Format mit Punkt als Dezimalzeichen; P/E-Statistik ohne WDAY (‡), ohne Untergrenzen."
+
+  - id: ST-A15
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "Scout uses the 10-K only; 10-Q filings are not evaluated."
+    expect: accepted
+    category: form_name
+    reason: "Formnamen mit Bindestrich (Klasse 1)."
+
+  - id: ST-A16
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "Both peers with a different fiscal year end are flagged: [[warn:W2]] and [[warn:W3]]."
+    expect: accepted
+    rendered: "Both peers with a different fiscal year end are flagged: [W2: INTU] and [W3: CRM]."
+    category: number_word_allowed
+    reason: "„both“ ist erlaubt (Klasse 11)."
+
+  - id: ST-A17
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "First, the EV/EBITDA statistic excludes WDAY; second, CDNS values are lower bounds."
+    expect: accepted
+    category: enumeration_adverb
+    reason: "Satzeinleitendes „First,“/„second,“ ist Aufzählung, kein Rang (Klasse 13)."
+
+  - id: ST-A18
+    lang: de
+    profile: slot_text
+    session: base
+    text: |-
+      **Warnungen**
+      - [[warn:W5]] NOW: P/E oberhalb der erwarteten Spannbreite.
+    expect: accepted
+    rendered: |-
+      **Warnungen**
+      - [W5: NOW] NOW: P/E oberhalb der erwarteten Spannbreite.
+    category: markdown
+    reason: "Markdown ohne Ziffern ist unkritisch; Marker nach Aufzählungszeichen erlaubt."
+
+  - id: ST-A19
+    lang: de
+    profile: slot_text
+    session: dates_differ
+    text: "Kurs INTU [[co:INTU:price]], ADBE [[co:ADBE:price]]."
+    expect: accepted
+    rendered: "Kurs INTU 640,50 USD (Kurs vom 07.10.2026), ADBE 350,00 USD (Kurs vom 08.10.2026)."
+    category: price_date
+    reason: "Bei abweichenden Kursdaten bekommt jeder kursabhängige Wert sein Datum (11.4)."
+
+  - id: ST-A20
+    lang: de
+    profile: slot_text
+    session: dates_differ
+    text: "Median EV/EBIT der Peers: [[stat:ev_ebit:median]]."
+    expect: accepted
+    rendered: "Median EV/EBIT der Peers: 57,1x (n = 5)†§."
+    footnotes: ["†", "§"]
+    category: price_date
+    reason: "Kursabhängige Statistik bei abweichenden Kursdaten bekommt §; CDNS-Untergrenze †."
+
+  - id: ST-A21
+    lang: de
+    profile: slot_text
+    session: base
+    text: "WDAY: Nettomarge [[co:WDAY:net_margin]], daher kein P/E."
+    expect: accepted
+    rendered: "WDAY: Nettomarge −1,3 %, daher kein P/E."
+    category: negative_value
+    reason: "Negatives Vorzeichen setzt der Renderer (U+2212)."
+
+  - id: ST-A22
+    lang: de
+    profile: slot_text
+    session: base
+    text: "INTU berichtet für GJ [[co:INTU:fiscal_year]] mit Periodenende [[co:INTU:period_end]]."
+    expect: accepted
+    rendered: "INTU berichtet für GJ 2025 mit Periodenende 31.07.2025."
+    category: fiscal_year_slot
+    reason: "Jahr und Datum über Slots statt als nackte Zahl (O2 A)."
+
+  - id: ST-A23
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt beim EV/EBITDA bei [[co:INTU:ev_ebitda]]."
+    expect: accepted
+    rendered: "ADBE liegt beim EV/EBITDA bei 32,1x* (INTU)."
+    footnotes: ["*"]
+    depends_on: [O6]
+    category: attack_slot_wrong_company
+    reason: "Gültiger Slot einer anderen Firma; der Number-Check kann die Zuordnung nicht prüfen, das Ticker-Etikett macht sie sichtbar."
+
+  - id: ST-A24
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das EV/EBITDA von ADBE beträgt [[co:ADBE:ev_ebit]]."
+    expect: accepted
+    rendered: "Das EV/EBITDA von ADBE beträgt 19,0x."
+    residual: true
+    category: attack_slot_wrong_metric
+    reason: "Gültiger Slot mit falscher Kennzahl; nicht deterministisch erkennbar (Phase-5-Kandidat)."
+
+  - id: ST-A25
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das P/E beruht auf [[stat:pe:n]] Peers."
+    expect: accepted
+    rendered: "Das P/E beruht auf 4 Peers."
+    category: stat_n
+    reason: "Anzahl als Slot; n-Slot ohne Marken."
+
+  - id: ST-A26
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Für WDAY ist EV/EBITDA nicht verfügbar, weil EBITDA nicht ausgewiesen ist."
+    expect: accepted
+    category: unavailable_text
+    reason: "Korrekte Reaktion auf SLOT_VALUE_UNAVAILABLE: „nicht verfügbar“ mit Grund, ohne Zahl."
+
+  - id: ST-A27
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Salesforce, Inc. (CRM) hat ein abweichendes Geschäftsjahresende."
+    expect: accepted
+    category: company_name
+    reason: "Firmenname und Ticker ohne Ziffern."
+
+  - id: ST-A28
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Für WDAY gibt es kein P/E, weil das Nettoergebnis nicht positiv ist."
+    expect: accepted
+    category: number_word_allowed
+    reason: "„kein“ ist erlaubt (Klasse 11)."
+
+  - id: ST-A29
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "CDNS EV is a lower bound: [[co:CDNS:enterprise_value]]."
+    expect: accepted
+    rendered: "CDNS EV is a lower bound: ≥ USD 85,140m."
+    category: en_format
+    reason: "en-Geldformat mit Untergrenze."
+
+  - id: ST-A30
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "ADBE EBIT margin: [[co:ADBE:ebit_margin]]."
+    expect: accepted
+    rendered: "ADBE EBIT margin: 36.0%."
+    category: en_format
+    reason: "en-Prozentformat ohne Leerzeichen."
+
+  - id: ST-A31
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE: Umsatz [[co:ADBE:revenue]], EBITDA [[co:ADBE:ebitda]]."
+    expect: accepted
+    rendered: "ADBE: Umsatz 21.505 Mio. USD, EBITDA 8.633 Mio. USD*."
+    footnotes: ["*"]
+    category: money_format
+    reason: "Mio. USD ohne Nachkommastellen mit Tausenderpunkt; EBITDA-Marke."
+
+  - id: ST-A32
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "Target period end: [[basis:target_period_end]]."
+    expect: accepted
+    rendered: "Target period end: Nov 28, 2025."
+    category: en_format
+    reason: "en-Datumsformat."
+
+  - id: ST-A33
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die Peer-Suche hat das Seitenlimit erreicht (P1); weitere Software-Firmen wurden nicht geprüft."
+    expect: accepted
+    category: warning_id
+    reason: "Existierende ID der Peer-Suche als Verweis (Klasse 2)."
+
+  # ===============================================================================================================
+  # ST-B — Slot-Text, nackte Zahlen (müssen blockiert werden)
+  # ===============================================================================================================
+
+  - id: ST-B01
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt mit 17,0x unter dem Median."
+    expect: [NAKED_NUMBER]
+    findings: ["17,0x"]
+    category: multiple
+    reason: "Multiple ausgeschrieben statt Slot."
+
+  - id: ST-B02
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt mit [[co:ADBE:ev_ebitda]] (17,0x) unter dem Median."
+    expect: [NAKED_NUMBER]
+    findings: ["17,0x"]
+    category: duplicate_next_to_slot
+    reason: "Zahl neben einem korrekten Slot ist trotzdem nackt."
+
+  - id: ST-B03
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das EV/EBITDA von INTU beträgt 3 2 , 1x."
+    expect: [NAKED_NUMBER]
+    findings: ["3 2 , 1x"]
+    category: attack_spread_digits
+    reason: "Auseinandergezogene Ziffern werden zu einer Fundstelle zusammengefasst (11.1, Schritt 5)."
+
+  - id: ST-B04
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "ADBE trades at 26.8x earnings."
+    expect: [NAKED_NUMBER]
+    findings: ["26.8x"]
+    category: multiple
+    reason: "Multiple ausgeschrieben (en)."
+
+  - id: ST-B05
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die EBIT-Marge von ADBE beträgt 36 %."
+    expect: [NAKED_NUMBER]
+    findings: ["36 %"]
+    category: percent
+    reason: "Prozent ausgeschrieben."
+
+  - id: ST-B06
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt 5 Prozentpunkte unter dem Median."
+    expect: [NAKED_NUMBER]
+    findings: ["5 Prozentpunkte"]
+    category: calculation_context
+    reason: "Differenz ist eine Rechnung (Klasse 16)."
+
+  - id: ST-B07
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE erzielte 21,5 Mrd. USD Umsatz."
+    expect: [NAKED_NUMBER]
+    findings: ["21,5 Mrd. USD"]
+    category: amount_scale
+    reason: "Betrag mit Skala; umgerechnet aus dem Payload, trotzdem nackt."
+
+  - id: ST-B08
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "Revenue of $21.5bn trails CRM."
+    expect: [NAKED_NUMBER]
+    findings: ["$21.5bn"]
+    category: amount_scale
+    reason: "Betrag mit Währungszeichen und Skala."
+
+  - id: ST-B09
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "Revenue of 21.5B trails CRM."
+    expect: [NAKED_NUMBER]
+    findings: ["21.5B"]
+    category: amount_scale
+    reason: "Skala „B“ als Suffix."
+
+  - id: ST-B10
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Adobe beschäftigt rund 30k Mitarbeiter."
+    expect: [NAKED_NUMBER]
+    findings: ["30k"]
+    category: attack_prior_knowledge
+    reason: "Wert aus Vorwissen, Skala „k“."
+
+  - id: ST-B11
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Adobe beschäftigt über 10K Mitarbeiter."
+    expect: [NAKED_NUMBER]
+    findings: ["10K"]
+    category: form_name_lookalike
+    reason: "Ohne Bindestrich ist „10K“ = 10.000, kein Formname (Klasse 1)."
+
+  - id: ST-B12
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Im FY2025 lag ADBE unter dem Median."
+    expect: [NAKED_NUMBER]
+    findings: ["FY2025"]
+    depends_on: [O2]
+    category: fiscal_year
+    reason: "Fiskaljahr im Slot-Text nur per Slot (O2 A); bei O2 B erlaubt, weil Sitzungsjahr."
+
+  - id: ST-B13
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Seit 2019 wächst ADBE zweistellig."
+    expect: [NAKED_NUMBER]
+    findings: ["2019", "zweistellig"]
+    category: attack_prior_knowledge
+    reason: "Jahr aus Vorwissen und Größenordnungswort (Klassen 8, 12); auch bei O2 B blockiert (kein Sitzungsjahr)."
+
+  - id: ST-B14
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die Kurse stammen vom 08.10.2026."
+    expect: [NAKED_NUMBER]
+    findings: ["08.10.2026"]
+    depends_on: [O2]
+    category: date
+    reason: "Datum nur per Slot ([[basis:price_as_of]])."
+
+  - id: ST-B15
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Periodenende des Ziels: 2025-11-28."
+    expect: [NAKED_NUMBER]
+    findings: ["2025-11-28"]
+    depends_on: [O2]
+    category: date
+    reason: "ISO-Datum aus dem Payload kopiert; nur per Slot."
+
+  - id: ST-B16
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Im Q3 hat sich das Bild verändert."
+    expect: [NAKED_NUMBER]
+    findings: ["Q3"]
+    category: quarter
+    reason: "Scout hat keine Quartalsdaten (Klasse 10)."
+
+  - id: ST-B17
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Im dritten Quartal lag die Marge höher."
+    expect: [NAKED_NUMBER]
+    findings: ["dritten"]
+    category: quarter
+    reason: "Quartal als Ordinalwort (Klassen 10, 13)."
+
+  - id: ST-B18
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt beim P/E auf dem 2. Platz."
+    expect: [NAKED_NUMBER]
+    findings: ["2."]
+    category: ordinal
+    reason: "Ordinalzahl mitten im Satz ist keine Listennummer (Klasse 13)."
+
+  - id: ST-B19
+    lang: de
+    profile: slot_text
+    session: base
+    text: "INTU ist der zweitgrößte Peer nach Umsatz."
+    expect: [NAKED_NUMBER]
+    findings: ["zweitgrößte"]
+    category: ordinal
+    reason: "Rangwort ist ein gezählter Vergleich."
+
+  - id: ST-B20
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "CRM is the second-largest peer by revenue."
+    expect: [NAKED_NUMBER]
+    findings: ["second-largest"]
+    category: ordinal
+    reason: "Rangwort (en)."
+
+  - id: ST-B21
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Zwei Peers haben ein abweichendes Geschäftsjahresende."
+    expect: [NAKED_NUMBER]
+    findings: ["Zwei"]
+    category: number_word
+    reason: "Zahlwort ab zwei; die Ticker zu nennen genügt (Klasse 11)."
+
+  - id: ST-B22
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "Twelve candidates were not shown."
+    expect: [NAKED_NUMBER]
+    findings: ["Twelve"]
+    category: number_word
+    reason: "Zahlwort (en), Wert aus counts.truncated — im Slot-Text trotzdem nackt."
+
+  - id: ST-B23
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es wurden zweiundvierzig Kandidaten geprüft."
+    expect: [NAKED_NUMBER]
+    findings: ["zweiundvierzig"]
+    category: number_word
+    reason: "Zusammengesetztes Zahlwort."
+
+  - id: ST-B24
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das P/E von NOW ist doppelt so hoch wie das von ADBE."
+    expect: [NAKED_NUMBER]
+    findings: ["doppelt so"]
+    category: qualitative_multiplier
+    reason: "Multiplikativer Vergleich ist eine Rechnung (Klasse 14)."
+
+  - id: ST-B25
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Rund die Hälfte der Peers liegt über ADBE."
+    expect: [NAKED_NUMBER]
+    findings: ["Hälfte"]
+    category: qualitative_multiplier
+    reason: "Anteil ist eine Rechnung (Klasse 14)."
+
+  - id: ST-B26
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "INTU trades at twice the multiple of ADBE."
+    expect: [NAKED_NUMBER]
+    findings: ["twice"]
+    category: qualitative_multiplier
+    reason: "Multiplikativer Vergleich (en)."
+
+  - id: ST-B27
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Etwa 1/2 der Peers hat ein höheres P/E."
+    expect: [NAKED_NUMBER]
+    findings: ["1/2"]
+    category: fraction
+    reason: "Bruch in Ziffern (Klasse 15)."
+
+  - id: ST-B28
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Etwa ½ der Peers hat ein höheres P/E."
+    expect: [NAKED_NUMBER]
+    findings: ["½"]
+    category: fraction
+    reason: "Unicode-Bruch (Klassen 15, 17)."
+
+  - id: ST-B29
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EV/EBITDA von ADBE: ١٧٫٠x"
+    expect: [NAKED_NUMBER]
+    findings: ["١٧٫٠"]
+    category: attack_unicode_digits
+    reason: "Arabisch-indische Ziffern mit arabischem Dezimaltrenner; eine Fundstelle."
+
+  - id: ST-B30
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EV/EBITDA von ADBE: １７,０x"
+    expect: [NAKED_NUMBER]
+    findings: ["１７,０"]
+    category: attack_unicode_digits
+    reason: "Fullwidth-Ziffern."
+
+  - id: ST-B31
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EBIT-Marge von ADBE: ³⁶ %"
+    expect: [NAKED_NUMBER]
+    findings: ["³⁶"]
+    category: attack_unicode_digits
+    reason: "Hochgestellte Ziffern."
+
+  - id: ST-B32
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EV/EBITDA von ADBE: 1​7,0x"
+    expect: [NAKED_NUMBER]
+    findings: ["7,0x"]
+    category: attack_invisible_chars
+    reason: "Nullbreites Leerzeichen zwischen Ziffern wird vorher entfernt (11.1, Schritt 1)."
+
+  - id: ST-B33
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Umsatz von ADBE: 21 505 Mio. USD"
+    expect: [NAKED_NUMBER]
+    findings: ["21 505"]
+    category: thousands_separator
+    reason: "Geschütztes Leerzeichen als Tausendertrenner; eine Fundstelle."
+
+  - id: ST-B34
+    lang: de
+    profile: slot_text
+    session: base
+    text: |-
+      ```
+      EV/EBITDA ADBE: 17.0
+      ```
+    expect: [NAKED_NUMBER]
+    findings: ["17.0"]
+    category: code_block
+    reason: "Code-Blöcke sind nicht ausgenommen (Klasse 18)."
+
+  - id: ST-B35
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Der Wert `17,0x` stammt aus der Tabelle."
+    expect: [NAKED_NUMBER]
+    findings: ["17,0x"]
+    category: code_block
+    reason: "Inline-Code ist nicht ausgenommen."
+
+  - id: ST-B36
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Sie fragten: „Liegt das EV/EBITDA bei 25x?“ Die Tabelle zeigt für ADBE [[co:ADBE:ev_ebitda]]."
+    expect: [NAKED_NUMBER]
+    findings: ["25x"]
+    category: quote
+    reason: "Zitat einer Nutzerzahl ist nicht ausgenommen (Klasse 18)."
+
+  - id: ST-B37
+    lang: de
+    profile: slot_text
+    session: base
+    text: "## 3 Beobachtungen"
+    expect: [NAKED_NUMBER]
+    findings: ["3"]
+    category: heading
+    reason: "Überschrift ist keine Listennummer."
+
+  - id: ST-B38
+    lang: de
+    profile: slot_text
+    session: base
+    text: |-
+      Kennzahlen ADBE:
+      21. Mrd. USD Umsatz
+    expect: [NAKED_NUMBER]
+    findings: ["21."]
+    category: attack_list_marker
+    reason: "Zeilenanfang, aber Einheit folgt — getarnte Listennummer (Klasse 3)."
+
+  - id: ST-B39
+    lang: de
+    profile: slot_text
+    session: base
+    text: "[[basis:n_peers]]0 Peers wurden geprüft."
+    expect: [SLOT_UNKNOWN, NAKED_NUMBER]
+    findings:
+      - {code: SLOT_UNKNOWN, match: "[[basis:n_peers]]"}
+      - {code: NAKED_NUMBER, match: "0 Peers"}
+    category: attack_slot_concatenation
+    reason: "Ziffer direkt nach einem Slot würde „50“ rendern; Nachbarschaftsregel und nackte Ziffer."
+
+  - id: ST-B40
+    lang: de
+    profile: slot_text
+    session: base
+    text: "[[stat:pe:n]][[stat:pe:n]] Peers haben ein P/E."
+    expect: [SLOT_UNKNOWN]
+    findings: ["]][["]
+    category: attack_slot_concatenation
+    reason: "Zwei Slots ohne Trenner rendern „44“; ein Problem je benachbartem Paar."
+
+  - id: ST-B41
+    lang: de
+    profile: slot_text
+    session: base
+    text: "WDAY: Nettomarge +[[co:WDAY:net_margin]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["+[[co:WDAY:net_margin]]"]
+    category: attack_sign_before_slot
+    reason: "Vorzeichen vor Slot würde „+−1,3 %“ rendern; das Vorzeichen setzt der Renderer."
+
+  - id: ST-B42
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das EV/EBITDA von ADBE ist [[co:ADBE:17,0x]]."
+    expect: [SLOT_UNKNOWN, NAKED_NUMBER]
+    findings:
+      - {code: SLOT_UNKNOWN, match: "[[co:ADBE:17,0x]]"}
+      - {code: NAKED_NUMBER, match: "17,0x"}
+    category: attack_number_in_slot_syntax
+    reason: "Zahl als Feldname getarnt; ungültiger Slot bleibt im Text und wird mitgeprüft."
+
+  - id: ST-B43
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das EV/EBITDA von ADBE ist [[17,0x]]."
+    expect: [SLOT_UNKNOWN, NAKED_NUMBER]
+    findings:
+      - {code: SLOT_UNKNOWN, match: "[[17,0x]]"}
+      - {code: NAKED_NUMBER, match: "17,0x"}
+    category: attack_number_in_slot_syntax
+    reason: "Zahl in Slot-Klammern ohne Präfix."
+
+  - id: ST-B44
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das EV/EBITDA von ADBE ist [co:ADBE:ev_ebitda=17,0]."
+    expect: [SLOT_UNKNOWN, NAKED_NUMBER]
+    findings:
+      - {code: SLOT_UNKNOWN, match: "[co:ADBE:ev_ebitda=17,0]"}
+      - {code: NAKED_NUMBER, match: "17,0"}
+    category: attack_number_in_slot_syntax
+    reason: "Slot-ähnliches Konstrukt mit Wert."
+
+  - id: ST-B45
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Adobe hat rund 30.000 Mitarbeiter."
+    expect: [NAKED_NUMBER]
+    findings: ["30.000"]
+    category: attack_prior_knowledge
+    reason: "Wert aus Vorwissen."
+
+  - id: ST-B46
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE ist im S&P 500 und im Nasdaq-100 enthalten."
+    expect: [NAKED_NUMBER]
+    findings: ["500", "100"]
+    category: index_name
+    reason: "Indexnamen mit Ziffern sind Vorwissen (Klasse 19)."
+
+  - id: ST-B47
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE handelt mit einem Abschlag von 59 % zum Median."
+    expect: [NAKED_NUMBER]
+    findings: ["59 %"]
+    category: calculation_context
+    reason: "Abschlag ist eine Rechnung (Klasse 16)."
+
+  - id: ST-B48
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt bei ca. 17x."
+    expect: [NAKED_NUMBER]
+    findings: ["17x"]
+    category: approximation
+    reason: "Ungefähr-Wort ändert nichts (Klasse 20)."
+
+  - id: ST-B49
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE ist ein Milliardenkonzern mit Millionen von Nutzern."
+    expect: [NAKED_NUMBER]
+    findings: ["Milliardenkonzern", "Millionen"]
+    category: magnitude_word
+    reason: "Größenordnungswörter ohne Ziffer sind Mengenbehauptungen (Klasse 12)."
+
+  - id: ST-B50
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "Adobe serves millions of customers."
+    expect: [NAKED_NUMBER]
+    findings: ["millions"]
+    category: magnitude_word
+    reason: "Größenordnungswort (en)."
+
+  - id: ST-B51
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "ADBE shows double-digit growth."
+    expect: [NAKED_NUMBER]
+    findings: ["double-digit"]
+    category: magnitude_word
+    reason: "Stellenzahl als Größenordnung (Klasse 12)."
+
+  - id: ST-B52
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die Nettoverschuldung von CDNS ist null."
+    expect: [NAKED_NUMBER]
+    findings: ["null"]
+    category: number_word
+    reason: "„null“ ist ein Zahlwert (und für CDNS falsch: Schuld ist eine Untergrenze)."
+
+  - id: ST-B53
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die Tabelle ct_0001 zeigt alle Peers."
+    expect: [NAKED_NUMBER]
+    findings: ["ct_0001"]
+    category: handle
+    reason: "Handles sind intern und keine erlaubte Kennung (Klasse 6)."
+
+  - id: ST-B54
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Siehe W9 für Details."
+    expect: [NAKED_NUMBER]
+    findings: ["W9"]
+    category: warning_id
+    reason: "Nicht existierende Warnungs-ID ist ein erfundener Verweis (Klasse 2)."
+
+  - id: ST-B55
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Quelle: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000796343"
+    expect: [NAKED_NUMBER]
+    findings: ["0000796343"]
+    category: url
+    reason: "URLs sind nicht ausgenommen; CIK nur mit Präfix „CIK “ (Klasse 6)."
+
+  - id: ST-B56
+    lang: de
+    profile: slot_text
+    session: base
+    text: "INTU liegt auf Rang Ⅱ der Peers."
+    expect: [NAKED_NUMBER]
+    findings: ["Ⅱ"]
+    category: attack_unicode_digits
+    reason: "Römisches Zahlzeichen (Unicode Nl) wird vor NFKC erkannt."
+
+  - id: ST-B57
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die Nettomarge von WDAY ist −1,3 %."
+    expect: [NAKED_NUMBER]
+    findings: ["−1,3 %"]
+    category: percent
+    reason: "Payload-Wert ausgeschrieben; im Slot-Text immer nackt."
+
+  - id: ST-B58
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "A dozen peers were considered."
+    expect: [NAKED_NUMBER]
+    findings: ["dozen"]
+    category: number_word
+    reason: "„dozen“ ist ein Zahlwort."
+
+  - id: ST-B59
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "Three quarters of the peers trade above ADBE."
+    expect: [NAKED_NUMBER]
+    findings: ["Three quarters"]
+    category: qualitative_multiplier
+    reason: "Bruch in Worten (Klasse 14)."
+
+  - id: ST-B60
+    lang: de
+    profile: slot_text
+    session: base
+    text: "INTU ist beim P/E dreimal so teuer wie ADBE."
+    expect: [NAKED_NUMBER]
+    findings: ["dreimal so"]
+    category: qualitative_multiplier
+    reason: "Multiplikativer Vergleich."
+
+  - id: ST-B61
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Der Enterprise Value von INTU hat sich verdoppelt."
+    expect: [NAKED_NUMBER]
+    findings: ["verdoppelt"]
+    category: qualitative_multiplier
+    reason: "Veränderung als Faktor; Scout liefert keine EV-Historie."
+
+  - id: ST-B62
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "In Q3 FY2025, ADBE grew faster."
+    expect: [NAKED_NUMBER]
+    findings: ["Q3", "FY2025"]
+    depends_on: [O2]
+    category: quarter
+    reason: "Quartal und Fiskaljahr; dürfen zu einer Fundstelle zusammengefasst werden."
+
+  - id: ST-B63
+    lang: de
+    profile: slot_text
+    session: base
+    text: "H1 2025 war stärker als das Vorjahr."
+    expect: [NAKED_NUMBER]
+    findings: ["H1", "2025"]
+    depends_on: [O2]
+    category: quarter
+    reason: "Halbjahr und Jahr (Klassen 8, 10)."
+
+  - id: ST-B64
+    lang: de
+    profile: slot_text
+    session: base
+    text: "### Drei Beobachtungen"
+    expect: [NAKED_NUMBER]
+    findings: ["Drei"]
+    category: number_word
+    reason: "Zahlwort in Überschrift; Prompt verlangt höchstens drei, nicht deren Ankündigung."
+
+  - id: ST-B65
+    lang: de
+    profile: slot_text
+    session: base
+    text: "INTU: EV/EBITDA 32.1"
+    expect: [NAKED_NUMBER]
+    findings: ["32.1"]
+    category: payload_copy
+    reason: "Wert exakt aus dem kompakten Payload kopiert; im Slot-Text trotzdem nackt."
+
+  - id: ST-B66
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "NOW ranks 3rd on EV/EBIT."
+    expect: [NAKED_NUMBER]
+    findings: ["3rd"]
+    category: ordinal
+    reason: "Ordinalzahl (en)."
+
+  - id: ST-B67
+    lang: de
+    profile: slot_text
+    session: base
+    text: "CRM liegt beim P/E auf Platz zwei."
+    expect: [NAKED_NUMBER]
+    findings: ["zwei"]
+    category: ordinal
+    reason: "Rang in Worten."
+
+  - id: ST-B68
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Umsatz von ADBE: 21,505 Mio. USD"
+    expect: [NAKED_NUMBER]
+    findings: ["21,505"]
+    category: thousands_separator
+    reason: "en-Tausendertrenner im de-Text (würde als 21,5 gelesen); im Slot-Text ohnehin nackt."
+
+  - id: ST-B69
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Der Support läuft 24/7."
+    expect: [NAKED_NUMBER]
+    findings: ["24/7"]
+    category: accepted_false_positive
+    reason: "Fehlalarm in Kauf genommen (Klasse 15); Kosten: Umformulieren."
+
+  - id: ST-B70
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die Marktkapitalisierung der Peers liegt im Billionenbereich."
+    expect: [NAKED_NUMBER]
+    findings: ["Billionenbereich"]
+    category: magnitude_word
+    reason: "Größenordnung als Wortbestandteil."
+
+  - id: ST-B71
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die Zahlen beziehen sich auf zweitausendfünfundzwanzig."
+    expect: [NAKED_NUMBER]
+    findings: ["zweitausendfünfundzwanzig"]
+    category: attack_number_word_year
+    reason: "Jahr als Zahlwort."
+
+  - id: ST-B72
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "NOW has the third-highest P/E."
+    expect: [NAKED_NUMBER]
+    findings: ["third-highest"]
+    category: ordinal
+    reason: "Rangwort (en)."
+
+  - id: ST-B73
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "Half of the peers trade above ADBE."
+    expect: [NAKED_NUMBER]
+    findings: ["Half of"]
+    category: qualitative_multiplier
+    reason: "Anteil ist eine Rechnung."
+
+  - id: ST-B74
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Ein Drittel der Peers hat ein abweichendes Geschäftsjahr."
+    expect: [NAKED_NUMBER]
+    findings: ["Drittel"]
+    category: qualitative_multiplier
+    reason: "Anteil ist eine Rechnung."
+
+  - id: ST-B75
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "CDNS has zero net debt."
+    expect: [NAKED_NUMBER]
+    findings: ["zero"]
+    category: number_word
+    reason: "„zero“ ist ein Zahlwert."
+
+  - id: ST-B76
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE: 6,8 beim EV/Umsatz."
+    expect: [NAKED_NUMBER]
+    findings: ["6,8"]
+    category: untyped_number
+    reason: "Zahl ohne Einheit ist ebenso nackt."
+
+  - id: ST-B77
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EBITDA¹ ist angenähert."
+    expect: [NAKED_NUMBER]
+    findings: ["¹"]
+    category: footnote_marker
+    reason: "Fußnotenmarken setzt der Renderer; hochgestellte Ziffer ist eine Fundstelle."
+
+  - id: ST-B78
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE ist #1 bei Kreativsoftware."
+    expect: [NAKED_NUMBER]
+    findings: ["#1"]
+    category: ordinal
+    reason: "Rang als Ziffer, Vorwissen."
+
+  - id: ST-B79
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Kurs [[co:ADBE:price]] [[co:INTU:price]]"
+    expect: [SLOT_UNKNOWN]
+    findings: ["]] [["]
+    category: attack_slot_concatenation
+    reason: "Zwei Slots nur durch Leerraum getrennt („350,00 USD 640,50 USD“) — zwischen Slots muss ein Nicht-Leerzeichen stehen."
+
+  # ===============================================================================================================
+  # ST-C — Slot-Gültigkeit
+  # ===============================================================================================================
+
+  - id: ST-C01
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ORCL liegt bei [[co:ORCL:pe]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:ORCL:pe]]"]
+    category: attack_unknown_company
+    reason: "Firma nicht in der Tabelle (weder Ziel noch Peer)."
+
+  - id: ST-C02
+    lang: de
+    profile: slot_text
+    session: base
+    text: "MMM liegt bei [[co:MMM:pe]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:MMM:pe]]"]
+    category: attack_unconfirmed_candidate
+    reason: "Kandidat, aber nicht im bestätigten Set — keine Zeile, kein Wert."
+
+  - id: ST-C03
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EV/Umsatz ADBE: [[co:ADBE:ev_sales]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:ADBE:ev_sales]]"]
+    category: unknown_field
+    reason: "Feldname nicht in der Liste (richtig: ev_revenue)."
+
+  - id: ST-C04
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das Ziel heißt [[co:ADBE:name]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:ADBE:name]]"]
+    category: unknown_field
+    reason: "Textfelder sind keine Slot-Felder."
+
+  - id: ST-C05
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Flag für CDNS: [[co:CDNS:ev_is_lower_bound]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:CDNS:ev_is_lower_bound]]"]
+    category: unknown_field
+    reason: "Flags sind keine Werte; die Untergrenze rendert der Code als ≥."
+
+  - id: ST-C06
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Median-Umsatz der Peers: [[stat:revenue:median]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[stat:revenue:median]]"]
+    category: attack_nonexistent_statistic
+    reason: "Statistik nur für Multiples; ein Umsatz-Median wäre eine Rechnung."
+
+  - id: ST-C07
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Durchschnitt P/E: [[stat:pe:average]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[stat:pe:average]]"]
+    category: unknown_field
+    reason: "Aggregat heißt mean."
+
+  - id: ST-C08
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Geprüft: [[basis:n_candidates]] Kandidaten."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[basis:n_candidates]]"]
+    category: unknown_field
+    reason: "Kein Basisfeld."
+
+  - id: ST-C09
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE: [[co:ADBE:EV_EBITDA]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:ADBE:EV_EBITDA]]"]
+    category: grammar
+    reason: "Feldnamen exakt klein; der Hinweis nennt die richtige Schreibweise, keine stille Korrektur."
+
+  - id: ST-C10
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE: [[co:adbe:pe]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:adbe:pe]]"]
+    category: grammar
+    reason: "Ticker in der Schreibweise der Tabelle."
+
+  - id: ST-C11
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE: [[ co:ADBE:pe ]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[ co:ADBE:pe ]]"]
+    category: grammar
+    reason: "Keine Leerzeichen im Slot."
+
+  - id: ST-C12
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE: {{co:ADBE:pe}}."
+    expect: [SLOT_UNKNOWN]
+    findings: ["{{co:ADBE:pe}}"]
+    category: grammar
+    reason: "Slot-ähnliches Konstrukt mit geschweiften Klammern."
+
+  - id: ST-C13
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE: [[co:[[co:ADBE:pe]]:pe]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:[[co:ADBE:pe]]:pe]]"]
+    category: attack_nested_slot
+    reason: "Verschachtelung; der äußere Rest bleibt als slot-ähnliches Konstrukt stehen."
+
+  - id: ST-C14
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE: [[val:ADBE:pe]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[val:ADBE:pe]]"]
+    category: grammar
+    reason: "Unbekanntes Präfix."
+
+  - id: ST-C15
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Siehe [[warn:W9]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[warn:W9]]"]
+    category: unknown_warning
+    reason: "Warnungs-ID existiert nicht."
+
+  - id: ST-C16
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Siehe [[warn:P1]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[warn:P1]]"]
+    depends_on: [O4]
+    category: unknown_warning
+    reason: "P-IDs gehören zur Peer-Suche, nicht zur Tabelle; Marker nur für W-IDs dieser Tabelle."
+
+  - id: ST-C17
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Für WDAY: [[co:WDAY:ev_ebitda]]."
+    expect: [SLOT_VALUE_UNAVAILABLE]
+    findings: ["[[co:WDAY:ev_ebitda]]"]
+    category: attack_missing_value
+    reason: "Wert None; details.reason „EBITDA nicht verfügbar.“ — kein leerer oder geratener Wert."
+
+  - id: ST-C18
+    lang: de
+    profile: slot_text
+    session: base
+    text: "P/E von WDAY: [[co:WDAY:pe]]."
+    expect: [SLOT_VALUE_UNAVAILABLE]
+    findings: ["[[co:WDAY:pe]]"]
+    category: attack_missing_value
+    reason: "Multiple ausgeschlossen (Nettoergebnis nicht positiv)."
+
+  - id: ST-C19
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADSK: [[co:ADSK:revenue]]."
+    expect: [SLOT_VALUE_UNAVAILABLE]
+    findings: ["[[co:ADSK:revenue]]"]
+    category: attack_missing_value
+    reason: "Übersprungener Peer ist bekannt, hat aber keine Zeile; Grund aus skipped_peers."
+
+  - id: ST-C20
+    lang: de
+    profile: slot_text
+    session: dates_differ
+    text: "Kursdatum: [[basis:price_as_of]]."
+    expect: [SLOT_VALUE_UNAVAILABLE]
+    findings: ["[[basis:price_as_of]]"]
+    category: attack_missing_value
+    reason: "Kein gemeinsames Kursdatum; kein „jüngstes“ Datum als Ersatz."
+
+  - id: ST-C21
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ORCL [[co:ORCL:pe]], WDAY [[co:WDAY:pe]], ADBE 26,8x."
+    expect: [SLOT_UNKNOWN, SLOT_VALUE_UNAVAILABLE, NAKED_NUMBER]
+    findings:
+      - {code: SLOT_UNKNOWN, match: "[[co:ORCL:pe]]"}
+      - {code: SLOT_VALUE_UNAVAILABLE, match: "[[co:WDAY:pe]]"}
+      - {code: NAKED_NUMBER, match: "26,8x"}
+    category: all_problems
+    reason: "Alle Probleme in einer Abweisung, damit eine Korrekturrunde reicht."
+
+  - id: ST-C22
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "ADBE growth: [[co:ADBE:revenue_growth]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:ADBE:revenue_growth]]"]
+    category: unknown_field
+    reason: "Feld heißt revenue_yoy."
+
+  - id: ST-C23
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE: [co:ADBE:pe]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[co:ADBE:pe]"]
+    category: grammar
+    reason: "Einfache Klammern; slot-ähnlich, damit der Tippfehler gemeldet wird."
+
+  - id: ST-C24
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Median EV/Sales: [[stat:ev_sales:median]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[stat:ev_sales:median]]"]
+    category: unknown_field
+    reason: "Unbekanntes Multiple."
+
+  # ===============================================================================================================
+  # RA — Peer-Begründungen (propose_peer_set: rationale, notable_exclusions.reason)
+  # ===============================================================================================================
+
+  - id: RA-01
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Cloud-Software für Finanz- und Steuerprozesse kleiner Unternehmen, Abo-Modell."
+    expect: accepted
+    category: plain
+    reason: "Geschäftsmodell ohne Zahl."
+
+  - id: RA-02
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Wie 3M ein breit diversifizierter Konzern."
+    expect: accepted
+    category: company_name_digits
+    reason: "Name aus dem Kandidatenset mit Ziffer (F18, Klasse 4)."
+
+  - id: RA-03
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Direktvertrieb an Endkunden wie 1-800-FLOWERS.COM."
+    expect: accepted
+    category: company_name_digits
+    reason: "Name aus dem Kandidatenset."
+
+  - id: RA-04
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Lizenzen und Abos, laut 10-K zwei Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["zwei"]
+    category: number_word
+    reason: "10-K erlaubt; Zahlwort neu blockiert (Schritt 5 prüfte nur Ziffern)."
+
+  - id: RA-05
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Seit 2019 reines Cloud-Abo-Modell."
+    expect: [NAKED_NUMBER]
+    findings: ["2019"]
+    category: year
+    reason: "Jahre in Begründungen blockiert (Vorwissen)."
+
+  - id: RA-06
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Umsatz rund 18,8 Mrd. USD, ähnliche Größe."
+    expect: [NAKED_NUMBER]
+    findings: ["18,8 Mrd. USD"]
+    category: payload_copy
+    reason: "Steht (gerundet) im Payload, aber Begründungen sind zahlenfrei."
+
+  - id: RA-07
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Größenverhältnis 0,88 zum Ziel."
+    expect: [NAKED_NUMBER]
+    findings: ["0,88"]
+    category: payload_copy
+    reason: "size_ratio aus dem Payload; zahlenfrei."
+
+  - id: RA-08
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Zweitgrößter Anbieter von CRM-Software."
+    expect: [NAKED_NUMBER]
+    findings: ["Zweitgrößter"]
+    category: ordinal
+    reason: "Marktrang aus Vorwissen."
+
+  - id: RA-09
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Marktführer bei Designsoftware, B2B-Abos."
+    expect: accepted
+    depends_on: [O7]
+    category: domain_term
+    reason: "B2B ist Fachbegriff (Klasse 5); „Marktführer“ ohne Zahl ist unbelegte Einschätzung, aber keine Zahl."
+
+  - id: RA-10
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Bietet Integrationen mit Microsoft 365."
+    expect: [NAKED_NUMBER]
+    findings: ["365"]
+    category: product_name
+    reason: "Produktnamen mit Ziffern sind nicht ausgenommen (Klasse 5); Kosten: Umformulieren."
+
+  - id: RA-11
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Gleicher SIC-Code 7372, Anwendungssoftware."
+    expect: accepted
+    category: identifier
+    reason: "SIC mit Präfix und exaktem Sitzungswert (Klasse 6)."
+
+  - id: RA-12
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Gleicher SIC-Code 7373."
+    expect: [NAKED_NUMBER]
+    findings: ["7373"]
+    category: identifier
+    reason: "SIC nicht in der Sitzung."
+
+  - id: RA-13
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Software für 3D-Konstruktion und 5G-Netzplanung."
+    expect: accepted
+    depends_on: [O7]
+    category: domain_term
+    reason: "3D und 5G sind Fachbegriffe (Klasse 5)."
+
+  - id: RA-14
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Seit Jahrzehnten im Geschäft mit Designsoftware."
+    expect: accepted
+    category: time_span_word
+    reason: "Zeitspanne ohne Zahl ist keine Finanzgröße (Klasse 12)."
+
+  - id: RA-15
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Hat doppelt so viele Kunden wie Adobe."
+    expect: [NAKED_NUMBER]
+    findings: ["doppelt so"]
+    category: qualitative_multiplier
+    reason: "Multiplikativer Vergleich aus Vorwissen."
+
+  - id: RA-16
+    lang: en
+    profile: rationale
+    session: pre_table_en
+    text: "Subscription software for small businesses with two segments."
+    expect: [NAKED_NUMBER]
+    findings: ["two"]
+    category: number_word
+    reason: "Zahlwort (en)."
+
+  - id: RA-17
+    lang: en
+    profile: rationale
+    session: pre_table_en
+    text: "Files a 10-K and 10-Q like ADBE; SaaS subscription model."
+    expect: accepted
+    category: form_name
+    reason: "Formnamen erlaubt; ersetzt die Ziffernregel aus Schritt 5, die hier angeschlagen hätte."
+
+  - id: RA-18
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Zu klein, unter einem Zehntel des Ziels."
+    expect: [NAKED_NUMBER]
+    findings: ["Zehntel"]
+    category: qualitative_multiplier
+    reason: "Ausschlussgrund (notable_exclusions.reason) mit Bruch in Worten."
+
+  - id: RA-19
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Kunden in über 190 Ländern."
+    expect: [NAKED_NUMBER]
+    findings: ["190"]
+    category: attack_prior_knowledge
+    reason: "Zahl aus Vorwissen."
+
+  - id: RA-20
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Ähnlich bewertet wie ADBE mit 26,8x."
+    expect: [NAKED_NUMBER]
+    findings: ["26,8x"]
+    category: attack_prior_knowledge
+    reason: "Bewertung vor der Tabelle kann nur Vorwissen sein."
+
+  - id: RA-21
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Ähnliches Multiple wie [[co:ADBE:pe]]."
+    expect: [INVALID_ARGUMENTS]
+    findings: ["[[co:ADBE:pe]]"]
+    category: slot_in_rationale
+    reason: "Slots in Begründungen bleiben INVALID_ARGUMENTS (Schritt 5, unverändert)."
+
+  - id: RA-22
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Rund 30k Mitarbeiter, ähnlich Intuit."
+    expect: [NAKED_NUMBER]
+    findings: ["30k"]
+    category: attack_prior_knowledge
+    reason: "Zahl aus Vorwissen."
+
+  - id: RA-23
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Plattform für IT-Service-Management, Abo-Modell; laut 10-K vor allem Großkunden."
+    expect: accepted
+    category: form_name
+    reason: "Formname in Begründung erlaubt."
+
+  - id: RA-24
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Nr. 1 im Markt für Steuersoftware."
+    expect: [NAKED_NUMBER]
+    findings: ["1"]
+    category: ordinal
+    reason: "Marktrang aus Vorwissen."
+
+  - id: RA-25
+    lang: en
+    profile: rationale
+    session: pre_table_en
+    text: "The world's second-largest CRM vendor."
+    expect: [NAKED_NUMBER]
+    findings: ["second-largest"]
+    category: ordinal
+    reason: "Rangwort (en)."
+
+  - id: RA-26
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Ein Milliardenmarkt für Designsoftware."
+    expect: [NAKED_NUMBER]
+    findings: ["Milliardenmarkt"]
+    category: magnitude_word
+    reason: "Größenordnung aus Vorwissen."
+
+  - id: RA-27
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Konstruktionssoftware, Abo-Modell, ähnliche Kunden wie das Ziel."
+    expect: accepted
+    category: plain
+    reason: "Kein Zahlenbezug."
+
+  # ===============================================================================================================
+  # FT — freier Text ohne Tabelle, typisierter Abgleich (nur relevant bei O1 = A oder C; bei O1 = B gilt slot_text)
+  # ===============================================================================================================
+
+  - id: FT-01
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Für Adobe liegt das jüngste 10-K mit Periodenende 28.11.2025 vor."
+    expect: accepted
+    depends_on: [O1]
+    category: date
+    reason: "Datum steht in der Sitzung (Kandidatenset, Fehlerdetails)."
+
+  - id: FT-02
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Adobe meldete für das FY2024 einen Umsatz von 19.410 Mio. USD."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match
+    reason: "Jahr und Betrag aus fin_0001."
+
+  - id: FT-03
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Adobe meldete für das FY2024 einen Umsatz von 19,4 Mrd. USD."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match_rescaled
+    reason: "Skalenwechsel ist Darstellung; 19,41 Mrd. auf eine Stelle = 19,4."
+
+  - id: FT-04
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Adobe meldete für das FY2024 einen Umsatz von rund 20 Mrd. USD."
+    expect: [NAKED_NUMBER]
+    findings: ["20 Mrd. USD"]
+    depends_on: [O1]
+    category: coarse_rounding
+    reason: "Eine signifikante Stelle und außerhalb der Toleranz."
+
+  - id: FT-05
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Adobe meldete für das FY2024 einen Umsatz von 19,410 Mio. USD."
+    expect: [NAKED_NUMBER]
+    findings: ["19,410 Mio. USD"]
+    depends_on: [O1]
+    category: thousands_separator
+    reason: "Im de-Text heißt das 19,41 Mio. USD — kein Treffer, der Leser läse es falsch."
+
+  - id: FT-06
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Adobe meldete einen Umsatz von 6.131 Mio. USD."
+    expect: accepted
+    residual: true
+    depends_on: [O1]
+    category: attack_other_company_value
+    reason: "ADSK-Umsatz als Adobe-Umsatz; der typisierte Abgleich kennt keine Zuordnung (Argument für O1 B)."
+
+  - id: FT-07
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Adobe hat Ende 2023 eine Übernahme abgesagt."
+    expect: accepted
+    residual: true
+    depends_on: [O1]
+    category: attack_prior_knowledge
+    reason: "Jahr aus Vorwissen, zufällig ein Sitzungsjahr (available_period_ends) — geht durch."
+
+  - id: FT-08
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Adobe hat rund 30.000 Mitarbeiter."
+    expect: [NAKED_NUMBER]
+    findings: ["30.000"]
+    depends_on: [O1]
+    category: attack_prior_knowledge
+    reason: "Kein Sitzungswert."
+
+  - id: FT-09
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Die EBIT-Marge im FY2024 lag bei 34,7 %."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match
+    reason: "Prozent aus fin_0001 (ebit_margin kompakt 34.7)."
+
+  - id: FT-10
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Die EBIT-Marge stieg um 1,3 Prozentpunkte."
+    expect: [NAKED_NUMBER]
+    findings: ["1,3 Prozentpunkte"]
+    depends_on: [O1]
+    category: calculation_context
+    reason: "Prozentpunkte haben keine Quelle (11.3)."
+
+  - id: FT-11
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Die EBIT-Marge im FY2024 lag bei 34,7x."
+    expect: [NAKED_NUMBER]
+    findings: ["34,7x"]
+    depends_on: [O1]
+    category: type_mismatch
+    reason: "Faktor statt Prozent — Typ passt nicht."
+
+  - id: FT-12
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Die Suche ergab 40 Kandidaten; 12 weitere wurden wegen des Limits nicht gezeigt."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match_count
+    reason: "counts.returned und counts.truncated."
+
+  - id: FT-13
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Die Suche ergab 4 0 Kandidaten."
+    expect: [NAKED_NUMBER]
+    findings: ["4 0"]
+    depends_on: [O1]
+    category: attack_spread_digits
+    reason: "Auseinandergezogene Ziffern werden nie einzeln abgeglichen."
+
+  - id: FT-14
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Intuit ist nach Umsatz etwa 0,88-mal so groß wie Adobe."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match_factor
+    reason: "Ziffer mit „-mal“ ist Faktor (Klasse 7), size_ratio 0.88; Klasse 14 betrifft nur Wortformen."
+
+  - id: FT-15
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Sie nannten 25x – das kann Scout erst nach der Comps-Tabelle prüfen."
+    expect: [NAKED_NUMBER]
+    findings: ["25x"]
+    depends_on: [O1, O3]
+    category: user_number_echo
+    reason: "Mengenangabe nur aus der Nutzernachricht; bei O3 A erlaubt."
+
+  - id: FT-16
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Für das FY2022 liegt Scout kein 10-K vor."
+    expect: accepted
+    depends_on: [O1, O3]
+    category: user_year_echo
+    reason: "Jahr nur aus der Nutzernachricht; bei O3 B/A erlaubt, bei O3 C blockiert."
+
+  - id: FT-17
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Die Prämie beträgt 34,7 %."
+    expect: [NAKED_NUMBER]
+    findings: ["34,7 %"]
+    depends_on: [O1]
+    category: calculation_context
+    reason: "Rechenkontext blockiert auch bei zufälligem Treffer (ebit_margin 34,7)."
+
+  - id: FT-18
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Das Umsatzwachstum im FY2024 betrug −10,8 %."
+    expect: [NAKED_NUMBER]
+    findings: ["−10,8 %"]
+    depends_on: [O1]
+    category: sign_mismatch
+    reason: "Vorzeichen widerspricht dem Payload (+10,8)."
+
+  - id: FT-19
+    lang: en
+    profile: free_text
+    session: pre_table_en
+    text: "Adobe reported revenue of USD 19,410m for FY2024."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match
+    reason: "en-Format, Treffer."
+
+  - id: FT-20
+    lang: en
+    profile: free_text
+    session: pre_table_en
+    text: "Adobe reported revenue of 19.410m for FY2024."
+    expect: [NAKED_NUMBER]
+    findings: ["19.410m"]
+    depends_on: [O1]
+    category: thousands_separator
+    reason: "Im en-Text heißt das 19,41 Mio. — kein Treffer."
+
+  - id: FT-21
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Die Marktkapitalisierung von Adobe beträgt 148,75 Billionen USD."
+    expect: [NAKED_NUMBER]
+    findings: ["148,75 Billionen USD"]
+    depends_on: [O1]
+    category: scale_language
+    reason: "Deutsche „Billion“ = 10^12; englisches billion im de-Text trifft nicht."
+
+  - id: FT-22
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Die Marktkapitalisierung von Adobe beträgt 148,75 Mrd. USD."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match_rescaled
+    reason: "market_cap_musd 148750."
+
+  - id: FT-23
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Der Kurs von Adobe lag am 08.10.2026 bei 350,00 USD."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match_price
+    reason: "Kurs und Kursdatum aus get_market_data."
+
+  - id: FT-24
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Die Marktkapitalisierung von Adobe beträgt 350 Mio. USD."
+    expect: [NAKED_NUMBER]
+    findings: ["350 Mio. USD"]
+    depends_on: [O1]
+    category: type_mismatch
+    reason: "Kurs (USD je Aktie) als Betrag in Mio. USD."
+
+  - id: FT-25
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Knapp 19,4 Mrd. USD Umsatz im FY2024."
+    expect: accepted
+    depends_on: [O1]
+    category: approximation
+    reason: "Ungefähr-Wort ändert nichts; Zahl trifft."
+
+  - id: FT-26
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Adobe hat 425,0 Mio. Aktien ausstehend."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match_shares
+    reason: "shares_outstanding_mio."
+
+  - id: FT-27
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Umsatz FY2024: 19 410 Mio. USD."
+    expect: [NAKED_NUMBER]
+    findings: ["19 410"]
+    depends_on: [O1]
+    category: thousands_separator
+    reason: "Leerzeichen als Tausendertrenner ist nicht kanonisch."
+
+  - id: FT-28
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Das Periodenende war der 11/28/2025."
+    expect: [NAKED_NUMBER]
+    findings: ["11/28/2025"]
+    depends_on: [O1]
+    category: date
+    reason: "Numerische Slash-Daten sind mehrdeutig (Klasse 9)."
+
+  - id: FT-29
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Für ADSK liegt kein 10-K für FY2027 vor."
+    expect: [NAKED_NUMBER]
+    findings: ["FY2027"]
+    depends_on: [O1]
+    category: year
+    reason: "10-K erlaubt; FY2027 steht nirgends in der Sitzung."
+
+  - id: FT-30
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Meinen Sie Adobe Inc. (CIK 0000796343)?"
+    expect: accepted
+    depends_on: [O1]
+    category: identifier
+    reason: "CIK mit Präfix und exaktem Sitzungswert (Klasse 6) — gilt auch bei O1 B."
+
+  - id: FT-31
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Das letzte 10-K von Adobe stammt vom November 2025."
+    expect: accepted
+    depends_on: [O1]
+    category: date
+    reason: "Monat und Jahr passen zu einem Sitzungsdatum."
+
+  - id: FT-32
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Von 212 SIC-Treffern blieben 52 nach den Filtern."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match_count
+    reason: "counts.sic_matches und counts.passed_filters."
+
+  - id: FT-33
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Größenspanne 0,05x bis 5,0x des Ziels."
+    expect: accepted
+    depends_on: [O1]
+    category: typed_match_factor
+    reason: "size_range; exakter Wert darf weniger als zwei signifikante Stellen haben."
+
+  - id: FT-34
+    lang: en
+    profile: free_text
+    session: pre_table_en
+    text: "Adobe has roughly 30,000 employees."
+    expect: [NAKED_NUMBER]
+    findings: ["30,000"]
+    depends_on: [O1]
+    category: attack_prior_knowledge
+    reason: "Kein Sitzungswert (en)."
+
+  - id: FT-35
+    lang: de
+    profile: free_text
+    session: pre_table
+    text: "Für Q3 hat Scout keine Daten."
+    expect: [NAKED_NUMBER]
+    findings: ["Q3"]
+    depends_on: [O1]
+    category: quarter
+    reason: "Quartale immer blockiert (Klasse 10)."
+
+  - id: FT-36
+    lang: de
+    profile: slot_text
+    session: pre_table
+    text: "ADBE, GJ [[fin:fin_0001:fiscal_year]]: Umsatz [[fin:fin_0001:revenue]]."
+    expect: accepted
+    rendered: "ADBE, GJ 2024: Umsatz 19.410 Mio. USD."
+    depends_on: [O1]
+    category: fin_slot
+    reason: "Nur bei O1 B/C — Werte aus get_financials per Handle-Slot, auch vor der Tabelle."
+
+  - id: FT-37
+    lang: de
+    profile: slot_text
+    session: pre_table
+    text: "Umsatz: [[fin:fin_0099:revenue]]."
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[fin:fin_0099:revenue]]"]
+    depends_on: [O1]
+    category: fin_slot
+    reason: "Nur bei O1 B/C — unbekanntes Financials-Handle."
