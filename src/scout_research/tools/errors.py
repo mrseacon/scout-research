@@ -48,6 +48,7 @@ ERROR_SPECS: dict[str, ErrorSpec] = {
     "SLOT_UNKNOWN": ErrorSpec(False, "Ein Slot ist unbekannt oder falsch aufgebaut.", "Prüfe die Slot-Grammatik in der Tool-Beschreibung und die Ticker und Felder der Tabelle."),
     "SLOT_VALUE_UNAVAILABLE": ErrorSpec(False, "Ein Slot zeigt auf einen nicht verfügbaren Wert.", "Schreibe stattdessen „nicht verfügbar“ mit dem Grund aus der Tabelle."),
     "NAKED_NUMBER": ErrorSpec(False, "Der Text enthält eine ausgeschriebene Zahl.", "Schreibe keine Zahlen aus; verwende Slots (Kommentar) bzw. lass die Zahl weg (Begründungen)."),
+    "COMMENTARY_WITHHELD": ErrorSpec(False, "Der Kommentar wurde zurückgehalten: auch nach zwei Korrekturen enthielt er Zahlen oder ungültige Slots.", "Schreibe keinen weiteren Kommentar zu dieser Tabelle; der Nutzer sieht stattdessen die Tabelle und die Warnungen."),
     "FRAME_YEAR_UNRESOLVED": ErrorSpec(False, "Das Ziel taucht in keinem Vergleichsjahr der SEC-Daten auf; ein Größenvergleich ist nicht möglich.", "Erkläre dem Nutzer, dass die Peer-Suche für dieses Ziel nicht zuverlässig möglich ist."),
     "DATA_NOT_FOUND": ErrorSpec(False, "Die SEC hat für diese Anfrage keine Daten.", "Erkläre dem Nutzer, dass für das Unternehmen keine Daten vorliegen."),
     "UPSTREAM_UNAVAILABLE": ErrorSpec(True, "Die Datenquelle {source} ist gerade nicht erreichbar.", "Du darfst den Aufruf einmal wiederholen; sonst erkläre dem Nutzer, dass die Quelle nicht erreichbar ist."),

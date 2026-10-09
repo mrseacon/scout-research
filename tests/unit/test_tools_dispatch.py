@@ -10,8 +10,6 @@ from scout_research.tools.handlers import TOOLS, dispatch
 from tests.unit.tool_world import AAPL_CIK, MSFT_CIK, NVDA_CIK, call, confirmed, propose, resolved, standard_world, start
 
 PLAN = Path(__file__).resolve().parents[2] / "docs" / "decisions" / "phase-3-plan.md"
-STEP_6_CODES = {"SLOT_UNKNOWN", "SLOT_VALUE_UNAVAILABLE"}
-"""Entstehen erst in `submit_commentary` (Schritt 6); ihre Erreichbarkeit prüft T2 dort."""
 
 
 # --- T1: jeder Code ist erreichbar und kommt als is_error-Ergebnis ----------------------------------------------
@@ -90,6 +88,27 @@ def _scn_naked_number():
     return _err(ctx, "propose_peer_set", candidate_set_id=set_id, peers=[{"cik": AAPL_CIK, "rationale": "40 Prozent"}])
 
 
+def _commentary(text: str):
+    ctx, ps = confirmed(standard_world())
+    table_id = call(ctx, "compute_comps_table", peer_set_id=ps)["comps_table_id"]
+    return ctx, table_id, lambda t=text: _err(ctx, "submit_commentary", comps_table_id=table_id, text=t)
+
+
+def _scn_slot_unknown():
+    return _commentary("[[co:ORCL:pe]]")[2]()
+
+
+def _scn_slot_value_unavailable():
+    return _commentary("")[2]("[[co:MSFT:ev_ebitda]]")  # MSFT weist kein EBITDA aus
+
+
+def _scn_commentary_withheld():
+    _, _, submit = _commentary("")
+    submit("17,0x")
+    submit("18,0x")
+    return submit("19,0x")
+
+
 def _scn_frame_year():
     w = standard_world()
     del w.frames[("Revenues", 2025)][NVDA_CIK]
@@ -153,6 +172,8 @@ SCENARIOS = {
     "NO_VALID_PEERS": _scn_no_valid_peers, "PEER_SET_NOT_CONFIRMED": _scn_not_confirmed,
     "NOT_IN_ALLOWLIST": _scn_allowlist, "PEER_NOT_IN_CANDIDATES": _scn_peer_not_in_candidates,
     "USER_ADDITION_NOT_IN_MESSAGES": _scn_user_addition, "NAKED_NUMBER": _scn_naked_number,
+    "SLOT_UNKNOWN": _scn_slot_unknown, "SLOT_VALUE_UNAVAILABLE": _scn_slot_value_unavailable,
+    "COMMENTARY_WITHHELD": _scn_commentary_withheld,
     "FRAME_YEAR_UNRESOLVED": _scn_frame_year, "DATA_NOT_FOUND": _scn_data_not_found,
     "UPSTREAM_UNAVAILABLE": _scn_unavailable, "UPSTREAM_RATE_LIMITED": _scn_rate_limited,
     "TOOL_TIMEOUT": _scn_timeout, "LOOP_GUARD": _scn_loop_guard, "UNKNOWN_TOOL": _scn_unknown_tool,
@@ -160,8 +181,8 @@ SCENARIOS = {
 }
 
 
-def test_every_code_is_covered_by_a_scenario_or_belongs_to_step_6() -> None:
-    assert set(SCENARIOS) | STEP_6_CODES == set(CODES) and not set(SCENARIOS) & STEP_6_CODES
+def test_every_code_is_covered_by_a_scenario() -> None:
+    assert set(SCENARIOS) == set(CODES)
 
 
 @pytest.mark.parametrize("code", sorted(SCENARIOS))
@@ -274,7 +295,7 @@ def test_the_gate_block_does_not_count_towards_the_loop_guard() -> None:
     assert not dispatch(ctx, "resolve_company", {"query": "NVDA"}).is_error
 
 
-def test_the_registry_holds_exactly_the_six_step_5_tools_with_budgets() -> None:
+def test_the_registry_holds_exactly_the_seven_model_tools_with_budgets() -> None:
     assert {n: s.budget_seconds for n, s in TOOLS.items()} == {
         "resolve_company": 20, "find_peer_candidates": 90, "propose_peer_set": 20, "compute_comps_table": 180,
-        "get_financials": 45, "get_market_data": 30}
+        "submit_commentary": 5, "get_financials": 45, "get_market_data": 30}

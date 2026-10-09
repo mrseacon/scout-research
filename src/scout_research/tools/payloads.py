@@ -65,37 +65,84 @@ def price(value: float | None) -> float | int | None:
 # --- Warnungen ohne Zahlen (E4 A) --------------------------------------------------------------------------------
 
 _PEER_SKIPPED_REASONS = {
-    "DATA_NOT_FOUND": "bei der SEC liegen keine Daten für das Unternehmen vor",
-    "REVENUE_NOT_FOUND": "in den Filings wurde kein Umsatz gefunden",
+    "de": {
+        "DATA_NOT_FOUND": "bei der SEC liegen keine Daten für das Unternehmen vor",
+        "REVENUE_NOT_FOUND": "in den Filings wurde kein Umsatz gefunden",
+        "default": "Daten fehlen",
+    },
+    "en": {
+        "DATA_NOT_FOUND": "the SEC has no data for the company",
+        "REVENUE_NOT_FOUND": "no revenue was found in the filings",
+        "default": "data is missing",
+    },
+}
+
+_WARNING_TEMPLATES = {
+    "de": {
+        "fiscal_year_mismatch": "Das Geschäftsjahresende weicht vom Ziel ab; die Kennzahlen sind nicht periodengleich.",
+        "stale_period": ("Der jüngste Jahresbericht endet ein Geschäftsjahr oder mehr vor dem Ziel; der Peer wird mit "
+                         "einer älteren Periode verglichen."),
+        "missing_data": "Für dieses Unternehmen fehlt ein Kernwert (siehe params.field).",
+        "debt_lower_bound": ("total_debt ist nur eine Untergrenze: das Konzept schließt den kurzfristigen Anteil aus und "
+                             "dieser ist nicht gemeldet."),
+        "debt_lower_bound_ev": " EV und EV-Multiples sind daher ebenfalls Untergrenzen (zu niedrig); P/E ist nicht betroffen.",
+        "debt_lower_bound_no_ev": (" Ein berechneter EV und die EV-Multiples wären Untergrenzen (hier mangels Marktdaten "
+                                   "nicht berechnet)."),
+        "outlier": "Der Wert dieses Multiples liegt {side} der erwarteten Spannbreite (IQR-Methode über das Peer-Set).",
+        "outlier_above": "oberhalb",
+        "outlier_below": "unterhalb",
+        "too_few_datapoints": "Zu wenige Datenpunkte für dieses Multiple für eine verlässliche Ausreißer-Erkennung.",
+        "peer_skipped": "Der Peer wurde übersprungen ({reason}); er fehlt in Tabelle und Statistik.",
+        "sic_search_truncated": ("Die SIC-Suche hat das Seitenlimit erreicht; es kann weitere Unternehmen mit diesem "
+                                 "SIC-Code geben, die nicht geprüft wurden."),
+        "other": "Hinweis zur Datenqualität.",
+    },
+    "en": {
+        "fiscal_year_mismatch": "The fiscal year end differs from the target; the figures are not for the same period.",
+        "stale_period": ("The latest annual report ends a fiscal year or more before the target; the peer is compared "
+                         "on an older period."),
+        "missing_data": "A core value is missing for this company (see params.field).",
+        "debt_lower_bound": ("total_debt is only a lower bound: the concept excludes the current portion and it is not "
+                             "reported."),
+        "debt_lower_bound_ev": " EV and EV multiples are therefore lower bounds as well (too low); P/E is not affected.",
+        "debt_lower_bound_no_ev": (" A computed EV and the EV multiples would be lower bounds (not computed here for "
+                                   "lack of market data)."),
+        "outlier": "The value of this multiple lies {side} the expected range (IQR method across the peer set).",
+        "outlier_above": "above",
+        "outlier_below": "below",
+        "too_few_datapoints": "Too few data points for this multiple for a reliable outlier test.",
+        "peer_skipped": "The peer was skipped ({reason}); it is missing from the table and the statistics.",
+        "sic_search_truncated": ("The SIC search reached its page limit; other companies with this SIC code may exist "
+                                 "that were not checked."),
+        "other": "Note on data quality.",
+    },
 }
 
 
-def _warning_text(kind: str | None, params: dict[str, Any]) -> str:
-    if kind == "fiscal_year_mismatch":
-        return "Das Geschäftsjahresende weicht vom Ziel ab; die Kennzahlen sind nicht periodengleich."
-    if kind == "stale_period":
-        return ("Der jüngste Jahresbericht endet ein Geschäftsjahr oder mehr vor dem Ziel; der Peer wird mit einer "
-                "älteren Periode verglichen.")
-    if kind == "missing_data":
-        return "Für dieses Unternehmen fehlt ein Kernwert (siehe params.field)."
+_SIMPLE_WARNING_KINDS = frozenset({"fiscal_year_mismatch", "stale_period", "missing_data", "too_few_datapoints",
+                                   "sic_search_truncated"})
+
+
+def skip_reason(code: str, lang: str = "de") -> str:
+    """Zahlenfreier Grund, warum ein Peer übersprungen wurde (Warnungstext und `skipped_peers`)."""
+    reasons = _PEER_SKIPPED_REASONS[lang]
+    return reasons.get(code, reasons["default"])
+
+
+def warning_text(kind: str | None, params: dict[str, Any], lang: str = "de") -> str:
+    """Text je Warnungsart, ohne Ziffern und ohne Firmennamen (E4 A). Auch für die vom Code angehängten Warnungen."""
+    t = _WARNING_TEMPLATES[lang]
     if kind == "debt_lower_bound":
-        base = ("total_debt ist nur eine Untergrenze: das Konzept schließt den kurzfristigen Anteil aus und dieser "
-                "ist nicht gemeldet.")
-        if params.get("ev_available"):
-            return base + " EV und EV-Multiples sind daher ebenfalls Untergrenzen (zu niedrig); P/E ist nicht betroffen."
-        return base + " Ein berechneter EV und die EV-Multiples wären Untergrenzen (hier mangels Marktdaten nicht berechnet)."
+        return t["debt_lower_bound"] + (t["debt_lower_bound_ev"] if params.get("ev_available") else t["debt_lower_bound_no_ev"])
     if kind == "outlier":
-        side = "oberhalb" if params.get("direction") == "above" else "unterhalb"
-        return f"Der Wert dieses Multiples liegt {side} der erwarteten Spannbreite (IQR-Methode über das Peer-Set)."
-    if kind == "too_few_datapoints":
-        return "Zu wenige Datenpunkte für dieses Multiple für eine verlässliche Ausreißer-Erkennung."
+        return t["outlier"].format(side=t["outlier_above"] if params.get("direction") == "above" else t["outlier_below"])
     if kind == "peer_skipped":
-        reason = _PEER_SKIPPED_REASONS.get(str(params.get("code")), "Daten fehlen")
-        return f"Der Peer wurde übersprungen ({reason}); er fehlt in Tabelle und Statistik."
-    if kind == "sic_search_truncated":
-        return ("Die SIC-Suche hat das Seitenlimit erreicht; es kann weitere Unternehmen mit diesem SIC-Code geben, "
-                "die nicht geprüft wurden.")
-    return "Hinweis zur Datenqualität."
+        return t["peer_skipped"].format(reason=skip_reason(str(params.get("code")), lang))
+    return t[kind] if kind in _SIMPLE_WARNING_KINDS else t["other"]
+
+
+def _warning_text(kind: str | None, params: dict[str, Any]) -> str:
+    return warning_text(kind, params, "de")
 
 
 def _model_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -109,7 +156,7 @@ def _model_params(params: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
-def model_warning(warning: QualityWarning, warning_id: str) -> dict[str, Any]:
+def model_warning(warning: QualityWarning, warning_id: str, lang: str = "de") -> dict[str, Any]:
     company = warning.company if (is_valid_ticker(warning.company) or warning.company in ("Peer-Set", "target")) else "?"
     return {
         "id": warning_id,
@@ -117,7 +164,7 @@ def model_warning(warning: QualityWarning, warning_id: str) -> dict[str, Any]:
         "kind": warning.kind or "other",
         "company": company,
         "field": warning.affected_field,
-        "text": _warning_text(warning.kind, warning.params),
+        "text": warning_text(warning.kind, warning.params, lang),
         "params": _model_params(warning.params),
     }
 
@@ -131,27 +178,53 @@ def full_warning(warning: QualityWarning, warning_id: str) -> dict[str, Any]:
 
 _DENOMINATOR_LABELS = {"ev_revenue": "Revenue", "ev_ebitda": "EBITDA", "ev_ebit": "EBIT"}
 
-
-def excluded_text(field: str, code: str) -> str:
-    label = _DENOMINATOR_LABELS.get(field, "Nenner")
-    return {
+_EXCLUDED_TEMPLATES = {
+    "de": {
         "historical_period": "Historische Periode: Multiples nur für die aktuelle Periode.",
         "ev_unavailable_market": "Enterprise Value nicht verfügbar (Marktdaten fehlen: Kurs oder Aktienanzahl).",
         "ev_unavailable_debt": "Enterprise Value nicht verfügbar (total_debt nicht ermittelbar).",
         "ev_unavailable_cash": "Enterprise Value nicht verfügbar (Cash nicht ermittelbar).",
-        "denominator_unavailable": f"{label} nicht verfügbar.",
-        "denominator_not_positive": f"{label} nicht positiv; Multiple nicht aussagekräftig.",
+        "denominator_unavailable": "{label} nicht verfügbar.",
+        "denominator_not_positive": "{label} nicht positiv; Multiple nicht aussagekräftig.",
         "ev_not_positive": "Enterprise Value nicht positiv; Multiple nicht aussagekräftig.",
         "market_unavailable": "Marktdaten (Market Cap) nicht verfügbar.",
         "net_income_unavailable": "Net Income nicht verfügbar.",
         "net_income_not_positive": "Net Income nicht positiv; Multiple nicht aussagekräftig.",
-    }.get(code, "Multiple nicht verfügbar.")
+        "default": "Multiple nicht verfügbar.",
+        "denominator": "Nenner",
+    },
+    "en": {
+        "historical_period": "Historical period: multiples only for the current period.",
+        "ev_unavailable_market": "Enterprise value not available (market data missing: price or share count).",
+        "ev_unavailable_debt": "Enterprise value not available (total_debt cannot be determined).",
+        "ev_unavailable_cash": "Enterprise value not available (cash cannot be determined).",
+        "denominator_unavailable": "{label} not available.",
+        "denominator_not_positive": "{label} not positive; multiple not meaningful.",
+        "ev_not_positive": "Enterprise value not positive; multiple not meaningful.",
+        "market_unavailable": "Market data (market cap) not available.",
+        "net_income_unavailable": "Net income not available.",
+        "net_income_not_positive": "Net income not positive; multiple not meaningful.",
+        "default": "Multiple not available.",
+        "denominator": "Denominator",
+    },
+}
+
+
+_EXCLUDED_CODES = frozenset({"historical_period", "ev_unavailable_market", "ev_unavailable_debt", "ev_unavailable_cash",
+                             "denominator_unavailable", "denominator_not_positive", "ev_not_positive",
+                             "market_unavailable", "net_income_unavailable", "net_income_not_positive"})
+
+
+def excluded_text(field: str, code: str, lang: str = "de") -> str:
+    t = _EXCLUDED_TEMPLATES[lang]
+    label = _DENOMINATOR_LABELS.get(field, t["denominator"])
+    return (t[code] if code in _EXCLUDED_CODES else t["default"]).format(label=label)
 
 
 # --- Comps-Tabelle -----------------------------------------------------------------------------------------------
 
 
-def build_row(metrics: CompanyMetrics, multiples: CompanyMultiples, ticker: str) -> dict[str, Any]:
+def build_row(metrics: CompanyMetrics, multiples: CompanyMultiples, ticker: str, lang: str = "de") -> dict[str, Any]:
     market = metrics.market
     return {
         "cik": metrics.company.cik,
@@ -179,7 +252,7 @@ def build_row(metrics: CompanyMetrics, multiples: CompanyMultiples, ticker: str)
         "ev_ebitda": one_decimal(multiples.ev_ebitda),
         "ev_ebit": one_decimal(multiples.ev_ebit),
         "pe": one_decimal(multiples.pe),
-        "excluded": {f: excluded_text(f, code) for f, code in multiples.excluded_codes.items()},
+        "excluded": {f: excluded_text(f, code, lang) for f, code in multiples.excluded_codes.items()},
     }
 
 

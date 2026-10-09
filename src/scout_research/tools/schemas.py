@@ -70,6 +70,11 @@ class ComputeCompsTableInput(_Input):
     peer_set_id: str = Field(min_length=1, max_length=64, description="Handle des vom Menschen bestätigten Peer-Sets (ps_…).")
 
 
+class SubmitCommentaryInput(_Input):
+    comps_table_id: str = Field(min_length=1, max_length=64, description="Handle der Comps-Tabelle (ct_…).")
+    text: str = Field(min_length=1, max_length=4000, description="Kommentar mit Slots statt Zahlen.")
+
+
 class GetFinancialsInput(_Input):
     cik: Cik
     period: PeriodSelector | None = None

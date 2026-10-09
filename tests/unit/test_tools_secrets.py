@@ -35,7 +35,12 @@ def _full_flow(w: World, market=None):
         outcomes.append(proposal)
         if not proposal.is_error:
             peer_set = ctx.confirm_peer_set(proposal.content["proposal_id"], [AAPL_CIK, MSFT_CIK])
-            outcomes.append(dispatch(ctx, "compute_comps_table", {"peer_set_id": peer_set.id}))
+            table = dispatch(ctx, "compute_comps_table", {"peer_set_id": peer_set.id})
+            outcomes.append(table)
+            if not table.is_error:  # Kommentar: einmal abgewiesen (Zahl), einmal angenommen
+                tid = table.content["comps_table_id"]
+                outcomes.append(dispatch(ctx, "submit_commentary", {"comps_table_id": tid, "text": "Median [[stat:pe:median]] und 40x."}))
+                outcomes.append(dispatch(ctx, "submit_commentary", {"comps_table_id": tid, "text": "Median [[stat:pe:median]] ([[warn:W1]])."}))
     outcomes += [dispatch(ctx, "get_financials", {"cik": NVDA_CIK}), dispatch(ctx, "get_market_data", {"ticker": "NVDA"}),
                  dispatch(ctx, "get_financials", {"cik": AAPL_CIK, "period": {"period_end": "1999-01-01"}})]
     return ctx, outcomes
@@ -43,7 +48,8 @@ def _full_flow(w: World, market=None):
 
 def _assert_clean(ctx, outcomes, caplog) -> None:
     texts = [o.to_json() for o in outcomes] + [json.dumps(o.trace, default=str) for o in outcomes if o.trace]
-    texts += [json.dumps(ctx.gate_log, default=str), caplog.text]
+    texts += [json.dumps(ctx.gate_log, default=str), caplog.text, json.dumps(ctx.commentary_log, default=str)]
+    texts += [c.rendered for c in ctx.commentaries.values()]
     texts += [repr(o.content) for o in outcomes]
     for text in texts:
         for secret in ALL_SECRETS:

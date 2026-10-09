@@ -372,5 +372,31 @@
     },
     "name": "resolve_company",
     "strict": true
+  },
+  {
+    "description": "Reicht den Kommentar zur Comps-Tabelle ein. Zahlen schreibst du nie aus: Wo ein Wert stehen soll, setzt du einen Slot; die Anwendung setzt Wert, Einheit, Format und Kennzeichnungen ein. Slots: [[co:<TICKER>:<feld>]] (Wert eines Unternehmens; Felder: revenue, ebit, ebitda, net_income, total_debt, cash, market_cap, enterprise_value, price, price_as_of, period_end, fiscal_year, ebit_margin, net_margin, revenue_yoy, ev_revenue, ev_ebitda, ev_ebit, pe), [[stat:<multiple>:<min|median|mean|max|n>]] (Multiple: ev_revenue, ev_ebitda, ev_ebit, pe), [[basis:<n_peers|n_peers_with_ev_multiples|target_period_end|target_fiscal_year|price_as_of>]], [[warn:<W-ID>]] (Verweis auf eine Warnung der Tabelle; jede Warnung der Stufe warning oder critical gehört mit ihrem Marker in den Kommentar), [[fin:<financials_id>:<metrik>]] und [[mkt:<TICKER>:<feld>]] (Werte aus get_financials und get_market_data). Schreibweise exakt, ohne Leerzeichen; direkt vor oder nach einem Slot steht keine Ziffer, kein Buchstabe, kein Vorzeichen und kein zweiter Slot. Auch Jahre, Daten, Quartale, Zahlwörter (zwei), Rangwörter (zweitgrößte) und Vergleiche wie „doppelt so hoch“ sind Zahlen und nur über Slots erlaubt. Fehlt ein Wert, schreibst du „nicht verfügbar“ mit dem Grund. Bei einer Abweisung korrigierst du alle Probleme aus details.problems auf einmal; nach der zweiten erfolglosen Korrektur wird der Kommentar zurückgehalten.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "comps_table_id": {
+          "description": "Handle der Comps-Tabelle (ct_…). (mindestens 1 Zeichen; höchstens 64 Zeichen)",
+          "title": "Comps Table Id",
+          "type": "string"
+        },
+        "text": {
+          "description": "Kommentar mit Slots statt Zahlen. (mindestens 1 Zeichen; höchstens 4000 Zeichen)",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "comps_table_id",
+        "text"
+      ],
+      "title": "SubmitCommentaryInput",
+      "type": "object"
+    },
+    "name": "submit_commentary",
+    "strict": true
   }
 ]

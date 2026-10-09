@@ -158,6 +158,10 @@ session:
     pre_table_en: {output_language: en, comps_table: false}
     base:         {output_language: de, comps_table: true}
     base_en:      {output_language: en, comps_table: true}
+    brk_b:        # Ticker mit Bindestrich in der Tabelle (SEC-Schreibweise), Nutzer schreibt oft BRK.B (F9)
+      output_language: de
+      comps_table: true
+      add_peers: [{from: INTU, ticker: "BRK-B", name: "Berkshire Hathaway Inc."}]
     dates_differ:
       output_language: de
       comps_table: true
@@ -2280,3 +2284,431 @@ cases:
     category: fin_slot
     reason: "Unbekanntes Financials-Handle."
     adapted: "reason umformuliert (O1 B entschieden); Erwartung unverändert"
+
+  # ===============================================================================================================
+  # Phase B — Ergänzungen: Ticker-Schreibweise (BRK.B/BRK-B), fin:/mkt:-Slots, Nachbarschaft, Formnamen, Unicode
+  # Erwartungen aus der Policy (Plan 11) abgeleitet, vor dem ersten Lauf geschrieben.
+  # ===============================================================================================================
+
+  - id: ST-D01
+    lang: de
+    profile: slot_text
+    session: brk_b
+    text: "BRK.B liegt beim P/E bei [[co:BRK.B:pe]]."
+    expect: accepted
+    rendered: "BRK.B liegt beim P/E bei 46,2x."
+    category: ticker_spelling
+    reason: "Der Nutzer schreibt BRK.B, die Tabelle führt BRK-B: derselbe Ticker (F9); der Ticker steht im Satz, kein Etikett."
+    added_in: phase_b
+
+  - id: ST-D02
+    lang: de
+    profile: slot_text
+    session: brk_b
+    text: "Das P/E von BRK-B ist [[co:BRK-B:pe]]."
+    expect: accepted
+    rendered: "Das P/E von BRK-B ist 46,2x."
+    category: ticker_spelling
+    reason: "Schreibweise der Tabelle."
+    added_in: phase_b
+
+  - id: ST-D03
+    lang: de
+    profile: slot_text
+    session: brk_b
+    text: "Das P/E ist [[co:BRK.B:pe]]."
+    expect: accepted
+    rendered: "Das P/E ist 46,2x (BRK-B)."
+    category: ticker_spelling
+    reason: "Steht der Ticker nicht im Satz, erscheint er im Etikett in der Schreibweise der Tabelle (O6)."
+    added_in: phase_b
+
+  - id: ST-D04
+    lang: de
+    profile: slot_text
+    session: brk_b
+    text: "[[co:BRK.A:pe]]"
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:BRK.A:pe]]"]
+    category: ticker_spelling
+    reason: "Nur .↔- wird normalisiert, nie ein anderer Buchstabe."
+    added_in: phase_b
+
+  - id: ST-D05
+    lang: de
+    profile: slot_text
+    session: brk_b
+    text: "[[co:brk.b:pe]]"
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:brk.b:pe]]"]
+    category: ticker_spelling
+    reason: "Groß-/Kleinschreibung bleibt exakt."
+    added_in: phase_b
+
+  - id: ST-D06
+    lang: de
+    profile: slot_text
+    session: base
+    text: "[[co:BRK.B:pe]]"
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:BRK.B:pe]]"]
+    category: ticker_spelling
+    reason: "BRK-B ist in dieser Tabelle kein Teilnehmer."
+    added_in: phase_b
+
+  - id: ST-D07
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Kurs ADBE: [[mkt:ADBE:price]], Marktkapitalisierung [[mkt:ADBE:market_cap]]."
+    expect: accepted
+    rendered: "Kurs ADBE: 350,00 USD, Marktkapitalisierung 148.750 Mio. USD."
+    category: mkt_slot
+    reason: "Werte aus get_market_data per mkt:-Slot (O1 B)."
+    added_in: phase_b
+
+  - id: ST-D08
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "ADBE shares outstanding: [[mkt:ADBE:shares_outstanding]] as of [[mkt:ADBE:price_as_of]]."
+    expect: accepted
+    rendered: "ADBE shares outstanding: 425.0m shares as of Oct 8, 2026."
+    category: mkt_slot
+    reason: "en-Format für Aktienanzahl und Datum."
+    added_in: phase_b
+
+  - id: ST-D09
+    lang: de
+    profile: slot_text
+    session: base
+    text: "[[mkt:INTU:price]]"
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[mkt:INTU:price]]"]
+    category: mkt_slot
+    reason: "Für INTU wurde get_market_data nicht aufgerufen."
+    added_in: phase_b
+
+  - id: ST-D10
+    lang: de
+    profile: slot_text
+    session: base
+    text: "[[mkt:ADBE:volume]]"
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[mkt:ADBE:volume]]"]
+    category: mkt_slot
+    reason: "Unbekanntes Feld."
+    added_in: phase_b
+
+  - id: ST-D11
+    lang: de
+    profile: slot_text
+    session: pre_table
+    text: "ADBE EBIT-Marge: [[fin:fin_0001:ebit_margin]], Wachstum [[fin:fin_0001:revenue_yoy]]."
+    expect: accepted
+    rendered: "ADBE EBIT-Marge: 34,7 %, Wachstum 10,8 %."
+    category: fin_slot
+    reason: "Prozentwerte aus get_financials."
+    added_in: phase_b
+
+  - id: ST-D12
+    lang: de
+    profile: slot_text
+    session: pre_table
+    text: "[[fin:fin_0001:total_assets]]"
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[fin:fin_0001:total_assets]]"]
+    category: fin_slot
+    reason: "Metrik wurde nicht abgefragt: kein Wert, den das Modell gesehen hat."
+    added_in: phase_b
+
+  - id: ST-D13
+    lang: de
+    profile: slot_text
+    session: pre_table
+    text: "[[fin:fin_0002:revenue_yoy]]"
+    expect: [SLOT_VALUE_UNAVAILABLE]
+    findings: ["[[fin:fin_0002:revenue_yoy]]"]
+    category: fin_slot
+    reason: "Feld im Ergebnis ohne Wert: nicht verfügbar statt geraten."
+    added_in: phase_b
+
+  - id: ST-D14
+    lang: de
+    profile: slot_text
+    session: pre_table
+    text: "Der Umsatz beträgt [[fin:fin_0002:revenue]]."
+    expect: accepted
+    rendered: "Der Umsatz beträgt 6.131 Mio. USD (ADSK)."
+    category: fin_slot_label
+    reason: "Ticker-Etikett auch an fin:-Slots, wenn der Ticker im Satz fehlt (O6)."
+    added_in: phase_b
+
+  - id: ST-D15
+    lang: de
+    profile: slot_text
+    session: dates_differ
+    text: "Das P/E beträgt [[co:INTU:pe]]."
+    expect: accepted
+    rendered: "Das P/E beträgt 46,2x (INTU, Kurs vom 07.10.2026)."
+    category: price_date_label
+    reason: "Etikett und Kursdatum in einer Klammer."
+    added_in: phase_b
+
+  - id: ST-D16
+    lang: de
+    profile: slot_text
+    session: base
+    text: "**[[co:ADBE:pe]]** ist ADBE."
+    expect: accepted
+    rendered: "**26,8x** ist ADBE."
+    category: slot_adjacency_allowed
+    reason: "Markdown-Fettdruck um einen Slot ist erlaubt."
+    added_in: phase_b
+
+  - id: ST-D17
+    lang: de
+    profile: slot_text
+    session: base
+    text: "[[co:ADBE:price]]\n[[co:INTU:price]]"
+    expect: accepted
+    rendered: "350,00 USD (ADBE)\n640,50 USD (INTU)"
+    category: slot_adjacency_allowed
+    reason: "Zeilenumbruch trennt zwei Slots; jeder Satz bekommt sein Etikett."
+    added_in: phase_b
+
+  - id: ST-D18
+    lang: de
+    profile: slot_text
+    session: base
+    text: "[[co:ADBE:pe]]x"
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:ADBE:pe]]x"]
+    category: attack_slot_adjacency
+    reason: "Buchstabe direkt nach dem Slot."
+    added_in: phase_b
+
+  - id: ST-D19
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ab[[co:ADBE:pe]]"
+    expect: [SLOT_UNKNOWN]
+    findings: ["ab[[co:ADBE:pe]]"]
+    category: attack_slot_adjacency
+    reason: "Buchstaben direkt vor dem Slot."
+    added_in: phase_b
+
+  - id: ST-D20
+    lang: de
+    profile: slot_text
+    session: base
+    text: "[[co:ADBE:ebit_margin]]%"
+    expect: [SLOT_UNKNOWN]
+    findings: ["[[co:ADBE:ebit_margin]]%"]
+    category: attack_slot_adjacency
+    reason: "Prozentzeichen direkt nach dem Slot (der Renderer setzt es selbst)."
+    added_in: phase_b
+
+  - id: ST-D21
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Siehe 10-K/A, 10‑Q und DEF 14A sowie Form 4."
+    expect: accepted
+    category: form_name
+    reason: "Geschlossene Liste der Formnamen, auch mit geschütztem Bindestrich und /A."
+    added_in: phase_b
+
+  - id: ST-D22
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Form 44 und 10K-Daten"
+    expect: [NAKED_NUMBER]
+    findings: ["44", "10K"]
+    category: form_name_lookalike
+    reason: "Nur Form 3, 4 und 5 mit dem Wort Form; 10K ohne Bindestrich ist eine Zahl."
+    added_in: phase_b
+
+  - id: ST-D23
+    lang: de
+    profile: slot_text
+    session: pre_table
+    text: "Quelle: Accession Number 0000796343-25-000004."
+    expect: accepted
+    category: identifier
+    reason: "Accession Number, die in einem Tool-Ergebnis der Sitzung steht (Klasse 6)."
+    added_in: phase_b
+
+  - id: ST-D24
+    lang: de
+    profile: slot_text
+    session: pre_table
+    text: "Quelle: Accession Number 0000796343-25-000099."
+    expect: [NAKED_NUMBER]
+    findings: ["0000796343-25-000099"]
+    category: identifier
+    reason: "Unbekannte Accession Number ist eine erfundene Kennung."
+    added_in: phase_b
+
+  - id: ST-D25
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat १२ Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["१२"]
+    category: attack_unicode_digits
+    reason: "Devanagari-Ziffern."
+    added_in: phase_b
+
+  - id: ST-D26
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat ① Segment."
+    expect: [NAKED_NUMBER]
+    findings: ["①"]
+    category: attack_unicode_digits
+    reason: "Eingekreiste Ziffer."
+    added_in: phase_b
+
+  - id: ST-D27
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat 十二 Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["十二"]
+    category: attack_unicode_digits
+    reason: "CJK-Zahlzeichen."
+    added_in: phase_b
+
+  - id: ST-D28
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Im Jahr ２０２５ lag ADBE vorn."
+    expect: [NAKED_NUMBER]
+    findings: ["２０２５"]
+    category: attack_unicode_digits
+    reason: "Fullwidth-Jahreszahl."
+    added_in: phase_b
+
+  - id: ST-D29
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EV/EBITDA von ADBE: 1\u00AD7,0x"
+    expect: [NAKED_NUMBER]
+    findings: ["7,0x"]
+    category: attack_invisible_chars
+    reason: "Weiches Trennzeichen zwischen den Ziffern."
+    added_in: phase_b
+
+  - id: ST-D30
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "NOW ranks 21st on EV/EBIT."
+    expect: [NAKED_NUMBER]
+    findings: ["21st"]
+    category: ordinal
+    reason: "Ordinalzahl in Ziffern (en)."
+    added_in: phase_b
+
+  - id: ST-D31
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Einhundert Mitarbeiter und einundzwanzig Büros."
+    expect: [NAKED_NUMBER]
+    findings: ["Einhundert", "einundzwanzig"]
+    category: number_word
+    reason: "Zusammengesetzte Zahlwörter mit „ein“."
+    added_in: phase_b
+
+  - id: ST-D32
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "Nineteen peers serve hundreds of customers at fifty-fifty odds."
+    expect: [NAKED_NUMBER]
+    findings: ["Nineteen", "hundreds", "fifty-fifty"]
+    category: number_word
+    reason: "Englische Zahlwörter, Größenordnung und Bindestrich-Zusammensetzung."
+    added_in: phase_b
+
+  - id: ST-D33
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "The third-party vendors differ, and second, CDNS is a lower bound."
+    expect: accepted
+    category: enumeration_adverb
+    reason: "„third-party“ ist kein Rang; „second,“ ist Aufzählung."
+    added_in: phase_b
+
+  - id: ST-D34
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Zweitens nutzt der Peer einen Drittanbieter."
+    expect: accepted
+    category: enumeration_adverb
+    reason: "Aufzählungsadverb und „Drittanbieter“ sind keine Ränge."
+    added_in: phase_b
+
+  - id: ST-D35
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Im ersten Quartal lag die Marge höher."
+    expect: [NAKED_NUMBER]
+    findings: ["ersten Quartal"]
+    category: quarter
+    reason: "Quartal mit Ordinalwort (Klasse 10)."
+    added_in: phase_b
+
+  - id: ST-D36
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Ein Viertel der Peers hat ein höheres P/E."
+    expect: [NAKED_NUMBER]
+    findings: ["Viertel"]
+    category: qualitative_multiplier
+    reason: "Anteil in Worten."
+    added_in: phase_b
+
+  - id: ST-D37
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "A quarter of the peers trade above ADBE."
+    expect: [NAKED_NUMBER]
+    findings: ["quarter of"]
+    category: qualitative_multiplier
+    reason: "Anteil in Worten (en)."
+    added_in: phase_b
+
+  - id: RA-28
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Hat mehrere Segmente und beide Kundengruppen im Blick."
+    expect: accepted
+    category: plain
+    reason: "„mehrere“ und „beide“ sind keine Zahlwörter."
+    added_in: phase_b
+
+  - id: RA-29
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Einzige Alternative zu Adobe im Kreativmarkt."
+    expect: accepted
+    category: plain
+    reason: "„einzige“ ist kein Zahlwort."
+    added_in: phase_b

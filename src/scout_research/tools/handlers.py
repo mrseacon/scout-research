@@ -4,7 +4,7 @@
 Sitzungsspeicher (`ToolContext`). Der Dispatcher validiert die Eingabe serverseitig mit Pydantic, setzt das Zeitbudget,
 erzwingt die Gate-Sperre und den `LOOP_GUARD` und bildet jede Ausnahme auf einen bereinigten `ToolError` ab.
 
-Noch nicht enthalten (Schritt 6): `submit_commentary` — der Name ist nicht registriert und liefert `UNKNOWN_TOOL`.
+`submit_commentary` (Schritt 6) delegiert an `tools/commentary.py`: Slot-Rendering und Backstop gegen nackte Zahlen.
 """
 
 from __future__ import annotations
@@ -30,9 +30,8 @@ from scout_research.domain.metrics import (
 from scout_research.domain.models import CompanyMetrics, QualityWarning
 from scout_research.domain.peers import find_peer_candidates, rank_candidates
 from scout_research.domain.periods import PeriodNotAvailable, PeriodSelector
-from scout_research.tools import payloads
+from scout_research.tools import commentary, payloads
 from scout_research.tools.errors import ToolError, ToolFailure, fail, make_error, map_exception
-from scout_research.tools.numbers import find_numbers
 from scout_research.tools.resolve import normalize_ticker
 from scout_research.tools.sanitize import clean_text, is_valid_ticker
 from scout_research.tools.schemas import (
@@ -43,6 +42,7 @@ from scout_research.tools.schemas import (
     GetMarketDataInput,
     ProposePeerSetInput,
     ResolveCompanyInput,
+    SubmitCommentaryInput,
     strict_schema,
 )
 from scout_research.tools.session import (
@@ -203,6 +203,9 @@ def handle_resolve_company(ctx: ToolContext, args: ResolveCompanyInput) -> Resol
             return ResolveCompanyResult(status="not_found", candidate_count=0)
         metadata = ctx.metadata(company.cik)
         ctx.note_resolved(company.cik, args.query, resolution.match)
+        ctx.resolved_names[company.cik] = clean_text(metadata.name or company.name, 80)
+        if metadata.sic_code:
+            ctx.known_sic.add(clean_text(metadata.sic_code, 10))
         return ResolveCompanyResult(
             status="resolved",
             company={
@@ -227,18 +230,6 @@ def handle_resolve_company(ctx: ToolContext, args: ResolveCompanyInput) -> Resol
         return ResolveCompanyResult(status="ambiguous", candidates=candidates, candidate_count=resolution.candidate_count)
 
     return ResolveCompanyResult(status="not_found", candidate_count=0)
-
-
-def _exempt_terms(strings: list[str | None]) -> list[str]:
-    """Namen und Ticker des Kandidatensets samt ihrer Wörter mit Ziffern („3M“, „1-800-Flowers“): Sie sind keine
-    Zahlen und dürfen in Begründungen vorkommen (Review F18)."""
-    terms: list[str] = []
-    for text in strings:
-        if not text:
-            continue
-        terms.append(text)
-        terms += [w.strip(".,;:()") for w in text.split() if any(ch.isnumeric() for ch in w)]
-    return [t for t in dict.fromkeys(terms) if t]
 
 
 # --- 2 find_peer_candidates --------------------------------------------------------------------------------------
@@ -310,7 +301,8 @@ def handle_find_peer_candidates(ctx: ToolContext, args: FindPeerCandidatesInput)
         target=target,
         period_end=anchor.period_end,
         candidates=candidates,
-        terms=_exempt_terms([target["name"], target["ticker"], *[x for c in candidates for x in (c["name"], c["ticker"])]]),
+        warnings=warnings,
+        terms=commentary.exempt_terms([target["name"], target["ticker"], *[x for c in candidates for x in (c["name"], c["ticker"])]]),
     )
     return FindPeerCandidatesResult(
         candidate_set_id=set_id,
@@ -359,8 +351,10 @@ def handle_propose_peer_set(ctx: ToolContext, args: ProposePeerSetInput) -> Prop
     if problems:
         raise _problems("INVALID_ARGUMENTS", problems)
     problems = []
+    check_session = commentary.build_check_session(ctx)
+    check_session.terms = (*check_session.terms, *candidate_set.terms)
     for field_name, text in texts:
-        found = find_numbers(text, candidate_set.terms)
+        found = [p.match for p in commentary.check_text(check_session, text, "rationale").problems if p.code == "NAKED_NUMBER"]
         if found:
             problems.append({"field": field_name, "found": found[:5]})
     if problems:
@@ -438,10 +432,17 @@ def handle_propose_peer_set(ctx: ToolContext, args: ProposePeerSetInput) -> Prop
 # --- 4 compute_comps_table ---------------------------------------------------------------------------------------
 
 
-def _skip_reason(exc: Exception) -> tuple[str, str]:
-    if isinstance(exc, RevenueNotFoundError):
-        return "REVENUE_NOT_FOUND", "In den Filings wurde kein Umsatz gefunden."
-    return "DATA_NOT_FOUND", "Bei der SEC liegen keine Daten für das Unternehmen vor."
+_SKIP_SENTENCES = {
+    "de": {"REVENUE_NOT_FOUND": "In den Filings wurde kein Umsatz gefunden.",
+           "DATA_NOT_FOUND": "Bei der SEC liegen keine Daten für das Unternehmen vor."},
+    "en": {"REVENUE_NOT_FOUND": "No revenue was found in the filings.",
+           "DATA_NOT_FOUND": "The SEC has no data for the company."},
+}
+
+
+def _skip_reason(exc: Exception, lang: str = "de") -> tuple[str, str]:
+    code = "REVENUE_NOT_FOUND" if isinstance(exc, RevenueNotFoundError) else "DATA_NOT_FOUND"
+    return code, _SKIP_SENTENCES[lang][code]
 
 
 @guarded
@@ -462,7 +463,7 @@ def handle_compute_comps_table(ctx: ToolContext, args: ComputeCompsTableInput) -
             peers.append(_build_metrics(ctx, ref.cik))
         except (EdgarDataNotFound, RevenueNotFoundError) as exc:
             # E5 A: fehlende Daten → übersprungen, mit Pflicht-Warnung; Netzfehler (EdgarError sonst) brechen ab.
-            code, reason = _skip_reason(exc)
+            code, reason = _skip_reason(exc, ctx.output_language)
             skipped.append({"ticker": ref.ticker, "code": code, "reason": reason})
             skip_warnings.append(
                 QualityWarning(
@@ -477,12 +478,13 @@ def handle_compute_comps_table(ctx: ToolContext, args: ComputeCompsTableInput) -
     table = table.model_copy(update={"warnings": [*skip_warnings, *table.warnings]})
 
     full_warnings = [payloads.full_warning(w, f"W{i}") for i, w in enumerate(table.warnings, start=1)]
-    model_warnings = [payloads.model_warning(w, f"W{i}") for i, w in enumerate(table.warnings, start=1)]
+    lang = ctx.output_language
+    model_warnings = [payloads.model_warning(w, f"W{i}", lang) for i, w in enumerate(table.warnings, start=1)]
 
     target_ticker = ctx.ticker_for(target.company.cik) or target.company.cik
-    target_row = payloads.build_row(target, table.target_multiples, target_ticker)
+    target_row = payloads.build_row(target, table.target_multiples, target_ticker, lang)
     peer_rows = [
-        payloads.build_row(m, mu, ctx.ticker_for(m.company.cik) or m.company.cik)
+        payloads.build_row(m, mu, ctx.ticker_for(m.company.cik) or m.company.cik, lang)
         for m, mu in zip(table.peers, table.peer_multiples)
     ]
 
@@ -577,7 +579,7 @@ def handle_get_market_data(ctx: ToolContext, args: GetMarketDataInput) -> GetMar
     except (EdgarDataNotFound, RevenueNotFoundError):
         reason = (reason + " " if reason else "") + "Keine 10-K-Daten; Aktienanzahl und Marktkapitalisierung nicht verfügbar."
 
-    return GetMarketDataResult(
+    result = GetMarketDataResult(
         ticker=ticker,
         price=payloads.price(quote.price) if quote else None,
         price_as_of=quote.as_of_date if quote else None,
@@ -588,6 +590,16 @@ def handle_get_market_data(ctx: ToolContext, args: GetMarketDataInput) -> GetMar
         market_cap_musd=payloads.musd(market_cap),
         unavailable_reason=reason,
     )
+    ctx.market_data[ticker] = result.model_dump(mode="json")
+    return result
+
+
+# --- 5 submit_commentary -----------------------------------------------------------------------------------------
+
+
+@guarded
+def handle_submit_commentary(ctx: ToolContext, args: SubmitCommentaryInput) -> commentary.SubmitCommentaryResult:
+    return commentary.submit_commentary(ctx, args)
 
 
 # --- Registrierung und Dispatcher --------------------------------------------------------------------------------
@@ -630,6 +642,24 @@ TOOLS: dict[str, ToolSpec] = {
             "compute_comps_table",
             "Berechnet die Comps-Tabelle für ein vom Menschen bestätigtes Peer-Set (peer_set_id).",
             ComputeCompsTableInput, handle_compute_comps_table, 180,
+        ),
+        ToolSpec(
+            "submit_commentary",
+            "Reicht den Kommentar zur Comps-Tabelle ein. Zahlen schreibst du nie aus: Wo ein Wert stehen soll, setzt du "
+            "einen Slot; die Anwendung setzt Wert, Einheit, Format und Kennzeichnungen ein. Slots: "
+            "[[co:<TICKER>:<feld>]] (Wert eines Unternehmens; Felder: revenue, ebit, ebitda, net_income, total_debt, "
+            "cash, market_cap, enterprise_value, price, price_as_of, period_end, fiscal_year, ebit_margin, net_margin, "
+            "revenue_yoy, ev_revenue, ev_ebitda, ev_ebit, pe), [[stat:<multiple>:<min|median|mean|max|n>]] (Multiple: "
+            "ev_revenue, ev_ebitda, ev_ebit, pe), [[basis:<n_peers|n_peers_with_ev_multiples|target_period_end|"
+            "target_fiscal_year|price_as_of>]], [[warn:<W-ID>]] (Verweis auf eine Warnung der Tabelle; jede Warnung der "
+            "Stufe warning oder critical gehört mit ihrem Marker in den Kommentar), [[fin:<financials_id>:<metrik>]] und "
+            "[[mkt:<TICKER>:<feld>]] (Werte aus get_financials und get_market_data). Schreibweise exakt, ohne "
+            "Leerzeichen; direkt vor oder nach einem Slot steht keine Ziffer, kein Buchstabe, kein Vorzeichen und kein "
+            "zweiter Slot. Auch Jahre, Daten, Quartale, Zahlwörter (zwei), Rangwörter (zweitgrößte) und Vergleiche wie "
+            "„doppelt so hoch“ sind Zahlen und nur über Slots erlaubt. Fehlt ein Wert, schreibst du „nicht verfügbar“ "
+            "mit dem Grund. Bei einer Abweisung korrigierst du alle Probleme aus details.problems auf einmal; nach "
+            "der zweiten erfolglosen Korrektur wird der Kommentar zurückgehalten.",
+            SubmitCommentaryInput, handle_submit_commentary, 5,
         ),
         ToolSpec(
             "get_financials",

@@ -12,7 +12,8 @@ from pydantic import ValidationError
 from scout_research.domain.comps import build_comps_table
 from scout_research.tools import payloads
 from scout_research.tools.handlers import TOOLS, tool_definitions
-from scout_research.tools.numbers import find_numbers
+from scout_research.tools.commentary import check_text
+from scout_research.tools.slots import CheckSession
 from scout_research.tools.sanitize import Redactor, clean_text, clean_value, is_valid_ticker
 from scout_research.tools.schemas import (
     ComputeCompsTableInput, FindPeerCandidatesInput, GetFinancialsInput, ProposePeerSetInput, ResolveCompanyInput,
@@ -139,7 +140,8 @@ def test_rounding_rules_for_the_model() -> None:
     assert payloads.ratio2(1.5449) == 1.54 and payloads.mio_shares(24_300_000_000) == 24300 and payloads.musd(None) is None
 
 
-def test_model_warning_texts_and_exclusion_texts_never_contain_digits() -> None:
+@pytest.mark.parametrize("lang", ["de", "en"])
+def test_model_warning_texts_and_exclusion_texts_never_contain_digits(lang: str) -> None:
     from scout_research.domain.models import QualityWarning
 
     samples = {
@@ -151,17 +153,25 @@ def test_model_warning_texts_and_exclusion_texts_never_contain_digits() -> None:
     }
     for kind, params in samples.items():
         warning = QualityWarning(severity="warning", company="ABC", message="Wert 45.20 [1.2, 3.0]", affected_field="x", kind=kind, params=params)
-        view = payloads.model_warning(warning, "W1")
+        view = payloads.model_warning(warning, "W1", lang)
         assert not any(ch.isnumeric() for ch in view["text"]), (kind, view["text"])
         assert not any(isinstance(v, (int, float)) and not isinstance(v, bool) for v in view["params"].values())
         assert "45.20" not in json.dumps(view)
     debt = payloads.model_warning(QualityWarning(severity="warning", company="ABC", message="m", affected_field="total_debt",
-                                                 kind="debt_lower_bound", params={"ev_available": False}), "W2")
-    assert "mangels Marktdaten" in debt["text"]
+                                                 kind="debt_lower_bound", params={"ev_available": False}), "W2", lang)
+    assert ("mangels Marktdaten" if lang == "de" else "lack of market data") in debt["text"]
     for code in ("historical_period", "ev_unavailable_market", "ev_unavailable_debt", "ev_unavailable_cash",
                  "denominator_unavailable", "denominator_not_positive", "ev_not_positive", "market_unavailable",
                  "net_income_unavailable", "net_income_not_positive", "unbekannt"):
-        assert not any(ch.isnumeric() for ch in payloads.excluded_text("ev_ebit", code))
+        assert not any(ch.isnumeric() for ch in payloads.excluded_text("ev_ebit", code, lang))
+
+
+def test_german_and_english_templates_cover_the_same_kinds_and_codes() -> None:
+    assert payloads._WARNING_TEMPLATES["de"].keys() == payloads._WARNING_TEMPLATES["en"].keys()
+    assert payloads._EXCLUDED_TEMPLATES["de"].keys() == payloads._EXCLUDED_TEMPLATES["en"].keys()
+    assert payloads._PEER_SKIPPED_REASONS["de"].keys() == payloads._PEER_SKIPPED_REASONS["en"].keys()
+    assert payloads.warning_text("peer_skipped", {"code": "DATA_NOT_FOUND"}, "en").startswith("The peer was skipped")
+    assert payloads.excluded_text("ev_ebitda", "denominator_not_positive", "en") == "EBITDA not positive; multiple not meaningful."
 
 
 # --- Bereinigung externer Strings --------------------------------------------------------------------------------
@@ -184,11 +194,19 @@ def test_ticker_validation() -> None:
     assert not any(is_valid_ticker(t) for t in ("aapl", "A B", "[[X]]", "", "TOOLONGTICKER", None, 5))
 
 
-def test_number_finder() -> None:
-    assert find_numbers("Keine Zahlen, nur Software") == []
-    assert find_numbers("Umsatz 5,2 Mrd und 2 Segmente") == ["5", "2", "2"]
-    assert find_numbers("Wie 3M und 3M Co", ["3M", "3M Co"]) == [] and find_numbers("Wie 3M und 30", ["3M"]) == ["30"]
-    assert find_numbers("½ davon, ² hoch") != []
+def _naked(text: str, terms: tuple[str, ...] = ()) -> list[str]:
+    result = check_text(CheckSession(terms=terms), text, "rationale")
+    return [p.match for p in result.problems if p.code == "NAKED_NUMBER"]
+
+
+def test_number_backstop_replaces_the_digit_rule_of_step_5() -> None:
+    assert _naked("Keine Zahlen, nur Software") == []
+    assert _naked("Umsatz 5,2 Mrd und 2 Segmente") == ["5,2", "2"]
+    assert _naked("Wie 3M und 3M Co", ("3M", "3M Co")) == [] and _naked("Wie 3M und 30", ("3M",)) == ["30"]
+    assert _naked("½ davon, ² hoch") != []
+    # neu gegenüber „keine Ziffer“: Formnamen sind keine Zahlen, Zahlwörter und Rangwörter sind welche
+    assert _naked("Laut 10-K und 10-Q, B2B-Abos") == []
+    assert _naked("zwei Segmente, zweitgrößter Anbieter, doppelt so groß") == ["zwei", "zweitgrößter", "doppelt so"]
 
 
 def test_redactor_replaces_longest_secret_first_and_ignores_trivial_ones() -> None:

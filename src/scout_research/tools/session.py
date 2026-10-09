@@ -13,7 +13,7 @@ import secrets
 import time
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -76,7 +76,9 @@ class CandidateSet:
     candidates: list[dict[str, Any]]
     """Nur die dem Modell gezeigten (sortierten, gekürzten) Kandidaten."""
     terms: list[str]
-    """Namen und Ticker des Sets (für die Ziffernprüfung, F18)."""
+    """Namen und Ticker des Sets (Ausnahmen des Number-Checks, F18)."""
+    warnings: list[dict[str, Any]] = field(default_factory=list)
+    """Warnungen der Peer-Suche (`P1`): als Verweis im Text erlaubt."""
 
 
 @dataclass
@@ -129,6 +131,28 @@ class StoredFinancials:
     payload: dict[str, Any]
 
 
+@dataclass
+class CommentaryState:
+    """Abweisungen von `submit_commentary` je Comps-Tabelle seit der letzten Nutzernachricht."""
+
+    rejections: int = 0
+    withheld: bool = False
+
+
+@dataclass
+class StoredCommentary:
+    """Endergebnis für eine Comps-Tabelle: der Host zeigt `rendered`, nie den Modelltext."""
+
+    comps_table_id: str
+    status: str
+    """accepted | withheld"""
+    rendered: str
+    raw_text: str | None
+    attempts: int
+    warnings_addressed: list[str] = field(default_factory=list)
+    warnings_not_addressed: list[str] = field(default_factory=list)
+
+
 class ToolContext:
     def __init__(
         self,
@@ -161,6 +185,13 @@ class ToolContext:
         self.peer_sets: dict[str, ConfirmedPeerSet] = {}
         self.tables: dict[str, StoredTable] = {}
         self.financials: dict[str, StoredFinancials] = {}
+        self.market_data: dict[str, dict[str, Any]] = {}
+        """Jüngstes `get_market_data`-Ergebnis je Ticker (Slots `mkt:`)."""
+        self.resolved_names: dict[str, str] = {}
+        self.known_sic: set[str] = set()
+        self.commentary_state: dict[str, CommentaryState] = {}
+        self.commentaries: dict[str, StoredCommentary] = {}
+        self.commentary_log: list[dict[str, Any]] = []
         self.awaiting_confirmation = False
         self.failed_calls: dict[tuple[str, str], tuple[int, bool]] = {}
         self.last_exception: BaseException | None = None
@@ -181,6 +212,7 @@ class ToolContext:
         self._user_messages.append(text)
         self.awaiting_confirmation = False
         self.failed_calls.clear()
+        self.commentary_state.clear()  # neue Anfrage: neue Korrekturrunden für den Kommentar
 
     @property
     def user_messages(self) -> tuple[str, ...]:
