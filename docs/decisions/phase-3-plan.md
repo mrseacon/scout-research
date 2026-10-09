@@ -355,7 +355,8 @@ schon für `user_requested_additions`. **(Q3, bestätigt.)**
 | `USER_ADDITION_NOT_IN_MESSAGES` | nein | behaupteter Nutzerwunsch nicht in den Nachrichten |
 | `SLOT_UNKNOWN` | nein | unbekannter Ticker, unbekanntes Feld oder falsche Grammatik |
 | `SLOT_VALUE_UNAVAILABLE` | nein | Slot zeigt auf `None`; `details.reason` aus `excluded` |
-| `NAKED_NUMBER` | nein | ausgeschriebene Zahl außerhalb eines Slots; in Schritt 5 auch Ziffern in Peer-Begründungen (`propose_peer_set`) |
+| `NAKED_NUMBER` | nein | Zahl außerhalb eines Slots (Ziffern, Zahlwörter, Größenordnungs-, Rang- und Vergleichswörter, Abschnitt 11); gilt für `submit_commentary`, jeden Modelltext und Peer-Begründungen |
+| `COMMENTARY_WITHHELD` | nein | `submit_commentary`: dritte Abweisung für diese Tabelle (zwei Korrekturrunden aufgebraucht); der Host zeigt Tabelle und Warnungen statt des Kommentars. Zähler wird bei einer Nutzernachricht zurückgesetzt |
 | `FRAME_YEAR_UNRESOLVED` | nein | Ziel in keinem Frame ±1 (geprüft gegen den Frame des Umsatz-Konzepts seines Ankers) |
 | `DATA_NOT_FOUND` | nein | SEC 404, z. B. Unternehmen ohne `companyfacts` (entschieden 2026-10-08, Schritt 3) |
 | `UPSTREAM_UNAVAILABLE` | ja | Netz/Timeout/5xx, nach begrenzten Wiederholungen mit Backoff |
@@ -669,7 +670,7 @@ derzeit im iCloud-Desktop (Foundation §9).
 | 3 | L2/L1-Härtung: Check auf veraltete Periode, Frames über alle Umsatz-Konzepte mit Zählern, typisierte EDGAR-Fehler | Sonnet | T10 grün, Fehler-Mapping-Tests |
 | 4 | Tool-Verträge fixieren: Fehlertaxonomie, Handles, Payload-Rundung, Bereinigung externer Strings, Sitzungsspeicher | Opus-Review, dann Sonnet | Schemas aus Pydantic, Snapshot-Tests, T7 |
 | 5 | Handler für die Modell-Tools inkl. Allowlist und `resolve_company`-Namensabgleich — **sechs von sieben; `submit_commentary` gehört zu Schritt 6** | Sonnet | T1, T3, T4, T13; T12 für Tool-Ergebnisse; vorher E1–E7 entschieden. **Umgesetzt (2026-10-09)** |
-| 6 | **Slot-Renderer, `submit_commentary`, Backstop** | Opus (Grammatik, Korpus, Grenzfälle), dann Sonnet | T2 mit dem Korpus (Abschnitt 11.6). **Phase A (Policy, Korpus) erledigt 2026-10-09; Phase B nach Entscheidung O1–O7** |
+| 6 | **Slot-Renderer, `submit_commentary`, Backstop** | Opus (Grammatik, Korpus, Grenzfälle), dann Sonnet | T2 mit dem Korpus (Abschnitt 11.6). **Phase A (Policy, Korpus) und Entscheidungen O1–O7 erledigt 2026-10-09; Phase B (Umsetzung) erledigt 2026-10-09, Abschnitt 11.8** |
 | 7 | System-Prompt und Loop: Zustandsmaschine, Gate- und Kommentar-Ende, Budgets, Adapter | Opus (Prompt), Loop Sonnet | T3, T5, geskripteter End-to-End-Lauf |
 | 8 | Trace (JSONL), `EvalSessionConfig` | Sonnet | T9, T11, T12 für Trace und Logs |
 | 9 | CLI-Chat mit Gate-Abfrage (Host-API) | Sonnet | manueller Live-Lauf ADBE (API-Key nötig), Kosten im Trace |
@@ -892,9 +893,8 @@ Schritt 5 beheben.
 Alles, was über den Vertragstext hinaus beim Umsetzen festgelegt werden musste (keine inhaltliche Entscheidung, aber
 für Schritt 6/7 wissenswert):
 
-- **`submit_commentary` ist noch nicht registriert** (Schritt 6): der Name liefert vorerst `UNKNOWN_TOOL`. Die Codes
-  `SLOT_UNKNOWN` und `SLOT_VALUE_UNAVAILABLE` sind in der Code-Liste, aber noch ohne Szenario (Test
-  `STEP_6_CODES`). `NAKED_NUMBER` entsteht schon in Schritt 5 (Peer-Begründungen) — mit der einfachen Regel „keine
+- **`submit_commentary`** war in Schritt 5 noch nicht registriert (Stand Schritt 6: registriert, Abschnitt 11.8). Die Codes
+  `SLOT_UNKNOWN` und `SLOT_VALUE_UNAVAILABLE` haben seit Schritt 6 ein Szenario (`STEP_6_CODES` entfiel). `NAKED_NUMBER` entsteht schon in Schritt 5 (Peer-Begründungen) — mit der einfachen Regel „keine
   Ziffer“ (`tools/numbers.py`); der typisierte Backstop ersetzt sie in Schritt 6.
 - **Hinweis für Schritt 6:** Der Backstop muss Formnamen wie „10-K“ und „10-Q“ ausnehmen — das Modell schreibt sie
   im freien Text, und die Tool-Ergebnisse (`unavailable_reason`, Fehlermeldungen) enthalten sie ebenfalls. Warnungs-
@@ -1112,13 +1112,14 @@ neu blockiert werden dann auch Zahlwörter, Größenordnungs- und Rangwörter, n
 
 ### 11.6 Prüfkorpus
 
-`tests/data/number_check_corpus.yaml`, **200 Fälle** (171 de, 29 en; 33 + 1 akzeptierte und 104 abgewiesene im Slot-Text,
-27 Begründungen, 35 freier Text; 36 Angriffsfälle; 4 dokumentierte Restrisiken): synthetische Sitzung (Werte erfunden, keine echten Kennzahlen) mit Varianten
+`tests/data/number_check_corpus.yaml`, **239 Fälle** (200 aus Phase A, 39 aus Phase B; 205 de, 34 en; 44 Angriffsfälle;
+2 dokumentierte Restrisiken; Zahlen in 11.8): synthetische Sitzung (Werte erfunden, keine echten Kennzahlen) mit Varianten
 `base` (Tabelle, `de`), `base_en`, `dates_differ` (`basis.price_as_of = null`), `pre_table` und `pre_table_en`
 (Kandidatenset, Financials, Kursdaten, Nutzernachrichten, ohne Tabelle). Je Fall: `id`, `lang`, `profile`, `session`,
 `text`, `expect` (`accepted` oder Liste der Problem-Codes), `findings` (Ausschnitte des Rohtexts), optional `rendered`
 (Körper ohne Basiszeile und Fußnoten) und `footnotes` (Marken), `category`, `reason`, `depends_on` (O-Nummern),
-`residual: true` für Fälle, die der Check bewusst nicht fängt.
+`residual: true` für Fälle, die der Check bewusst nicht fängt, `adapted` (was nach den Entscheidungen O1–O7
+geändert wurde), `added_in: phase_b`.
 
 **Abnahmeregel für Phase B (Sonnet):** Für jeden Fall ohne offene Abhängigkeit (oder nach Entscheidung angepasst):
 gleiche Problem-Codes; je Code überlappt jede erwartete Fundstelle (erstes Vorkommen im Rohtext) mit genau einem
@@ -1146,8 +1147,10 @@ Korrektur (außer `.`↔`-` im Ticker), `(n = k)` an jeder Statistik.
 **Anpassung des Korpus (vor der Implementierung, eigener Commit):** Die Fälle `FT-01` bis `FT-35` hatten als
 Profil `free_text` mit typisiertem Abgleich. Mit O1 B sind sie `slot_text`; ihre Erwartungen und Fundstellen
 folgen aus O1/O2/O3, nicht aus dem Code. Jeder angepasste Fall trägt im Korpus das Feld `adapted:`. Sachlich ändert
-sich: 16 Fälle, die als „durchgelassen, weil Sitzungswert“ galten, sind jetzt `NAKED_NUMBER`; `FT-06` und `FT-07`
-(vorher bewusste Restrisiken) werden gefangen, es bleiben **zwei** dokumentierte Ausnahmen (`ST-A10`, `ST-A24`).
+sich: 17 Fälle, die als „durchgelassen, weil Sitzungswert“ galten, sind jetzt `NAKED_NUMBER` — darunter `FT-06`
+(Umsatz einer anderen Firma) und `FT-07` (Jahr aus Vorwissen), vorher bewusste Restrisiken. Sieben weitere Fälle
+bekommen zusätzliche Fundstellen (Jahr, Größenordnungswort), der Rest ändert nur das Profil. Es bleiben **zwei**
+dokumentierte Ausnahmen (`ST-A10`, `ST-A24`).
 
 #### Optionen und Empfehlungen (Stand Phase A, zur Nachvollziehbarkeit)
 
@@ -1165,3 +1168,84 @@ sich: 16 Fälle, die als „durchgelassen, weil Sitzungswert“ galten, sind jet
 **Von mir entschieden (Einwand möglich):** Zahlwortgrenze ab „zwei“, Aufzählungsadverbien erlaubt, `10K` ohne
 Bindestrich ist eine Zahl, Code-Blöcke/Zitate ohne Ausnahme, Jahre in Begründungen blockiert, strenge Slot-Grammatik
 ohne stille Korrektur (außer `.`↔`-`), `(n = k)` an jeder Statistik, englische Formate wie in 11.4.
+
+
+### 11.8 Umsetzung Phase B (Sonnet, 2026-10-09)
+
+**Module** (`src/scout_research/tools/`):
+
+| Datei | Inhalt |
+|---|---|
+| `numbercheck.py` | reine Funktionen ohne Sitzungszugriff: Normalisierung mit Rückabbildung auf den Rohtext (Formatzeichen `Cf` raus, Ziffern aller Schriften als ASCII, andere Zahlzeichen als `9`, NFKC), Ausnahmen der Klassen 1–6, Ziffernscan (zusammengeführt: `1 2 . 5`, Daten, Brüche), Wortscan (Zahlwörter, Größenordnungs-, Rang- und Vergleichswörter) |
+| `slots.py` | `CheckSession` (alles, was die Prüfung aus der Sitzung braucht), strenge Grammatik, Auflösung gegen die **kompakten** Payloads, Formate de/en |
+| `commentary.py` | `check_text` (Profile `slot_text`, `rationale`), Rendering mit Ticker-Etikett, feste Bestandteile (Basiszeile, Fußnoten, Warnungsblock, Rückhalt-Darstellung), `submit_commentary`, `build_check_session(ctx)` |
+| `payloads.py` | Warn-, Ausschluss- und Überspringen-Vorlagen auf Deutsch und Englisch (`warning_text`, `excluded_text`, `skip_reason`) |
+| `numbers.py` | entfällt; die Regel „keine Ziffer“ für Peer-Begründungen ist durch `check_text(…, "rationale")` ersetzt |
+
+**Festlegungen beim Umsetzen** (keine neuen inhaltlichen Entscheidungen; Einwände möglich):
+
+- **Zwei Profile statt drei** (O1 B). `check_text` gilt für jeden Modelltext, `submit_commentary` ist der Tool-Weg dafür.
+  `build_check_session(ctx)` liefert die Sitzungssicht (jüngste Tabelle, falls vorhanden); ohne Tabelle sind `co:`,
+  `stat:`, `basis:` und `warn:` `SLOT_UNKNOWN` (`kind: no_table`), `fin:`/`mkt:` gehen immer.
+- **Gerendert wird aus dem kompakten Payload**, den das Modell gesehen hat (derselbe Rundungscode wie `payloads.py`),
+  nicht aus den vollen Werten: Was das Modell sah, ist, was der Nutzer liest. Das Korpus bringt seine vollen Werte mit
+  denselben Funktionen in diese Form.
+- **`mkt:`** kennt `price`, `price_as_of`, `shares_outstanding`, `market_cap` (jüngstes `get_market_data` je Ticker);
+  **`fin:`** kennt die acht Metriken von `get_financials` plus `ebit_margin`, `net_margin`, `revenue_yoy`,
+  `period_end`, `fiscal_year`. Eine Metrik, die nicht abgefragt wurde, ist `SLOT_UNKNOWN` (`metric_not_in_result`);
+  eine abgefragte ohne Wert ist `SLOT_VALUE_UNAVAILABLE` mit `unavailable_reason`.
+- **Ticker-Etikett (O6)** gilt für alle firmengebundenen Slots (`co`, `fin`, `mkt`), nicht nur `co`; Kursdatum und Ticker
+  stehen in einer Klammer („46,2x (INTU, Kurs vom 07.10.2026)“).
+- **Nachbarschaft von Slots:** verboten sind davor Buchstabe, Ziffer, Vorzeichen und Vergleichszeichen (`+ - − – — ± ~ ≈ ≥ ≤
+  < > = $ € £ # &`), danach Buchstabe, Ziffer, `% $ € £ ° ^`; zwei Slots dürfen nicht nur durch Leerraum getrennt sein
+  (ein Problem je Paar). Anders als in 11.4 als Sperrliste statt Erlaubnisliste formuliert, damit Markdown
+  (`**[[…]]**`, `|`, `_`) keine Korrekturrunde kostet; jede Zeichenfolge, die aus Slot-Ausgabe und Umgebung eine neue Zahl
+  bildet, bleibt gesperrt.
+- **Namen mit Zahlwort (Lücke gefunden und geschlossen):** Die Ausnahme der Klasse 4 nimmt den ganzen Namen, Einzelwörter
+  mit **Ziffer** („3M“, in jeder Schreibweise) und Wortfolgen ab zwei Wörtern, die einen Treffer enthalten („Five Below“),
+  aus. Ein einzelnes Zahlwort („five“) und ein Ticker wie `FIVE`/`TWO` schalten nie das Zahlwort frei; Namen ohne Ziffer
+  gelten nur in der Schreibweise der Daten.
+- **Zusätzliche Wortregeln** aus der Gegenprobe: „ein/eine/one Prozent/percent/Basispunkt“ (die Zahl 1 als Artikel),
+  „anderthalb“/„eineinhalb“, Zusammensetzungen mit „komma“ („nullkommafünf“), das Emoji 🔟, Zahlwörter
+  Buchstabe für Buchstabe („z w e i“, „e.i.n.s“).
+- **Neuer Code `COMMENTARY_WITHHELD`** (dritte Abweisung für eine Tabelle; auch jeder weitere Aufruf bis zur nächsten
+  Nutzernachricht). Die dritte Abweisung trägt nicht die Probleme, sondern den Rückhalt; die Probleme stehen in
+  `ctx.commentary_log`. Der Zähler gilt je Tabelle und wird bei jeder Nutzernachricht zurückgesetzt. Ein identischer
+  Wiederholungsaufruf trifft vorher den `LOOP_GUARD` und zählt nicht.
+- **Zusammenbau** (`ctx.commentaries[comps_table_id]`, nur der Host liest ihn): Basiszeile (O5) – gerenderter Text –
+  Fußnoten (`*` EBITDA-Näherung, `†` Untergrenzen mit Tickern, `‡` Ausschlüsse mit Grund, `§` verschiedene Kurstage) –
+  Block „Im Kommentar nicht angesprochene Warnungen“ (O4 D) mit dem zahlenfreien Vorlagentext in der Sitzungssprache.
+  Pflichtwarnungen sind alle der Stufe `warning` oder `critical` (inklusive `peer_skipped`); eine nackte ID „W2“ zählt nicht.
+  Der Rückhalt zeigt Hinweis, Basiszeile, Markdown-Tabelle (Ziel, Peers, Min/Median/Mittel/Max) und die Warnungsliste.
+- **Sprache:** Vorlagen folgen `output_language` der Sitzung (Konfiguration, Default `de`), nicht der Sprache der
+  einzelnen Nutzernachricht. Die Fehlermeldungen an das Modell (`ERROR_SPECS`) und die Beschreibungen in
+  `get_financials`/`get_market_data` bleiben deutsch.
+
+**Abnahme:**
+
+- Korpus: **239 Fälle** (205 de, 34 en; 61 angenommen, 178 abgewiesen; 44 Angriffsfälle) als parametrisierter Test
+  (`tests/unit/test_number_check_corpus.py`), kein Fall übersprungen. 200 davon sind das Phase-A-Korpus (37 an die
+  Entscheidungen angepasst, siehe 11.7), 39 kamen in Phase B hinzu (Ticker-Schreibweise `BRK.B`/`BRK-B`, `fin:`/`mkt:`,
+  Nachbarschaft, Formnamen, Kennungen, Unicode, Zahlwörter). Zwei Fälle sind dokumentierte Ausnahmen (`ST-A10`, `ST-A24`).
+- **Mutationsproben:** Ohne Zahlen-Backstop schlagen 140 von 239 Fällen fehl (alle mit `NAKED_NUMBER`-Erwartung); ohne
+  Slot-Auflösung 63 (alle `ST-C`-Fälle, soweit sie an der Auflösung hängen, und die gerenderten Fälle).
+- Zusatztests: Handler-Integration (`test_tools_commentary.py`), zwei zufallsgesteuerte Läufe mit festem Seed (kein
+  Absturz, konsistente Positionen; eine in sicheren Text eingefügte Zahl wird nie angenommen), Gegenproben zu
+  Umgehungsversuchen, T12 für Kommentar und Log.
+
+**Grenzen (Restrisiko, bewusst):** Richtungsaussagen („liegt über dem Median“) und ein gültiger Slot mit falscher
+Kennzahl bleiben modellgeneriert (Phase 5); Zahlwörter anderer Sprachen („douze“), römische Zahlen in ASCII („XII“),
+Buchstaben als Ziffernersatz („l7“), qualitative Mengen ohne Zahl („die meisten“); nicht-numerische
+Zeichenfolgen, die ein Mensch als Zahl liest, soweit sie nicht in den Listen stehen.
+
+**Für Schritt 7 (Prompt und Loop):**
+
+- Jeder Modelltext, auch Rückfragen und die Einleitung nach dem Vorschlag, geht durch `check_text(build_check_session(ctx), text)`;
+  bei Verstoß ein Korrektur-Retry, dann Block (Plan, Abschnitt 3). Gezeigt wird `CheckResult.body`, nie der Rohtext.
+- Prompt: Zähler der Peer-Suche (`counts`, Anzahl Kandidaten) sind nicht nennbar — „es wurden nicht alle Kandidaten gezeigt“
+  ohne Zahl. Basisangabe entfällt im Prompt (O5). Das Modell nennt Firmen statt Anzahlen („beide Peers“ ist erlaubt).
+- Der Host zeigt nach `accepted` bzw. `COMMENTARY_WITHHELD` `ctx.commentaries[comps_table_id].rendered`; der Zug endet ohne
+  weiteren Modellaufruf.
+- Trace (Schritt 8): `ctx.commentary_log` (Rohtext mit Slots, Slot → Feldpfad, Probleme, Endaktion `accepted` /
+  `accepted_after_n` / `rejected` / `withheld`, Warnungsabdeckung) und `format_chars` (Anzahl entfernter unsichtbarer
+  Zeichen) sind schon belegt.
