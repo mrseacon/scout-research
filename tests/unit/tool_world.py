@@ -36,6 +36,13 @@ REAL = {
 }
 
 
+class _NoLimit:
+    """Rate Limiter ohne Wartezeit — die Test-Welt hat kein Netzwerk, das man schonen müsste."""
+
+    def acquire(self) -> None:
+        pass
+
+
 class FakeMarket:
     """Kursanbieter ohne Netzwerk. `prices` bildet Ticker auf Kurse ab; `errors` löst Ausnahmen aus."""
 
@@ -144,7 +151,8 @@ class World:
         return httpx.Response(404)
 
     def edgar(self) -> EdgarClient:
-        return EdgarClient(user_agent=UA, transport=httpx.MockTransport(self._handler), sleep=lambda _: None)
+        return EdgarClient(user_agent=UA, rate_limiter=_NoLimit(), transport=httpx.MockTransport(self._handler),  # type: ignore[arg-type]
+                           sleep=lambda _: None)
 
     def context(self, **kwargs: Any) -> ToolContext:
         kwargs.setdefault("secrets_to_redact", SECRETS)
@@ -186,11 +194,17 @@ def propose(ctx: ToolContext, candidate_set_id: str, ciks: tuple[str, ...] = (AA
     return call(ctx, "propose_peer_set", candidate_set_id=candidate_set_id, peers=peers, **extra)
 
 
-def start(w: World, user_message: str = "Mach Comps für NVDA") -> tuple[ToolContext, str]:
-    """Nutzer nennt das Ziel, das Modell löst es auf und sucht Kandidaten. Gibt (ctx, candidate_set_id) zurück."""
+def resolved(w: World, user_message: str = "Mach Comps für NVDA") -> ToolContext:
+    """Der Nutzer nennt das Ziel, das Modell löst es auf (noch keine Kandidatensuche)."""
     ctx = w.context()
     ctx.record_user_message(user_message)
     assert call(ctx, "resolve_company", query="NVDA")["status"] == "resolved"
+    return ctx
+
+
+def start(w: World, user_message: str = "Mach Comps für NVDA") -> tuple[ToolContext, str]:
+    """Wie `resolved`, dazu die Kandidatensuche. Gibt (ctx, candidate_set_id) zurück."""
+    ctx = resolved(w, user_message)
     found = call(ctx, "find_peer_candidates", target_cik=NVDA_CIK)
     return ctx, found["candidate_set_id"]
 
