@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.7 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.8 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -345,7 +345,8 @@ Fehler-Feedback an den Agenten statt harter Crash.
 **Stand der Umsetzung (v1.6.7)** — Phase 3, Schritt 5: Die L3-Handler für `resolve_company`,
 `find_peer_candidates`, `get_financials`, `get_market_data`, `compute_comps_table` und das neue Gate-Tool
 `propose_peer_set` existieren (`src/scout_research/tools/`); `submit_commentary` (Slots, Backstop) folgt in
-Schritt 6. Der Tool-Katalog oben ist die Skizze von v1.0; maßgeblich sind die Verträge in
+Schritt 6 — Policy und Prüfkorpus dafür stehen seit v1.6.8 im Plan (Abschnitt 11), die Implementierung wartet auf
+die Entscheidungen O1–O7. Der Tool-Katalog oben ist die Skizze von v1.0; maßgeblich sind die Verträge in
 `docs/decisions/phase-3-plan.md` (Abschnitt 2 und 10): Handles statt Zahlen im Tool-Input, `confirm_peer_set` als
 Host-API (kein Tool), `run_quality_checks` kein Modell-Tool (Warnungen kommen mit `compute_comps_table`),
 `export_deliverable` Phase 4. Stand der Abweichungen zwischen Katalog und L2 seit v1.5:
@@ -1177,7 +1178,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.5 | 2026-10-08 | Sicherheit: Finnhub-Fehler bereinigt (`MarketDataUnavailable` ohne URL/Token/Ausnahmekette) und httpx-Anfragezeilen im Log geschwärzt — vorher stand der API-Key in `str`/`repr` des Fehlers und in INFO-Logzeilen von httpx (Befund aus Schritt 3; nicht erreichbar, solange `CachedProvider` Fehler verschluckt). Sicherheits-Absatz in 7.3.2 erweitert. |
 | 1.6.6 | 2026-10-08 | Phase 3, Schritt 4: Review der Tool-Verträge gegen den Code (Plan, Abschnitt 10: Befunde F1–F21, offene Entscheidungen E1–E7). Eindeutige Korrekturen nur im Plan; hier ergänzt: `RevenueNotFoundError` → `TARGET_REVENUE_NOT_FOUND` in 7.3.2. Kein Code geändert. |
 | 1.6.7 | 2026-10-09 | Phase 3, Schritt 5 (Tool-Handler): `tools/` mit sechs Handlern, Sitzungsspeicher, Gate (`propose_peer_set`, Host-API `confirm_peer_set`), Allowlist, Dispatcher mit `LOOP_GUARD`. Entscheidungen E1–E7 (Plan, Abschnitt 10). L1: alle `httpx.HTTPError`, 3xx und ungültiges JSON typisiert (EDGAR) bzw. bereinigt (Finnhub); SIC-Suche meldet den Abbruch am Seitenlimit; `list_companies`. L2: `QualityWarning.kind/params`, `CompanyMultiples.excluded_codes`, `peers.rank_candidates` (max. 40), `PeerSearchCounts.sic_search_truncated`. Nachgeführt: 7.3 (Stand), 10 (Datenmodell), 15 (Repo-Struktur). |
+| 1.6.8 | 2026-10-09 | Phase 3, Schritt 6, Phase A (Number-Check, Opus): Policy für nackte Zahlen (Prüfprofile `slot_text`/`rationale`/`free_text`, 20 Klassen mit Begründung), Slot-Regeln (Gültigkeit, Nachbarschaft, `SLOT_VALUE_UNAVAILABLE` ohne Ersatzwert, Rendering de/en mit `≥`, Fußnotenmarken, `(n = k)`, Kursdatum, Ticker-Etikett), Pflichtbestandteile des Kommentars und Prüfkorpus `tests/data/number_check_corpus.yaml` (200 Fälle) — Plan, Abschnitt 11. Offen: O1–O7. Kein Produktionscode geändert. |
 
 ---
 
-*Ende Dokumentversion 1.6.7*
+*Ende Dokumentversion 1.6.8*

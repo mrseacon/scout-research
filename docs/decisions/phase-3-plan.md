@@ -390,6 +390,10 @@ keine API-Keys; die Fehler tragen nur Endpunkt-Pfad und Statuscode.
 
 ## 3. Zahlen-Absicherung: Slots primär, Regex als Backstop (R2)
 
+> **Präzisiert in Abschnitt 11** (Schritt 6, Phase A, 2026-10-09): Prüfprofile, Klassen nackter Zahlen, Slot-Regeln,
+> Pflichtbestandteile, Prüfkorpus. Offene Entscheidungen O1–O7 betreffen u. a. die Ausnahmen für Jahre (O2), die
+> Nutzerzahlen (O3) und die Warnungs-Abdeckung (O4) unten.
+
 ### Mechanismus
 
 Der Kommentar zur Comps-Tabelle läuft **ausschließlich** über `submit_commentary`. Das Modell schreibt
@@ -640,7 +644,7 @@ derzeit im iCloud-Desktop (Foundation §9).
 | # | Pflichttest |
 |---|---|
 | T1 | Jeder Fehlercode ist erreichbar und kommt als `is_error`-Ergebnis zurück; eine `RuntimeError` im Handler wird zu `INTERNAL_ERROR`, kein Absturz |
-| T2 | **Slots:** unbekannter Ticker/Feld/Grammatikfehler → `SLOT_UNKNOWN`; `None`-Wert → `SLOT_VALUE_UNAVAILABLE`; Untergrenze rendert `≥`; EBITDA-Fußnote erscheint; Format `de`/`en`. **Backstop:** ausgeschriebene Zahl im Kommentar → `NAKED_NUMBER`; erfundene Zahl in freiem Text → Retry, dann Block; Jahreszahl aus den Ergebnissen erlaubt. Korpus ≥ 40 Sätze |
+| T2 | **Slots:** unbekannter Ticker/Feld/Grammatikfehler → `SLOT_UNKNOWN`; `None`-Wert → `SLOT_VALUE_UNAVAILABLE`; Untergrenze rendert `≥`; EBITDA-Fußnote erscheint; Format `de`/`en`. **Backstop:** ausgeschriebene Zahl im Kommentar → `NAKED_NUMBER`; erfundene Zahl in freiem Text → Retry, dann Block; Jahreszahl aus den Ergebnissen erlaubt (je nach O2). Korpus `tests/data/number_check_corpus.yaml`, ≥ 80 Fälle, Abnahmeregel in 11.6 |
 | T3 | **Gate und Allowlist:** `compute_comps_table` mit `proposal_id` statt `peer_set_id` → abgewiesen; Modell ruft nach `propose_peer_set` weiter Tools → Zug endet. `get_financials`/`get_market_data`: unbestätigter Kandidat → `NOT_IN_ALLOWLIST`; vom Modell selbst aufgelöste Firma ohne Fundstelle in Nutzernachrichten → `NOT_IN_ALLOWLIST`; vom Nutzer genannte Firma → erlaubt; Ziel → erlaubt; bestätigter Peer → erlaubt; nach Bestätigung entfernter Kandidat → `NOT_IN_ALLOWLIST` |
 | T4 | Peer außerhalb der Kandidatenliste → abgewiesen; `user_requested_addition` ohne Fundstelle → abgewiesen; Zahl in `rationale` → abgewiesen |
 | T5 | Iterationslimit und `LOOP_GUARD` greifen |
@@ -665,7 +669,7 @@ derzeit im iCloud-Desktop (Foundation §9).
 | 3 | L2/L1-Härtung: Check auf veraltete Periode, Frames über alle Umsatz-Konzepte mit Zählern, typisierte EDGAR-Fehler | Sonnet | T10 grün, Fehler-Mapping-Tests |
 | 4 | Tool-Verträge fixieren: Fehlertaxonomie, Handles, Payload-Rundung, Bereinigung externer Strings, Sitzungsspeicher | Opus-Review, dann Sonnet | Schemas aus Pydantic, Snapshot-Tests, T7 |
 | 5 | Handler für die Modell-Tools inkl. Allowlist und `resolve_company`-Namensabgleich — **sechs von sieben; `submit_commentary` gehört zu Schritt 6** | Sonnet | T1, T3, T4, T13; T12 für Tool-Ergebnisse; vorher E1–E7 entschieden. **Umgesetzt (2026-10-09)** |
-| 6 | **Slot-Renderer, `submit_commentary`, Backstop** | Opus (Grammatik, Korpus, Grenzfälle), dann Sonnet | T2 mit ≥ 40 Fällen |
+| 6 | **Slot-Renderer, `submit_commentary`, Backstop** | Opus (Grammatik, Korpus, Grenzfälle), dann Sonnet | T2 mit dem Korpus (Abschnitt 11.6). **Phase A (Policy, Korpus) erledigt 2026-10-09; Phase B nach Entscheidung O1–O7** |
 | 7 | System-Prompt und Loop: Zustandsmaschine, Gate- und Kommentar-Ende, Budgets, Adapter | Opus (Prompt), Loop Sonnet | T3, T5, geskripteter End-to-End-Lauf |
 | 8 | Trace (JSONL), `EvalSessionConfig` | Sonnet | T9, T11, T12 für Trace und Logs |
 | 9 | CLI-Chat mit Gate-Abfrage (Host-API) | Sonnet | manueller Live-Lauf ADBE (API-Key nötig), Kosten im Trace |
@@ -914,3 +918,227 @@ für Schritt 6/7 wissenswert):
   liefert `EvalSessionConfig`); `gate_log` hält Vorschlag und Bestätigung für den Trace (Schritt 8).
 - **L1 (F5b, F12):** siehe Foundation 1.6.7. Die Sicherheitstests (T12) schlagen ohne die Schwärzung im Trace und ohne
   die Fehlerbereinigung an (Mutationsprobe).
+
+---
+
+## 11. Number-Check: Policy, Slot-Regeln, Pflichtbestandteile (Schritt 6, Phase A, Opus, 2026-10-09)
+
+**Status:** Entwurf ohne Implementierung. Offene Entscheidungen **O1–O7** stehen am Ende; wo eine Regel von ihnen
+abhängt, ist das markiert, und es gilt vorerst die Empfehlung. Prüfkorpus: `tests/data/number_check_corpus.yaml`
+(Abschnitt 11.6). Präzisiert Abschnitt 3; bei Widerspruch gilt dieser Abschnitt, sobald O1–O7 entschieden sind.
+
+**Ziel:** Kein Zahlenwert, den das Modell nicht aus einem Tool-Ergebnis hat, erreicht den Nutzer. Werte setzt der
+Code über Slots ein; der Backstop fängt Zahlen ab, die trotzdem im Modelltext stehen.
+
+### 11.1 Prüfprofile
+
+Jeder Modelltext läuft durch genau ein Profil:
+
+| Profil | Wofür | Erlaubte Zahlen |
+|---|---|---|
+| `slot_text` | `submit_commentary` und **jeder** Modelltext, sobald in der Sitzung eine Comps-Tabelle existiert (E6 A) | keine — Werte nur über Slots |
+| `rationale` | `propose_peer_set`: `rationale`, `notable_exclusions.reason` | keine; Slots sind dort weiterhin `INVALID_ARGUMENTS` (Schritt 5) |
+| `free_text` | Modelltext ohne Comps-Tabelle (Rückfragen, Einleitung nach dem Vorschlag, Antworten aus `get_financials`) | nur typisierte Treffer in Tool-Ergebnissen der Sitzung (11.3); **entfällt bei O1 = B** |
+
+Allen Profilen gemeinsam sind die Ausnahmen (11.2, Klassen 1–6) und die Vorverarbeitung:
+1. Unsichtbare Formatzeichen (Unicode-Kategorie `Cf`, z. B. U+200B, U+00AD) entfernen; ihr Vorkommen geht in den Trace.
+2. **Vor** der Normalisierung: jedes Zeichen mit `str.isnumeric()`, das keine ASCII-Ziffer ist (arabisch-indisch,
+   Devanagari, Fullwidth, Hoch-/Tiefstellung, `½`, `①`, römische Zahlzeichen `Ⅻ`, CJK), ist eine Fundstelle. Grund:
+   NFKC macht aus `Ⅻ` die Buchstaben `XII`, die der ASCII-Scan nicht mehr sieht.
+3. NFKC (Fullwidth-Klammern und -Doppelpunkte werden ASCII, der Slot-Parser sieht sie dann normal).
+4. Gültige Slots durch einen ziffernfreien Platzhalter ersetzen; slot-ähnliche, ungültige Konstrukte bleiben im Text
+   und werden mitgeprüft (eine Zahl in einem kaputten Slot ist eine nackte Zahl).
+5. Klassifizieren (11.2). Fundstellen, zwischen denen nur Leerzeichen oder Trenner (`. , ' ’ _` und NBSP) stehen,
+   werden zu **einer** Fundstelle zusammengefasst (`1 2 . 5` ist eine Zahl, nicht drei). Arabische Trenner `٫ ٬`
+   zählen mit.
+
+**Alle** Probleme einer Einreichung stehen in `details.problems` (je Problem `code`, `kind`, `match` als Ausschnitt des
+Rohtexts, Position, Hinweis). Der Fehlercode des Aufrufs ist das erste Problem in der Reihenfolge
+`SLOT_UNKNOWN` → `SLOT_VALUE_UNAVAILABLE` → `NAKED_NUMBER`; geprüft wird trotzdem alles, damit eine Korrekturrunde reicht.
+
+### 11.2 Was als nackte Zahl gilt
+
+Abwägung je Klasse: **Durchlassen** heißt, eine erfundene oder falsch zugeordnete Zahl kann den Nutzer erreichen;
+**Blockieren** kostet eine Korrekturrunde (nach der dritten Abweisung: Block mit deterministischer Tabelle). Ein
+Fehlalarm ist also billig und sichtbar, ein Durchlass teuer und unsichtbar. Im Zweifel wird blockiert — außer, die
+Ausnahme ist eng, geschlossen und häufig nötig.
+
+**Immer erlaubt (alle Profile):**
+
+| # | Klasse | Regel | Begründung |
+|---|---|---|---|
+| 1 | Formnamen | Geschlossene Liste, **mit Bindestrich** (auch `‐ ‑ –`): `10-K`, `10-Q`, `8-K`, `6-K`, `20-F`, `40-F`, `S-1`, `S-4`, `11-K`, `10-KT`, jeweils mit `/A`; `DEF 14A`; `Form 3/4/5` nur mit „Form“. **`10K`/`10k` ohne Bindestrich ist eine Zahl** (= 10.000) | Formnamen stehen in Tool-Texten (`unavailable_reason`, Fehlermeldungen) und sind keine Mengen. Ohne Bindestrich ist „10K Mitarbeiter“ nicht von „10K-Bericht“ zu unterscheiden; Durchlass wäre eine Mengenangabe |
+| 2 | Warnungs-IDs | `W<n>`, `P<n>`, wenn die ID in der Sitzung existiert. Nicht existierende IDs → Fundstelle. Eine nackte ID zählt **nicht** als Abdeckung (11.5) | Verweis, keine Menge; eine erfundene ID ist ein erfundener Verweis |
+| 3 | Listennummern | `^\s*([1-9]\|1[0-9]\|20)[.)]\s` am Zeilenanfang, **nicht** gefolgt von Einheit/Skala (`Mio.`, `Mrd.`, `USD`, `%`, `x`, …). Überschriften (`## 3 …`) und Nummern mitten im Satz sind keine Listennummern | Häufig, harmlos. Die Einheiten-Bedingung verhindert „21. Mrd. USD“ als getarnte Listennummer |
+| 4 | Namen und Ticker der Sitzung | Ticker (Großschreibung, Wortgrenzen) und Firmennamen bzw. deren Wörter mit Ziffern oder Zahlwörtern aus Kandidatenset, Tabelle und `resolve_company` werden vorher entfernt (`3M`, `1-800-FLOWERS.COM`, „Twenty-First …“) | F18; Namen sind Daten aus Tool-Ergebnissen, keine Mengen |
+| 5 | Fachbegriffe | Geschlossene Liste: `B2B`, `B2C`, `B2B2C`, `D2C`, `P2P`, `2D`, `3D`, `4G`, `5G`. Produktnamen mit Ziffern (`Microsoft 365`, `Windows 11`) sind **nicht** ausgenommen | Begriffe für Geschäftsmodelle, die in Begründungen nötig sind. Produktnamen sind unbegrenzt; eine offene Liste wäre ein Tor. Kosten: Umformulieren |
+| 6 | Kennungen mit Präfix und exaktem Sitzungswert | `CIK 0000796343`, `SIC 7372`/`SIC-Code 7372`, Accession Number im Format `\d{10}-\d{2}-\d{6}` — nur, wenn der Wert in einem Tool-Ergebnis der Sitzung steht. Handles (`cs_…`, `ct_…`, `fin_…`) sind **nicht** erlaubt | Kennungen braucht die Rückfrage bei Mehrdeutigkeit und die Provenance. Das Präfix verhindert, dass ein Betrag zufällig einer SIC gleicht. Handles sind intern |
+
+**Zahlen (Fundstelle, außer im Profil `free_text` bei typisiertem Treffer, 11.3):**
+
+| # | Klasse | Beispiele | `slot_text` | `rationale` | `free_text` | Begründung |
+|---|---|---|---|---|---|---|
+| 7 | Beträge, Multiples, Prozent, Kurse, Anzahlen in Ziffern | `17,0x`, `3x`, `36 %`, `21,5 Mrd. USD`, `$21.5bn`, `21.5B`, `30k`, `40 Kandidaten` | Fundstelle | Fundstelle | typisiert | Kern des Risikos |
+| 8 | Jahre und Fiskaljahre | `2025`, `FY2025`, `FY 2025`, `FY25`, `GJ 2025`, `Geschäftsjahr 2025/26` | Fundstelle — nur per Slot (**O2**) | Fundstelle | Treffer als Jahr | Ein Jahr ist eine Zuordnung (welche Firma, welche Periode). Im Slot-Text kommt es aus `fiscal_year`/`period_end` mit Provenance; in Begründungen ist es Vorwissen |
+| 9 | Daten | `28.11.2025`, `2025-11-28`, `Nov 28, 2025`, `November 2025` | Fundstelle — nur per Slot (**O2**) | Fundstelle | Treffer als Datum (Tag genau; Monat+Jahr, wenn ein Sitzungsdatum passt) | Format ist sprachabhängig, der Renderer schreibt es einheitlich. **Numerische Slash-Daten** (`11/28/2025`) sind immer Fundstelle (Tag/Monat mehrdeutig) |
+| 10 | Quartale, Halbjahre | `Q3`, `3Q25`, `H1`, `drittes Quartal`, `first half` | Fundstelle | Fundstelle | Fundstelle | Scout hat keine Quartalsdaten; jede Quartalsangabe ist Vorwissen |
+| 11 | Zahlwörter ab zwei | `zwei`, `zwölf`, `zweiundvierzig`, `two`, `twelve`, `Dutzend`, `dozen`, `null`, `zero`, `eins` | Fundstelle | Fundstelle | Fundstelle | Ein Zahlwort ist eine Zahl. **Erlaubt** sind `ein/eine/one/single/einzig`, `beide/both`, `kein/none` — als Artikel bzw. Bezug auf genannte Firmen nicht von Fließtext zu trennen. Bei `slot_text` fehlt damit die Anzahl übersprungener Peers als Wort: der Text nennt die Ticker |
+| 12 | Größenordnungswörter ohne Ziffer | `Milliarden`, `Millionen`, `Milliardenkonzern`, `Hunderte`, `thousands`, `millions`, `zweistellig`, `double-digit` | Fundstelle | Fundstelle | Fundstelle | Mengenbehauptung aus Vorwissen („Milliardenumsatz“). **Erlaubt**: Einheiten-Abkürzungen ohne Zahl (`Mio.`, `Mrd.`, `USD`, `%`, `x`) als Bezeichnung, und Zeitspannen ohne Zahl (`Jahrzehnte`, `decades`) — keine Finanzgröße |
+| 13 | Ordinalzahlen | Ziffern: `2.` mitten im Satz, `3rd`; Rang: `zweitgrößter`, `an dritter Stelle`, `Platz zwei`, `second-largest`, `dritten Quartal` | Fundstelle | Fundstelle | Fundstelle | Ein Rang ist ein gezählter Vergleich. **Erlaubt**: Aufzählungsadverbien (`erstens`, `zweitens`, …, `firstly`, `secondly`, satzeinleitendes `First,`/`Second,`) und Superlative ohne Zahl (`höchstes P/E`) — Letztere sind Richtungsaussagen (Restrisiko, Phase 5) |
+| 14 | Multiplikative und Bruch-Vergleiche in Worten | `doppelt so`, `das Doppelte`, `verdoppelt`, `dreimal so`, `halb so`, `die Hälfte`, `ein Drittel`, `ein Viertel`, `Zehntel`, `twice`, `double the`, `half of`, `a third of`, `three quarters` | Fundstelle | Fundstelle | Fundstelle | Das ist eine Rechnung, die kein Tool liefert. Feste Wendungen ohne Vergleich (`doppelt gezählt`, `double-check`) bleiben erlaubt. Ziffer mit `-mal`/`-fach` (`0,88-mal`) ist Klasse 7 (Faktor) |
+| 15 | Brüche in Ziffern/Zeichen | `1/2`, `3/4`, `½` | Fundstelle | Fundstelle | Fundstelle | wie 14 |
+| 16 | Rechenkontext mit Zahl | Zahl im selben Satzteil wie `Prämie`, `Abschlag`, `Aufschlag`, `Differenz`, `Abstand`, `Spread`, `Prozentpunkte`, `Basispunkte`, `premium`, `discount`, `percentage points`, `bps` | Fundstelle | Fundstelle | **Fundstelle auch bei Treffer** | Eine Differenz ist nie ein Tool-Wert; ein zufälliger Treffer (Marge 34,7 % als „Prämie 34,7 %“) darf nicht durchgehen. Ohne Zahl („handelt mit Abschlag“) ist das kein Number-Check-Thema, sondern Prompt (Schritt 7) |
+| 17 | Unicode-Ziffern | `١٧`, `１７`, `²⁶`, `⑫`, `Ⅻ` | Fundstelle | Fundstelle | Fundstelle | Vorverarbeitung Schritt 2; kein legitimer Gebrauch im Modelltext |
+| 18 | Code-Blöcke, Inline-Code, Zitate, Links, Überschriften | Zahl in `` ` ``, ```` ``` ````, „…“, `>`, URL | Fundstelle | Fundstelle | wie außerhalb | Der Nutzer sieht den Inhalt genauso; eine Ausnahme wäre der einfachste Umweg. Ein Zitat des Nutzers mit Zahl ist eine Bestätigung durch die Hintertür |
+| 19 | Index- und Produktnamen mit Ziffern | `S&P 500`, `Nasdaq-100`, `Russell 2000`, `Microsoft 365` | Fundstelle | Fundstelle | Fundstelle | Vorwissen; nicht in Tool-Ergebnissen |
+| 20 | Ungefähr-Wörter | `rund`, `etwa`, `ca.`, `über`, `knapp`, `~`, `≈`, `about`, `over` | ändern nichts | | | Die Zahl dahinter entscheidet |
+
+**Bewusst nicht erkannt (Restrisiko, dokumentiert):** Zahlwörter anderer Sprachen (`douze`), ASCII-römische Zahlen
+(`XII` — Fehlalarme bei `CD`, `MD`, `DC` wären häufiger als Treffer), Buchstaben als Ziffern-Ersatz (`l2,5x` wird
+über die `2` und `5` erkannt, `lO` nicht), qualitative Mengen ohne Zahl (`Mehrheit`, `die meisten`, `deutlich höher`,
+`keine Schulden`). Sie sind modellgeneriert wie Richtungsaussagen (Abschnitt 3, Restrisiko) und für den Phase-5-Check
+vorgemerkt.
+
+**Tausendertrenner und Dezimalzeichen:** Im Profil `slot_text` und `rationale` irrelevant (jede Ziffer ist Fundstelle).
+In `free_text` wird **streng nach `output_language`** gelesen (`de`: `6.210` = 6210, `6,2` = 6,2; `en` umgekehrt). Eine
+Zahl im fremden Format wird anders gelesen und trifft dann in der Regel nicht — das ist gewollt, denn der Leser liest
+sie genauso falsch. Leerzeichen, NBSP, Apostroph oder Unterstrich als Tausendertrenner (`19 410`, `19'410`) sind nie
+kanonisch → Fundstelle. Skalenwörter sind sprachabhängig: `Billion` in `de` = 10^12, `billion` in `en` = 10^9.
+
+### 11.3 Typisierter Abgleich (nur Profil `free_text`, entfällt bei O1 = B)
+
+- **Extraktion:** Vorzeichen (`+`, `-`, `−`, Klammern), Ziffern mit Trennern nach Sprache, Skala (`Tsd.`, `Mio.`,
+  `Mrd.`, `Bio.`, `k`, `m`, `mn`, `MM`, `bn`, `B`, Wörter), Typmarker: Faktor (`x`, `×`, `-fach`, `-mal`), Prozent
+  (`%`, `Prozent`, `percent`), Geld (`USD`, `$`, `US-Dollar`), Aktien (`Aktien`, `shares`). Ohne Typmarker:
+  untypisiert.
+- **Quellen:** alle Tool-Ergebnisse der Sitzung in der **kompakten Fassung, die das Modell gesehen hat**, inklusive
+  `details` von Fehlern (z. B. `available_period_ends`), jeweils mit Typ aus dem Feld: Geld (`*_musd`, Beträge in Mio.
+  USD), Kurs (USD), Prozent, Faktor (Multiples, `size_ratio`, `size_range`), Anzahl (Ganzzahlfelder, `counts.*`),
+  Jahr (`fiscal_year`, `calendar_year_used`, Jahre aus Sitzungsdaten), Datum, Aktien (Mio. Stück). Nutzerzahlen nach
+  **O3**.
+- **Treffer:** gleicher Typ (untypisiert trifft jeden Mengen-Typ, nie Jahr/Datum); nach Skalierung
+  `|geschrieben − Quelle| ≤ 0,5·10^-d` bei `d` geschriebenen Nachkommastellen in der geschriebenen Skala; mindestens
+  **zwei signifikante Stellen**, außer der Wert ist exakt; Vorzeichen gleich. Skalenwechsel (`19.410 Mio.` ↔
+  `19,4 Mrd.`) ist Darstellung, keine Rechnung, und erlaubt; Währungswechsel nicht.
+- **Ohne Quelle, daher immer Fundstelle:** Prozentpunkte, Basispunkte, andere Währungen, Klasse 16.
+- **Restrisiko (nicht behebbar ohne Slots):** Zuordnung. Der INTU-Umsatz als ADBE-Umsatz geht durch, ein Jahr aus
+  Vorwissen geht durch, wenn es zufällig ein Sitzungsjahr ist. Das ist der Grund für die Empfehlung zu **O1**.
+
+### 11.4 Slot-Regeln
+
+**Grammatik (streng, ohne Leerzeichen, Groß-/Kleinschreibung exakt):**
+
+| Slot | Gültig, wenn |
+|---|---|
+| `[[co:<TICKER>:<feld>]]` | `<TICKER>` = `Row.ticker` einer Zeile der Tabelle (Ziel oder Peer); `<feld>` ∈ `revenue, ebit, ebitda, net_income, total_debt, cash, market_cap, enterprise_value, price, price_as_of, period_end, fiscal_year, ebit_margin, net_margin, revenue_yoy, ev_revenue, ev_ebitda, ev_ebit, pe` |
+| `[[stat:<multiple>:<agg>]]` | `<multiple>` ∈ `ev_revenue, ev_ebitda, ev_ebit, pe`; `<agg>` ∈ `min, median, mean, max, n` |
+| `[[basis:<feld>]]` | `<feld>` ∈ `n_peers, n_peers_with_ev_multiples, target_period_end, target_fiscal_year, price_as_of` |
+| `[[warn:<ID>]]` | `<ID>` ist eine Warnungs-ID **dieser** Tabelle (`W<n>`; die `P<n>` der Peer-Suche gehören nicht dazu) — **O4** |
+| `[[fin:<financials_id>:<metric>]]`, `[[mkt:<TICKER>:<feld>]]` | nur bei **O1 = B/C**: Werte aus `get_financials` (Handle bindet Firma und Periode) bzw. `get_market_data` |
+
+- **`SLOT_UNKNOWN`:** falsche Grammatik, unbekanntes Präfix, Ticker nicht in der Tabelle (auch: Kandidat, der nicht
+  bestätigt wurde), unbekanntes Feld, Feld ohne Wert (`name`, `cik`, `ticker`, `excluded`, `*_is_lower_bound`,
+  `ebitda_approximated`), Statistik über eine Nicht-Kennzahl (`stat:revenue:…` — das wäre eine Rechnung), falsche
+  Schreibweise (`EV_EBITDA`, `adbe`) — der `hint` nennt die richtige Schreibweise, korrigiert wird nicht still.
+  Einzige Normalisierung: `.`↔`-` im Ticker (`BRK.B` = `BRK-B`, F9), protokolliert. **Slot-ähnliche** Konstrukte
+  (`[co:…]`, `{{co:…}}`, `[[ co:… ]]`, verschachtelt) sind ebenfalls `SLOT_UNKNOWN`, damit Tippfehler eine klare
+  Meldung bekommen.
+- **Nachbarschaft:** Vor einem Slot steht Zeilenanfang, Leerraum oder eines von `( „ " ' : /`; danach Zeilenende,
+  Leerraum oder eines von `) , ; . : ! ? “ " ' - /`. Verboten sind insbesondere Ziffern, Buchstaben, ein zweiter
+  Slot und Vorzeichen/Vergleichszeichen (`+ - − ± ~ ≈ ≥ ≤ < >`) davor; zwischen zwei Slots muss mindestens ein
+  Zeichen stehen, das kein Leerraum ist („350,00 USD 640,50 USD“ liest sich als eine Zahl). Sonst → `SLOT_UNKNOWN`
+  (`kind: slot_adjacent`), **ein** Problem je benachbartem Paar. Grund: `[[stat:pe:n]][[stat:pe:n]]` rendert „44“, `[[basis:n_peers]]0` „50“, `+[[co:WDAY:net_margin]]`
+  „+−1,3 %“ — jeweils eine neue Zahl aus gültigen Slots.
+- **`SLOT_VALUE_UNAVAILABLE`** (Abweisung, wie in Abschnitt 3 entschieden): Wert `None`; Peer übersprungen
+  (`co:<skipped>:…`, Grund aus `skipped_peers`); `basis:price_as_of` bei abweichenden Kursdaten; Statistik mit `n = 0`.
+  `details.reason` ist der zahlenfreie Text aus `excluded` bzw. der Vorlage. **Nie** wird ein leerer, geschätzter oder
+  Ersatzwert gerendert. Das Modell schreibt „nicht verfügbar“ mit dem Grund; ein automatisch eingesetztes „nicht
+  verfügbar“ wäre bequemer, ließe aber Sätze wie „WDAY liegt mit nicht verfügbar unter dem Median“ stehen.
+
+**Rendering** (aus den **vollen** Werten der gespeicherten Tabelle, mit **denselben Rundungsfunktionen wie der
+kompakte Payload** — was das Modell sah, ist was gerendert wird):
+
+| Typ | `de` | `en` |
+|---|---|---|
+| Geld (Mio. USD, ohne Nachkommastellen) | `21.505 Mio. USD` | `USD 21,505m` |
+| Multiple (eine Stelle) | `17,0x` | `17.0x` |
+| Prozent (eine Stelle) | `36,0 %` | `36.0%` |
+| Kurs (zwei Stellen) | `350,00 USD` | `USD 350.00` |
+| Datum | `28.11.2025` | `Nov 28, 2025` |
+| `fiscal_year` | `2025` (Bezeichnung „GJ“/„FY“ schreibt das Modell davor) | `2025` |
+| Anzahl | `5` | `5` |
+| negativ | `−1,3 %` (U+2212) | `−1.3%` |
+
+- Ein Wert ≠ 0 wird nie als 0 gerendert (F20, `round_nonzero`).
+- **Untergrenze** (`total_debt`, `enterprise_value`, EV-Multiples mit Flag): Präfix `≥ `.
+- **EBITDA-Näherung** (`ebitda`, `ev_ebitda`, `stat:ev_ebitda:*` außer `n`): Marke `*`, Fußnote einmal am Ende
+  („EBITDA angenähert als EBIT + D&A“).
+- **Statistik** (`min/median/mean/max`): immer mit `(n = k)`; Marke `†`, wenn `lower_bound` nicht leer ist (Fußnote:
+  „enthält Untergrenzen: CDNS“); Marke `‡`, wenn `excluded` nicht leer ist (Fußnote: „nicht enthalten: WDAY —
+  <Grund>“). Reihenfolge der Marken `* † ‡`. Damit sind kleines n, Untergrenzen und Ausschlüsse sichtbar, ohne dass das
+  Modell eine Zahl schreibt.
+- **Kursdatum:** Ist `basis.price_as_of` gesetzt, bekommt kein Einzelwert ein Datum (die Basiszeile nennt es, **O5**).
+  Ist es `null`, bekommen alle kursabhängigen Werte (`price`, `market_cap`, `enterprise_value`, `ev_*`, `pe`) den Zusatz
+  „(Kurs vom 07.10.2026)“ und kursabhängige Statistiken die Marke `§` („Kurse verschiedener Tage“).
+- **Ticker-Etikett (O6):** Kommt der Ticker eines `co`-Slots im selben Satz außerhalb von Slots nicht vor, rendert der
+  Code ihn mit: „ADBE liegt bei 32,1x* (INTU)“. Das macht eine falsche Firmenzuordnung für den Leser sichtbar.
+  Zusätze werden in **einer** Klammer zusammengefasst: „(INTU, Kurs vom 07.10.2026)“.
+- **Warnungs-Marker:** `[[warn:W2]]` → „[W2: INTU]“ (Firma aus der Warnung, bei Peer-Set-Warnungen „Peer-Set“).
+- **Sprache der Fußnoten:** Ausschluss- und Warnungstexte gibt es bisher nur deutsch (`payloads.py`). Für
+  `output_language = en` braucht der Renderer englische Vorlagen — Schritt 6, Phase B.
+
+### 11.5 Pflichtbestandteile des Kommentars
+
+| Bestandteil | Wer liefert ihn | Prüfung ohne Zahl im Modelltext | Folge bei Fehlen |
+|---|---|---|---|
+| Basis (Periodenende Ziel, Kursdatum, n Peers mit Multiples) | **Code** rendert eine feste Basiszeile über dem Kommentar (**O5**); `basis`-Slots bleiben erlaubt | entfällt | — |
+| Jede Warnung ab Stufe `warning` (inkl. `peer_skipped` aus E5, Untergrenzen, abweichendes/veraltetes Geschäftsjahr, Ausreißer) | Modell, mit Marker `[[warn:Wn]]` im Satz, der sie erklärt | Menge der Marker ⊇ Menge der IDs mit `severity ∈ {warning, critical}`; deterministisch | **O4**: Empfehlung: akzeptieren, nicht adressierte Warnungen hängt der Code als festen Block „Im Kommentar nicht angesprochen“ an; `warnings_not_addressed` im Ergebnis und Trace |
+| Übersprungene Peers | wie Warnungen (`peer_skipped` ist Pflicht-Warnung) + feste Tabellendarstellung | wie oben | wie oben |
+| EBITDA-Näherung | Code (Fußnote bei jedem EBITDA-Slot) | entfällt | — |
+| Untergrenzen in Werten und Statistik | Code (`≥`, `†`) | entfällt | — |
+| Ausgeschlossene Multiples und kleines n | Code (`‡`, `(n = k)`) | entfällt | — |
+| Höchstens drei Beobachtungen, offene Punkte | Modell | nicht deterministisch prüfbar | nur Prompt; Trace zählt Aufzählungspunkte als Hinweis |
+| Keine Empfehlung/kein Kursziel | Modell | Wortliste (`unterbewertet`, `Kursziel`, `kaufen`, `undervalued`, …) als **Hinweis** im Trace, keine Abweisung (Fehlalarme wie „nicht unterbewertet“) | Phase-5-Messgröße |
+
+Grundsatz: Was aus Daten folgt, rendert der Code; vom Modell verlangt wird nur, was Urteil braucht (eine Warnung
+erklären), und das wird über zahlenfreie Marker geprüft. Ein Marker beweist nicht, dass der Satz die Warnung
+richtig erklärt — das bleibt Restrisiko und Messgröße für Phase 5.
+
+**Ablauf `submit_commentary`** (unverändert aus Abschnitt 3, präzisiert): Prüfungen 11.1–11.4 → bei Problemen
+Abweisung mit allen Problemen; dritte Abweisung → Block („Kommentar zurückgehalten“ + Tabelle + Warnungsliste). Nach
+`accepted`: Basiszeile (Code) + gerenderter Text + Fußnoten + ggf. Block nicht adressierter Warnungen. Die
+Peer-Begründungsregel „keine Ziffer“ aus Schritt 5 (`tools/numbers.py`) wird durch das Profil `rationale` ersetzt;
+neu blockiert werden dann auch Zahlwörter, Größenordnungs- und Rangwörter, neu erlaubt Formnamen und Fachbegriffe.
+
+### 11.6 Prüfkorpus
+
+`tests/data/number_check_corpus.yaml`, **200 Fälle** (171 de, 29 en; 33 + 1 akzeptierte und 104 abgewiesene im Slot-Text,
+27 Begründungen, 35 freier Text; 36 Angriffsfälle; 4 dokumentierte Restrisiken): synthetische Sitzung (Werte erfunden, keine echten Kennzahlen) mit Varianten
+`base` (Tabelle, `de`), `base_en`, `dates_differ` (`basis.price_as_of = null`), `pre_table` und `pre_table_en`
+(Kandidatenset, Financials, Kursdaten, Nutzernachrichten, ohne Tabelle). Je Fall: `id`, `lang`, `profile`, `session`,
+`text`, `expect` (`accepted` oder Liste der Problem-Codes), `findings` (Ausschnitte des Rohtexts), optional `rendered`
+(Körper ohne Basiszeile und Fußnoten) und `footnotes` (Marken), `category`, `reason`, `depends_on` (O-Nummern),
+`residual: true` für Fälle, die der Check bewusst nicht fängt.
+
+**Abnahmeregel für Phase B (Sonnet):** Für jeden Fall ohne offene Abhängigkeit (oder nach Entscheidung angepasst):
+gleiche Problem-Codes; je Code überlappt jede erwartete Fundstelle (erstes Vorkommen im Rohtext) mit genau einem
+gemeldeten Problem, und jedes gemeldete Problem überlappt mit mindestens einer erwarteten Fundstelle (keine
+Fehlalarme, auseinandergezogene Zahlen als eine Fundstelle); `rendered` und `footnotes` exakt. T2 (Abschnitt 7) gilt mit
+diesem Korpus als erfüllt. Fälle mit `residual: true` dokumentieren Grenzen; sie werden als Erwartung „durchgelassen“
+getestet, damit eine spätere Verschärfung bewusst geschieht.
+
+### 11.7 Offene Entscheidungen (Sean)
+
+| # | Frage | Optionen | Empfehlung |
+|---|---|---|---|
+| O1 | Slots auch **vor** der Comps-Tabelle? | **A:** wie E6 A — vor der Tabelle typisierter Abgleich (11.3). **B:** Slots in jedem Modelltext; neue Namensräume `fin:` (Handle aus `get_financials`), `mkt:` (Kursdaten), ggf. `cand:`; typisierter Abgleich entfällt, `free_text` wird `slot_text`. **C:** Hybrid — `fin:`/`mkt:` Pflicht für Firmenwerte, typisierter Abgleich nur noch für Zähler und Größenverhältnisse der Peer-Suche | **B.** Der typisierte Abgleich ist der komplexeste und schwächste Teil: Er lässt genau die Zuordnungsfehler durch (Korpus `FT-06`, `FT-07`), wegen derer E6 A Slots verlangt. Kosten: zwei Namensräume mehr, mehr Slot-Befolgung |
+| O2 | Jahre/Fiskaljahre und Daten im Slot-Text | **A:** nur per Slot (`[[co:X:fiscal_year]]`, `[[basis:…]]`). **B:** `FY<jahr>`/Jahre erlaubt, wenn als Jahr in der Sitzung (Abschnitt 3 alt) | **A.** Ein Jahr ist eine Zuordnung zu Firma und Periode; B lässt „FY2024“ für die falsche Firma durch. Kosten: anfangs mehr Korrekturrunden (Go/No-go Schritt 10 misst das) |
+| O3 | Zahlen aus Nutzernachrichten als Quelle (nur relevant bei O1 = A/C) | **A:** alle (Abschnitt 3 alt). **B:** nur Nicht-Mengen (Jahre, Daten). **C:** keine | **B.** Ein vom Modell wiederholter Nutzerwert („EV/EBITDA 25x“) liest sich als Bestätigung |
+| O4 | Warnungs-Abdeckung: Mechanismus und Folge | Mechanismus: Marker `[[warn:Wn]]` (Review Schritt 4) oder „Ticker im Text“. Folge: **A** nur Hinweis (Abschnitt 3 alt); **B** Abweisung bei `peer_skipped`/`critical`; **C** Abweisung bei jeder Warnung ≥ `warning`; **D** akzeptieren und nicht adressierte Warnungen deterministisch anhängen | **Marker + D.** Marker sind deterministisch prüfbar; D garantiert Sichtbarkeit (auch E5) ohne Korrekturrunde und ohne Block |
+| O5 | Basiszeile | **A:** Modell schreibt sie mit Slots (Prompt Abschnitt 1, Punkt 1). **B:** Code rendert sie fest | **B.** Reine Daten; keine Befolgungslücke. Prompt-Punkt 1 entfällt in Schritt 7 |
+| O6 | Ticker-Etikett an `co`-Slots, wenn der Ticker nicht im Satz steht | **A:** ja (11.4). **B:** nein | **A.** Einzige deterministische Abhilfe gegen „Slot mit falscher Firma“ (Korpus `ST-A23`); Kosten: gelegentlich ein Klammerzusatz |
+| O7 | Fachbegriff-Ausnahmen (Klasse 5) | **A:** geschlossene Liste wie oben, Erweiterung nur per Code und Korpusfall. **B:** keine Ausnahmen | **A.** „B2B“ und „5G“ sind in Begründungen über Geschäftsmodelle üblich; die Liste ist klein und prüfbar |
+
+**Von mir entschieden (Einwand möglich):** Zahlwortgrenze ab „zwei“, Aufzählungsadverbien erlaubt, `10K` ohne
+Bindestrich ist eine Zahl, Code-Blöcke/Zitate ohne Ausnahme, Jahre in Begründungen blockiert, strenge Slot-Grammatik
+ohne stille Korrektur (außer `.`↔`-`), `(n = k)` an jeder Statistik, englische Formate wie in 11.4.
