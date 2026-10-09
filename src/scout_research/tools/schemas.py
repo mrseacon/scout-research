@@ -87,6 +87,8 @@ class GetMarketDataInput(_Input):
     ticker: str = Field(min_length=1, max_length=10)
 
 
+PERIOD_SELECTOR_DESCRIPTION = "Höchstens ein Feld setzen. Leer = jüngstes Geschäftsjahr."
+
 _UNSUPPORTED = ("minLength", "maxLength", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
                 "multipleOf", "maxItems", "pattern")
 
@@ -117,4 +119,10 @@ def _strip(node: Any) -> Any:
 def strict_schema(model: type[BaseModel]) -> dict[str, Any]:
     """JSON-Schema für `strict: true`: ohne die Grenzen, die die API ablehnt (sie stehen stattdessen in der
     `description`); Objekte mit `additionalProperties: false`. Geprüft wird weiter mit dem Pydantic-Modell."""
-    return _strip(copy.deepcopy(model.model_json_schema()))
+    schema = _strip(copy.deepcopy(model.model_json_schema()))
+    period = schema.get("$defs", {}).get("PeriodSelector")
+    if period is not None:  # statt der Entwickler-Docstring aus L2 eine kurze Beschreibung für das Modell
+        period["description"] = PERIOD_SELECTOR_DESCRIPTION
+        period["properties"]["period_end"]["description"] = "Exaktes Geschäftsjahresende (ISO-Datum). Bevorzugt."
+        period["properties"]["fiscal_year"]["description"] = "Geschäftsjahr laut Filing (ungenau; period_end ist eindeutig)."
+    return schema

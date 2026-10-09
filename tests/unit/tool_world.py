@@ -68,7 +68,9 @@ class World:
         self.facts: dict[str, dict] = {}
         self.sic_members: dict[str, list[str]] = {}
         self.frames: dict[tuple[str, int], dict[str, tuple[float, str, str]]] = {}
-        self.status_overrides: dict[str, int] = {}  # URL-Pfad-Teilstring -> Statuscode
+        self.status_overrides: dict[str, int] = {}  # URL-Teilstring -> Statuscode (die Antwort spiegelt den User-Agent)
+        self.raisers: dict[str, Any] = {}  # URL-Teilstring -> Funktion (request) -> Ausnahme, die der Transport wirft
+        self.garbage: set[str] = set()  # URL-Teilstrings, die mit 200 und Nicht-JSON antworten
         self.requests: list[httpx.Request] = []
         self.market = FakeMarket()
 
@@ -115,9 +117,15 @@ class World:
         self.requests.append(request)
         url = str(request.url)
         path = request.url.path
+        for fragment, make_exc in self.raisers.items():
+            if fragment in url:
+                raise make_exc(request)
+        for fragment in self.garbage:
+            if fragment in url:
+                return httpx.Response(200, text="<html>Wartung</html>", headers={"X-Echo": request.headers["User-Agent"]})
         for fragment, status in self.status_overrides.items():
             if fragment in url:
-                return httpx.Response(status, text="override")
+                return httpx.Response(status, text="override", headers={"X-Echo": request.headers["User-Agent"]})
 
         if path.endswith("company_tickers.json"):
             return httpx.Response(200, json={

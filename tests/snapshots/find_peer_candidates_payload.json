@@ -1,0 +1,48 @@
+{
+  "calendar_year_used": 2025,
+  "candidate_set_id": "cs_0002",
+  "candidates": [
+    {
+      "cik": "0000789019",
+      "name": "MICROSOFT CORPORATION",
+      "revenue_musd": 331839,
+      "sic_code": "3674",
+      "size_ratio": 1.54,
+      "ticker": "MSFT"
+    },
+    {
+      "cik": "0000320193",
+      "name": "Apple Inc.",
+      "revenue_musd": 416161,
+      "sic_code": "3674",
+      "size_ratio": 1.93,
+      "ticker": "AAPL"
+    }
+  ],
+  "counts": {
+    "not_in_revenue_frame": 0,
+    "outside_size_range": 0,
+    "passed_filters": 2,
+    "returned": 2,
+    "sic_matches": 2,
+    "sic_search_truncated": false,
+    "truncated": 0,
+    "without_ticker": 0
+  },
+  "frame_check": "target_in_frame",
+  "size_range": {
+    "max": 5.0,
+    "min": 0.2
+  },
+  "target": {
+    "cik": "0001045810",
+    "fiscal_year": 2026,
+    "name": "NVIDIA CORP",
+    "period_end": "2026-01-25",
+    "revenue_musd": 215938,
+    "sic_code": "3674",
+    "sic_description": "Semiconductors & Related Devices",
+    "ticker": "NVDA"
+  },
+  "warnings": []
+}

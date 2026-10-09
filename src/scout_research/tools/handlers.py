@@ -714,5 +714,6 @@ def dispatch(ctx: ToolContext, name: str, raw_args: Any) -> ToolOutcome:
     result = spec.handler(ctx, args)
     if isinstance(result, ToolError):
         return failed(result, ctx.last_exception)
+    ctx.failed_calls.pop(key, None)  # der Aufruf funktioniert jetzt — frühere Fehlschläge zählen nicht mehr
     return ToolOutcome(is_error=False, content=result.model_dump(mode="json", exclude_none=spec.exclude_none))
 

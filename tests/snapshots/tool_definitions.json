@@ -1,0 +1,376 @@
+[
+  {
+    "description": "Berechnet die Comps-Tabelle für ein vom Menschen bestätigtes Peer-Set (peer_set_id).",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "peer_set_id": {
+          "description": "Handle des vom Menschen bestätigten Peer-Sets (ps_…). (mindestens 1 Zeichen; höchstens 64 Zeichen)",
+          "title": "Peer Set Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "peer_set_id"
+      ],
+      "title": "ComputeCompsTableInput",
+      "type": "object"
+    },
+    "name": "compute_comps_table",
+    "strict": true
+  },
+  {
+    "description": "Liefert die Kandidatenliste für ein aufgelöstes Ziel (gleicher SIC-Code, Umsatz im Größenbereich), sortiert nach Größenähnlichkeit, höchstens 40. Nur für Firmen, die der Nutzer genannt hat. counts erklärt, was herausfiel und ob gekürzt wurde.",
+    "input_schema": {
+      "$defs": {
+        "PeriodSelector": {
+          "additionalProperties": false,
+          "description": "Höchstens ein Feld setzen. Leer = jüngstes Geschäftsjahr.",
+          "properties": {
+            "fiscal_year": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Geschäftsjahr laut Filing (ungenau; period_end ist eindeutig).",
+              "title": "Fiscal Year"
+            },
+            "period_end": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Exaktes Geschäftsjahresende (ISO-Datum). Bevorzugt.",
+              "title": "Period End"
+            }
+          },
+          "title": "PeriodSelector",
+          "type": "object"
+        },
+        "SizeRange": {
+          "additionalProperties": false,
+          "properties": {
+            "max": {
+              "default": 5.0,
+              "description": "Obergrenze des Umsatzes relativ zum Ziel. (mindestens 1; höchstens 20)",
+              "title": "Max",
+              "type": "number"
+            },
+            "min": {
+              "default": 0.2,
+              "description": "Untergrenze des Umsatzes relativ zum Ziel. (mindestens 0.05; höchstens 1)",
+              "title": "Min",
+              "type": "number"
+            }
+          },
+          "title": "SizeRange",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "period": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PeriodSelector"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Weglassen = jüngstes Geschäftsjahr (nur das ist möglich)."
+        },
+        "size_range": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SizeRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target_cik": {
+          "description": "CIK des Ziels aus resolve_company. (Muster ^\\d{1,10}$)",
+          "title": "Target Cik",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_cik"
+      ],
+      "title": "FindPeerCandidatesInput",
+      "type": "object"
+    },
+    "name": "find_peer_candidates",
+    "strict": true
+  },
+  {
+    "description": "Kennzahlen eines Unternehmens mit Konzept und Accession Number je Wert. Nur für das Ziel, bestätigte Peers und Firmen, die der Nutzer genannt hat.",
+    "input_schema": {
+      "$defs": {
+        "PeriodSelector": {
+          "additionalProperties": false,
+          "description": "Höchstens ein Feld setzen. Leer = jüngstes Geschäftsjahr.",
+          "properties": {
+            "fiscal_year": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Geschäftsjahr laut Filing (ungenau; period_end ist eindeutig).",
+              "title": "Fiscal Year"
+            },
+            "period_end": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Exaktes Geschäftsjahresende (ISO-Datum). Bevorzugt.",
+              "title": "Period End"
+            }
+          },
+          "title": "PeriodSelector",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "cik": {
+          "description": "(Muster ^\\d{1,10}$)",
+          "title": "Cik",
+          "type": "string"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "revenue",
+                  "ebit",
+                  "ebitda",
+                  "net_income",
+                  "total_assets",
+                  "total_debt",
+                  "cash",
+                  "shares_outstanding"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Weglassen = alle.",
+          "title": "Metrics"
+        },
+        "period": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PeriodSelector"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "cik"
+      ],
+      "title": "GetFinancialsInput",
+      "type": "object"
+    },
+    "name": "get_financials",
+    "strict": true
+  },
+  {
+    "description": "Kurs, Aktienanzahl und Marktkapitalisierung. Nur für das Ziel, bestätigte Peers und Firmen, die der Nutzer genannt hat.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "ticker": {
+          "description": "(mindestens 1 Zeichen; höchstens 10 Zeichen)",
+          "title": "Ticker",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ticker"
+      ],
+      "title": "GetMarketDataInput",
+      "type": "object"
+    },
+    "name": "get_market_data",
+    "strict": true
+  },
+  {
+    "description": "Reicht die gewählten Peers (nur aus der Kandidatenliste) mit je einer Begründung ohne Zahlen zur Bestätigung durch den Menschen ein. Das ist das Gate: Danach endet dein Zug.",
+    "input_schema": {
+      "$defs": {
+        "Addition": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "Name oder Ticker, genau so wie vom Nutzer genannt. (mindestens 1 Zeichen; höchstens 100 Zeichen)",
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "title": "Addition",
+          "type": "object"
+        },
+        "Exclusion": {
+          "additionalProperties": false,
+          "properties": {
+            "cik": {
+              "description": "(Muster ^\\d{1,10}$)",
+              "title": "Cik",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Grund ohne Zahlen. (mindestens 1 Zeichen; höchstens 300 Zeichen)",
+              "title": "Reason",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cik",
+            "reason"
+          ],
+          "title": "Exclusion",
+          "type": "object"
+        },
+        "PeerPick": {
+          "additionalProperties": false,
+          "properties": {
+            "cik": {
+              "description": "(Muster ^\\d{1,10}$)",
+              "title": "Cik",
+              "type": "string"
+            },
+            "rationale": {
+              "description": "Ein Satz zum Geschäftsmodell, ohne Zahlen. (mindestens 1 Zeichen; höchstens 300 Zeichen)",
+              "title": "Rationale",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cik",
+            "rationale"
+          ],
+          "title": "PeerPick",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "candidate_set_id": {
+          "description": "(mindestens 1 Zeichen; höchstens 64 Zeichen)",
+          "title": "Candidate Set Id",
+          "type": "string"
+        },
+        "notable_exclusions": {
+          "anyOf": [
+            {
+              "description": "(höchstens 15 Einträge)",
+              "items": {
+                "$ref": "#/$defs/Exclusion"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notable Exclusions"
+        },
+        "peers": {
+          "description": "(höchstens 15 Einträge)",
+          "items": {
+            "$ref": "#/$defs/PeerPick"
+          },
+          "minItems": 1,
+          "title": "Peers",
+          "type": "array"
+        },
+        "user_requested_additions": {
+          "anyOf": [
+            {
+              "description": "(höchstens 15 Einträge)",
+              "items": {
+                "$ref": "#/$defs/Addition"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Requested Additions"
+        }
+      },
+      "required": [
+        "candidate_set_id",
+        "peers"
+      ],
+      "title": "ProposePeerSetInput",
+      "type": "object"
+    },
+    "name": "propose_peer_set",
+    "strict": true
+  },
+  {
+    "description": "Löst einen Firmennamen oder Ticker deterministisch zu einer SEC-Firma auf. status \"resolved\": genau eine Firma; \"ambiguous\": Kandidaten zur Rückfrage beim Nutzer; \"not_found\": nach Ticker oder vollem Namen fragen. Nie raten.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "description": "Ticker oder Firmenname, so wie der Nutzer ihn nennt. (mindestens 1 Zeichen; höchstens 100 Zeichen)",
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "ResolveCompanyInput",
+      "type": "object"
+    },
+    "name": "resolve_company",
+    "strict": true
+  }
+]

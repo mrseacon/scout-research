@@ -1,0 +1,229 @@
+{
+  "basis": {
+    "n_peers": 2,
+    "n_peers_with_ev_multiples": 2,
+    "price_as_of": "2026-10-08",
+    "target_fiscal_year": 2026,
+    "target_period_end": "2026-01-25",
+    "units": {
+      "money": "Mio. USD",
+      "multiple": "x",
+      "pct": "%",
+      "price": "USD je Aktie"
+    }
+  },
+  "comps_table_id": "ct_0004",
+  "n_warnings_by_severity": {
+    "critical": 0,
+    "info": 5,
+    "warning": 2
+  },
+  "peers": [
+    {
+      "cash": 35934,
+      "cik": "0000320193",
+      "ebit": 133050,
+      "ebit_margin": 32.0,
+      "ebitda": 144748,
+      "ebitda_approximated": true,
+      "enterprise_value": 3756811,
+      "ev_ebit": 28.2,
+      "ev_ebitda": 26.0,
+      "ev_is_lower_bound": false,
+      "ev_revenue": 9.0,
+      "excluded": {},
+      "fiscal_year": 2025,
+      "market_cap": 3694088,
+      "name": "Apple Inc.",
+      "net_income": 112010,
+      "net_margin": 26.9,
+      "pe": 33.0,
+      "period_end": "2025-09-27",
+      "price": 250.0,
+      "price_as_of": "2026-10-08",
+      "revenue": 416161,
+      "revenue_yoy": 6.4,
+      "ticker": "AAPL",
+      "total_debt": 98657,
+      "total_debt_is_lower_bound": false
+    },
+    {
+      "cash": 20935,
+      "cik": "0000789019",
+      "ebit": 155237,
+      "ebit_margin": 46.8,
+      "ebitda": null,
+      "ebitda_approximated": true,
+      "enterprise_value": 3732132,
+      "ev_ebit": 24.0,
+      "ev_ebitda": null,
+      "ev_is_lower_bound": false,
+      "ev_revenue": 11.2,
+      "excluded": {
+        "ev_ebitda": "EBITDA nicht verfügbar."
+      },
+      "fiscal_year": 2026,
+      "market_cap": 3712773,
+      "name": "MICROSOFT CORPORATION",
+      "net_income": 133749,
+      "net_margin": 40.3,
+      "pe": 27.8,
+      "period_end": "2026-06-30",
+      "price": 500.0,
+      "price_as_of": "2026-10-08",
+      "revenue": 331839,
+      "revenue_yoy": 17.8,
+      "ticker": "MSFT",
+      "total_debt": 40294,
+      "total_debt_is_lower_bound": false
+    }
+  ],
+  "skipped_peers": [],
+  "statistics": [
+    {
+      "excluded": [],
+      "lower_bound": [],
+      "max": 11.2,
+      "mean": 10.1,
+      "median": 10.1,
+      "min": 9.0,
+      "multiple": "ev_revenue",
+      "n": 2
+    },
+    {
+      "excluded": [
+        "MSFT"
+      ],
+      "lower_bound": [],
+      "max": 26.0,
+      "mean": 26.0,
+      "median": 26.0,
+      "min": 26.0,
+      "multiple": "ev_ebitda",
+      "n": 1
+    },
+    {
+      "excluded": [],
+      "lower_bound": [],
+      "max": 28.2,
+      "mean": 26.1,
+      "median": 26.1,
+      "min": 24.0,
+      "multiple": "ev_ebit",
+      "n": 2
+    },
+    {
+      "excluded": [],
+      "lower_bound": [],
+      "max": 33.0,
+      "mean": 30.4,
+      "median": 30.4,
+      "min": 27.8,
+      "multiple": "pe",
+      "n": 2
+    }
+  ],
+  "target": {
+    "cash": 10605,
+    "cik": "0001045810",
+    "ebit": 130387,
+    "ebit_margin": 60.4,
+    "ebitda": 133230,
+    "ebitda_approximated": true,
+    "enterprise_value": 4371863,
+    "ev_ebit": 33.5,
+    "ev_ebitda": 32.8,
+    "ev_is_lower_bound": false,
+    "ev_revenue": 20.2,
+    "excluded": {},
+    "fiscal_year": 2026,
+    "market_cap": 4374000,
+    "name": "NVIDIA CORP",
+    "net_income": 120067,
+    "net_margin": 55.6,
+    "pe": 36.4,
+    "period_end": "2026-01-25",
+    "price": 180.0,
+    "price_as_of": "2026-10-08",
+    "revenue": 215938,
+    "revenue_yoy": 65.5,
+    "ticker": "NVDA",
+    "total_debt": 8468,
+    "total_debt_is_lower_bound": false
+  },
+  "warnings": [
+    {
+      "company": "AAPL",
+      "field": "period_end",
+      "id": "W1",
+      "kind": "fiscal_year_mismatch",
+      "params": {},
+      "severity": "warning",
+      "text": "Das Geschäftsjahresende weicht vom Ziel ab; die Kennzahlen sind nicht periodengleich."
+    },
+    {
+      "company": "MSFT",
+      "field": "period_end",
+      "id": "W2",
+      "kind": "fiscal_year_mismatch",
+      "params": {},
+      "severity": "warning",
+      "text": "Das Geschäftsjahresende weicht vom Ziel ab; die Kennzahlen sind nicht periodengleich."
+    },
+    {
+      "company": "MSFT",
+      "field": "ebitda",
+      "id": "W3",
+      "kind": "missing_data",
+      "params": {
+        "field": "ebitda"
+      },
+      "severity": "info",
+      "text": "Für dieses Unternehmen fehlt ein Kernwert (siehe params.field)."
+    },
+    {
+      "company": "Peer-Set",
+      "field": "ev_revenue",
+      "id": "W4",
+      "kind": "too_few_datapoints",
+      "params": {
+        "multiple": "ev_revenue"
+      },
+      "severity": "info",
+      "text": "Zu wenige Datenpunkte für dieses Multiple für eine verlässliche Ausreißer-Erkennung."
+    },
+    {
+      "company": "Peer-Set",
+      "field": "ev_ebitda",
+      "id": "W5",
+      "kind": "too_few_datapoints",
+      "params": {
+        "multiple": "ev_ebitda"
+      },
+      "severity": "info",
+      "text": "Zu wenige Datenpunkte für dieses Multiple für eine verlässliche Ausreißer-Erkennung."
+    },
+    {
+      "company": "Peer-Set",
+      "field": "ev_ebit",
+      "id": "W6",
+      "kind": "too_few_datapoints",
+      "params": {
+        "multiple": "ev_ebit"
+      },
+      "severity": "info",
+      "text": "Zu wenige Datenpunkte für dieses Multiple für eine verlässliche Ausreißer-Erkennung."
+    },
+    {
+      "company": "Peer-Set",
+      "field": "pe",
+      "id": "W7",
+      "kind": "too_few_datapoints",
+      "params": {
+        "multiple": "pe"
+      },
+      "severity": "info",
+      "text": "Zu wenige Datenpunkte für dieses Multiple für eine verlässliche Ausreißer-Erkennung."
+    }
+  ]
+}

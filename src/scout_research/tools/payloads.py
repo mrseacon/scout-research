@@ -74,7 +74,7 @@ def _warning_text(kind: str | None, params: dict[str, Any]) -> str:
     if kind == "fiscal_year_mismatch":
         return "Das Geschäftsjahresende weicht vom Ziel ab; die Kennzahlen sind nicht periodengleich."
     if kind == "stale_period":
-        return ("Das jüngste 10-K endet ein Geschäftsjahr oder mehr vor dem Ziel; der Peer wird mit einer "
+        return ("Der jüngste Jahresbericht endet ein Geschäftsjahr oder mehr vor dem Ziel; der Peer wird mit einer "
                 "älteren Periode verglichen.")
     if kind == "missing_data":
         return "Für dieses Unternehmen fehlt ein Kernwert (siehe params.field)."
