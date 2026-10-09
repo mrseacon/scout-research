@@ -923,8 +923,8 @@ für Schritt 6/7 wissenswert):
 
 ## 11. Number-Check: Policy, Slot-Regeln, Pflichtbestandteile (Schritt 6, Phase A, Opus, 2026-10-09)
 
-**Status:** Entwurf ohne Implementierung. Offene Entscheidungen **O1–O7** stehen am Ende; wo eine Regel von ihnen
-abhängt, ist das markiert, und es gilt vorerst die Empfehlung. Prüfkorpus: `tests/data/number_check_corpus.yaml`
+**Status:** Phase A (Entwurf) und Entscheidungen **O1–O7** (Sean, 2026-10-09, Abschnitt 11.7); Phase B (Umsetzung)
+folgt in 11.8. Wo der Entwurf noch `free_text` oder den typisierten Abgleich nennt, gilt O1 B: beide entfallen. Prüfkorpus: `tests/data/number_check_corpus.yaml`
 (Abschnitt 11.6). Präzisiert Abschnitt 3; bei Widerspruch gilt dieser Abschnitt, sobald O1–O7 entschieden sind.
 
 **Ziel:** Kein Zahlenwert, den das Modell nicht aus einem Tool-Ergebnis hat, erreicht den Nutzer. Werte setzt der
@@ -1127,7 +1127,30 @@ Fehlalarme, auseinandergezogene Zahlen als eine Fundstelle); `rendered` und `foo
 diesem Korpus als erfüllt. Fälle mit `residual: true` dokumentieren Grenzen; sie werden als Erwartung „durchgelassen“
 getestet, damit eine spätere Verschärfung bewusst geschieht.
 
-### 11.7 Offene Entscheidungen (Sean)
+### 11.7 Entscheidungen O1–O7 (Sean, 2026-10-09)
+
+| # | Entscheidung | Folge |
+|---|---|---|
+| O1 | **B:** Slots in jedem Modelltext, auch vor der Tabelle; neue Namensräume `fin:` und `mkt:` | Das Profil `free_text` und der typisierte Abgleich (11.3) entfallen; es bleiben `slot_text` und `rationale`. Kein Namensraum für Kandidatenzähler (`cand:` wurde nicht beschlossen): Zähler aus `find_peer_candidates` sind nicht nennbar |
+| O2 | **A:** Jahre und Daten nur per Slot | wie empfohlen |
+| O3 | **hinfällig:** kein Abgleich gegen Nutzerzahlen; Zahlen aus Nutzernachrichten werden nicht wiederholt | folgt aus O1 B |
+| O4 | **Marker `[[warn:W3]]` plus D:** fehlende Pflichtwarnungen hängt der Code automatisch an (vom Code erzeugter Text, nicht vom Modell) | Kommentar wird nicht abgewiesen, wenn Warnungen fehlen; `warnings_not_addressed` im Ergebnis und im Trace |
+| O5 | **B:** der Code rendert die Basiszeile fest | Prompt-Punkt 1 („Basis“) entfällt in Schritt 7 |
+| O6 | **ja:** Ticker-Etikett, wenn der Ticker nicht im selben Satz steht | |
+| O7 | **ja:** feste Liste von Fachbegriffen, nur per Code erweiterbar | |
+
+Von Sean bestätigt (vorher „von mir entschieden“): Zahlwörter ab „zwei“, „10K“ ohne Bindestrich ist eine Zahl, keine
+Ausnahme für Code-Blöcke und Zitate, Jahre in Peer-Begründungen blockiert, strenge Slot-Grammatik ohne stille
+Korrektur (außer `.`↔`-` im Ticker), `(n = k)` an jeder Statistik.
+
+**Anpassung des Korpus (vor der Implementierung, eigener Commit):** Die Fälle `FT-01` bis `FT-35` hatten als
+Profil `free_text` mit typisiertem Abgleich. Mit O1 B sind sie `slot_text`; ihre Erwartungen und Fundstellen
+folgen aus O1/O2/O3, nicht aus dem Code. Jeder angepasste Fall trägt im Korpus das Feld `adapted:`. Sachlich ändert
+sich: 16 Fälle, die als „durchgelassen, weil Sitzungswert“ galten, sind jetzt `NAKED_NUMBER`; `FT-06` und `FT-07`
+(vorher bewusste Restrisiken) werden gefangen, es bleiben **zwei** dokumentierte Ausnahmen (`ST-A10`, `ST-A24`).
+
+#### Optionen und Empfehlungen (Stand Phase A, zur Nachvollziehbarkeit)
+
 
 | # | Frage | Optionen | Empfehlung |
 |---|---|---|---|

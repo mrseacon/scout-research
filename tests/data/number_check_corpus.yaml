@@ -1,13 +1,15 @@
 # Prüfkorpus Number-Check (Phase-3-Plan, Abschnitt 11) — Schritt 6, Phase A (Opus, 2026-10-09)
 #
-# Status: Entwurf. Erwartungen gelten unter den Empfehlungen zu O1–O7 (Plan 11.7). Fälle mit `depends_on`
-# werden nach Seans Entscheidung angepasst; alle übrigen sind unabhängig davon.
+# Status: Entscheidungen O1–O7 getroffen (Sean, 2026-10-09, Plan 11.7). Die FT-Fälle (freier Text vor der Tabelle)
+# wurden daran angepasst: O1 B schafft das Profil `free_text` ab (alle Modelltexte sind `slot_text`), O2 A lässt
+# Jahre und Daten nur per Slot zu, O3 ist hinfällig. Jede angepasste Erwartung trägt `adapted:` mit der Änderung.
+# `depends_on` bleibt als Verweis stehen, welche Entscheidung eine Erwartung bestimmt.
 #
 # Felder je Fall:
 #   id          eindeutig; Präfix = Gruppe (ST-A akzeptiert, ST-B nackte Zahl, ST-C Slot-Fehler, RA Begründungen,
-#               FT freier Text mit typisiertem Abgleich)
+#               FT Text vor der Tabelle, seit O1 B ebenfalls slot_text)
 #   lang        Sprache des Texts (de|en); muss zur output_language der Session-Variante passen
-#   profile     slot_text | rationale | free_text (Plan 11.1)
+#   profile     slot_text | rationale (Plan 11.1; `free_text` entfiel mit O1 B)
 #   session     Variante aus `session.variants`
 #   text        Modelltext (Rohtext, wie eingereicht)
 #   expect      accepted | Liste der Problem-Codes (Reihenfolge egal; Aufruf-Code = erstes nach Plan 11.1)
@@ -20,7 +22,8 @@
 #   category    Kurzname der Klasse (Plan 11.2) bzw. des Angriffs
 #   reason      warum das Ergebnis so sein muss
 #   depends_on  (optional) offene Entscheidungen, von denen die Erwartung abhängt
-#   residual    (optional) true = der Check lässt das bewusst durch (dokumentierte Grenze, Plan 11.2/11.3)
+#   residual    (optional) true = der Check lässt das bewusst durch (dokumentierte Grenze, Plan 11.2)
+#   adapted     (optional) was an dieser Erwartung nach den Entscheidungen O1–O7 geändert wurde
 #
 # Alle Werte der Sitzung sind synthetisch (keine echten Kennzahlen der genannten Firmen).
 
@@ -1831,86 +1834,97 @@ cases:
     reason: "Kein Zahlenbezug."
 
   # ===============================================================================================================
-  # FT — freier Text ohne Tabelle, typisierter Abgleich (nur relevant bei O1 = A oder C; bei O1 = B gilt slot_text)
+  # FT — Modelltext vor der Comps-Tabelle (Rückfragen, Einleitung, Antworten aus get_financials/get_market_data).
+  # Seit O1 B gilt auch hier slot_text; erlaubt sind nur die Namensräume fin: und mkt:.
   # ===============================================================================================================
 
   - id: FT-01
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Für Adobe liegt das jüngste 10-K mit Periodenende 28.11.2025 vor."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["28.11.2025"]
     depends_on: [O1]
     category: date
-    reason: "Datum steht in der Sitzung (Kandidatenset, Fehlerdetails)."
+    reason: "Datum nur per Slot (O2 A); vor der Tabelle gibt es dafür keinen Slot."
+    adapted: "O1 B: Profil free_text -> slot_text; Erwartung accepted -> NAKED_NUMBER (O2 A)"
 
   - id: FT-02
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Adobe meldete für das FY2024 einen Umsatz von 19.410 Mio. USD."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["FY2024", "19.410 Mio. USD"]
     depends_on: [O1]
     category: typed_match
-    reason: "Jahr und Betrag aus fin_0001."
+    reason: "Jahr und Betrag stehen zwar in fin_0001, aber nur ein Slot darf sie nennen."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-03
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Adobe meldete für das FY2024 einen Umsatz von 19,4 Mrd. USD."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["FY2024", "19,4 Mrd. USD"]
     depends_on: [O1]
     category: typed_match_rescaled
-    reason: "Skalenwechsel ist Darstellung; 19,41 Mrd. auf eine Stelle = 19,4."
+    reason: "Umgerechneter Betrag ist im Slot-Text ebenso nackt."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-04
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Adobe meldete für das FY2024 einen Umsatz von rund 20 Mrd. USD."
     expect: [NAKED_NUMBER]
-    findings: ["20 Mrd. USD"]
+    findings: ["FY2024", "20 Mrd. USD"]
     depends_on: [O1]
     category: coarse_rounding
-    reason: "Eine signifikante Stelle und außerhalb der Toleranz."
+    reason: "Gerundeter Betrag und Jahr."
+    adapted: "O1 B: Profil free_text -> slot_text; Fundstelle FY2024 ergänzt"
 
   - id: FT-05
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Adobe meldete für das FY2024 einen Umsatz von 19,410 Mio. USD."
     expect: [NAKED_NUMBER]
-    findings: ["19,410 Mio. USD"]
+    findings: ["FY2024", "19,410 Mio. USD"]
     depends_on: [O1]
     category: thousands_separator
-    reason: "Im de-Text heißt das 19,41 Mio. USD — kein Treffer, der Leser läse es falsch."
+    reason: "Falscher Tausendertrenner; im Slot-Text ohnehin nackt."
+    adapted: "O1 B: Profil free_text -> slot_text; Fundstelle FY2024 ergänzt"
 
   - id: FT-06
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Adobe meldete einen Umsatz von 6.131 Mio. USD."
-    expect: accepted
-    residual: true
+    expect: [NAKED_NUMBER]
+    findings: ["6.131 Mio. USD"]
     depends_on: [O1]
     category: attack_other_company_value
-    reason: "ADSK-Umsatz als Adobe-Umsatz; der typisierte Abgleich kennt keine Zuordnung (Argument für O1 B)."
+    reason: "ADSK-Umsatz als Adobe-Umsatz: ohne Slot nackt. Der typisierte Abgleich hätte ihn durchgelassen (das war das Argument für O1 B)."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted + residual -> NAKED_NUMBER, kein Restrisiko mehr"
 
   - id: FT-07
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Adobe hat Ende 2023 eine Übernahme abgesagt."
-    expect: accepted
-    residual: true
+    expect: [NAKED_NUMBER]
+    findings: ["2023"]
     depends_on: [O1]
     category: attack_prior_knowledge
-    reason: "Jahr aus Vorwissen, zufällig ein Sitzungsjahr (available_period_ends) — geht durch."
+    reason: "Jahr aus Vorwissen, jetzt nackt, auch wenn es zufällig ein Sitzungsjahr ist."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted + residual -> NAKED_NUMBER, kein Restrisiko mehr"
 
   - id: FT-08
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Adobe hat rund 30.000 Mitarbeiter."
     expect: [NAKED_NUMBER]
@@ -1918,272 +1932,310 @@ cases:
     depends_on: [O1]
     category: attack_prior_knowledge
     reason: "Kein Sitzungswert."
+    adapted: "O1 B: Profil free_text -> slot_text"
 
   - id: FT-09
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Die EBIT-Marge im FY2024 lag bei 34,7 %."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["FY2024", "34,7 %"]
     depends_on: [O1]
     category: typed_match
-    reason: "Prozent aus fin_0001 (ebit_margin kompakt 34.7)."
+    reason: "Treffer in fin_0001 genügt nicht; nur per Slot."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-10
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Die EBIT-Marge stieg um 1,3 Prozentpunkte."
     expect: [NAKED_NUMBER]
     findings: ["1,3 Prozentpunkte"]
     depends_on: [O1]
     category: calculation_context
-    reason: "Prozentpunkte haben keine Quelle (11.3)."
+    reason: "Differenz ist nie ein Tool-Wert."
+    adapted: "O1 B: Profil free_text -> slot_text"
 
   - id: FT-11
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Die EBIT-Marge im FY2024 lag bei 34,7x."
     expect: [NAKED_NUMBER]
-    findings: ["34,7x"]
+    findings: ["FY2024", "34,7x"]
     depends_on: [O1]
     category: type_mismatch
-    reason: "Faktor statt Prozent — Typ passt nicht."
+    reason: "Faktor statt Prozent; ohnehin nackt."
+    adapted: "O1 B: Profil free_text -> slot_text; Fundstelle FY2024 ergänzt"
 
   - id: FT-12
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Die Suche ergab 40 Kandidaten; 12 weitere wurden wegen des Limits nicht gezeigt."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["40 Kandidaten", "12 weitere"]
     depends_on: [O1]
     category: typed_match_count
-    reason: "counts.returned und counts.truncated."
+    reason: "Zähler aus counts: ohne Slot-Namensraum für Kandidatenzähler (O1 B kennt nur fin: und mkt:) nicht nennbar."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-13
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Die Suche ergab 4 0 Kandidaten."
     expect: [NAKED_NUMBER]
     findings: ["4 0"]
     depends_on: [O1]
     category: attack_spread_digits
-    reason: "Auseinandergezogene Ziffern werden nie einzeln abgeglichen."
+    reason: "Auseinandergezogene Ziffern sind eine Fundstelle."
+    adapted: "O1 B: Profil free_text -> slot_text"
 
   - id: FT-14
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Intuit ist nach Umsatz etwa 0,88-mal so groß wie Adobe."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["0,88-mal"]
     depends_on: [O1]
     category: typed_match_factor
-    reason: "Ziffer mit „-mal“ ist Faktor (Klasse 7), size_ratio 0.88; Klasse 14 betrifft nur Wortformen."
+    reason: "Faktor mit „-mal“ ist eine Zahl (Klasse 7)."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-15
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Sie nannten 25x – das kann Scout erst nach der Comps-Tabelle prüfen."
     expect: [NAKED_NUMBER]
     findings: ["25x"]
     depends_on: [O1, O3]
     category: user_number_echo
-    reason: "Mengenangabe nur aus der Nutzernachricht; bei O3 A erlaubt."
+    reason: "Zahlen aus Nutzernachrichten werden nicht wiederholt (O3 hinfällig)."
+    adapted: "O1 B: Profil free_text -> slot_text; O3 hinfällig"
 
   - id: FT-16
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Für das FY2022 liegt Scout kein 10-K vor."
-    expect: accepted
-    depends_on: [O1, O3]
+    expect: [NAKED_NUMBER]
+    findings: ["FY2022"]
+    depends_on: [O1, O2, O3]
     category: user_year_echo
-    reason: "Jahr nur aus der Nutzernachricht; bei O3 B/A erlaubt, bei O3 C blockiert."
+    reason: "Auch ein vom Nutzer genanntes Jahr wird nicht wiederholt (O2 A, O3 hinfällig)."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-17
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Die Prämie beträgt 34,7 %."
     expect: [NAKED_NUMBER]
     findings: ["34,7 %"]
     depends_on: [O1]
     category: calculation_context
-    reason: "Rechenkontext blockiert auch bei zufälligem Treffer (ebit_margin 34,7)."
+    reason: "Rechenkontext mit Zahl."
+    adapted: "O1 B: Profil free_text -> slot_text"
 
   - id: FT-18
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Das Umsatzwachstum im FY2024 betrug −10,8 %."
     expect: [NAKED_NUMBER]
-    findings: ["−10,8 %"]
+    findings: ["FY2024", "−10,8 %"]
     depends_on: [O1]
     category: sign_mismatch
-    reason: "Vorzeichen widerspricht dem Payload (+10,8)."
+    reason: "Vorzeichen widerspricht dem Payload; ohnehin nackt."
+    adapted: "O1 B: Profil free_text -> slot_text; Fundstelle FY2024 ergänzt"
 
   - id: FT-19
     lang: en
-    profile: free_text
+    profile: slot_text
     session: pre_table_en
     text: "Adobe reported revenue of USD 19,410m for FY2024."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["19,410m", "FY2024"]
     depends_on: [O1]
     category: typed_match
-    reason: "en-Format, Treffer."
+    reason: "en-Format, nur per Slot."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-20
     lang: en
-    profile: free_text
+    profile: slot_text
     session: pre_table_en
     text: "Adobe reported revenue of 19.410m for FY2024."
     expect: [NAKED_NUMBER]
-    findings: ["19.410m"]
+    findings: ["19.410m", "FY2024"]
     depends_on: [O1]
     category: thousands_separator
-    reason: "Im en-Text heißt das 19,41 Mio. — kein Treffer."
+    reason: "Falscher Tausendertrenner (en)."
+    adapted: "O1 B: Profil free_text -> slot_text; Fundstelle FY2024 ergänzt"
 
   - id: FT-21
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Die Marktkapitalisierung von Adobe beträgt 148,75 Billionen USD."
     expect: [NAKED_NUMBER]
-    findings: ["148,75 Billionen USD"]
+    findings: ["148,75", "Billionen"]
     depends_on: [O1]
     category: scale_language
-    reason: "Deutsche „Billion“ = 10^12; englisches billion im de-Text trifft nicht."
+    reason: "Ziffern und Größenordnungswort sind zwei Fundstellen."
+    adapted: "O1 B: Profil free_text -> slot_text; Fundstelle in zwei geteilt (Ziffer und Wort „Billionen“, Klasse 12)"
 
   - id: FT-22
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Die Marktkapitalisierung von Adobe beträgt 148,75 Mrd. USD."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["148,75 Mrd. USD"]
     depends_on: [O1]
     category: typed_match_rescaled
-    reason: "market_cap_musd 148750."
+    reason: "Betrag nur per Slot ([[mkt:ADBE:market_cap]])."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-23
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Der Kurs von Adobe lag am 08.10.2026 bei 350,00 USD."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["08.10.2026", "350,00 USD"]
     depends_on: [O1]
     category: typed_match_price
-    reason: "Kurs und Kursdatum aus get_market_data."
+    reason: "Kurs und Datum nur per mkt:-Slot."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-24
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Die Marktkapitalisierung von Adobe beträgt 350 Mio. USD."
     expect: [NAKED_NUMBER]
     findings: ["350 Mio. USD"]
     depends_on: [O1]
     category: type_mismatch
-    reason: "Kurs (USD je Aktie) als Betrag in Mio. USD."
+    reason: "Kurs als Betrag."
+    adapted: "O1 B: Profil free_text -> slot_text"
 
   - id: FT-25
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Knapp 19,4 Mrd. USD Umsatz im FY2024."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["19,4 Mrd. USD", "FY2024"]
     depends_on: [O1]
     category: approximation
-    reason: "Ungefähr-Wort ändert nichts; Zahl trifft."
+    reason: "Ungefähr-Wort ändert nichts."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-26
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Adobe hat 425,0 Mio. Aktien ausstehend."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["425,0 Mio."]
     depends_on: [O1]
     category: typed_match_shares
-    reason: "shares_outstanding_mio."
+    reason: "Nur per mkt:-Slot."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-27
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Umsatz FY2024: 19 410 Mio. USD."
     expect: [NAKED_NUMBER]
-    findings: ["19 410"]
+    findings: ["FY2024", "19 410"]
     depends_on: [O1]
     category: thousands_separator
-    reason: "Leerzeichen als Tausendertrenner ist nicht kanonisch."
+    reason: "Leerzeichen als Tausendertrenner; ohnehin nackt."
+    adapted: "O1 B: Profil free_text -> slot_text; Fundstelle FY2024 ergänzt"
 
   - id: FT-28
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Das Periodenende war der 11/28/2025."
     expect: [NAKED_NUMBER]
     findings: ["11/28/2025"]
     depends_on: [O1]
     category: date
-    reason: "Numerische Slash-Daten sind mehrdeutig (Klasse 9)."
+    reason: "Numerisches Slash-Datum."
+    adapted: "O1 B: Profil free_text -> slot_text"
 
   - id: FT-29
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Für ADSK liegt kein 10-K für FY2027 vor."
     expect: [NAKED_NUMBER]
     findings: ["FY2027"]
     depends_on: [O1]
     category: year
-    reason: "10-K erlaubt; FY2027 steht nirgends in der Sitzung."
+    reason: "10-K erlaubt, FY2027 nackt."
+    adapted: "O1 B: Profil free_text -> slot_text"
 
   - id: FT-30
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Meinen Sie Adobe Inc. (CIK 0000796343)?"
     expect: accepted
     depends_on: [O1]
     category: identifier
-    reason: "CIK mit Präfix und exaktem Sitzungswert (Klasse 6) — gilt auch bei O1 B."
+    reason: "CIK mit Präfix und exaktem Sitzungswert (Klasse 6)."
+    adapted: "O1 B: Profil free_text -> slot_text"
 
   - id: FT-31
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Das letzte 10-K von Adobe stammt vom November 2025."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["2025"]
     depends_on: [O1]
     category: date
-    reason: "Monat und Jahr passen zu einem Sitzungsdatum."
+    reason: "Monat und Jahr nur per Slot (O2 A)."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-32
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Von 212 SIC-Treffern blieben 52 nach den Filtern."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["212", "52"]
     depends_on: [O1]
     category: typed_match_count
-    reason: "counts.sic_matches und counts.passed_filters."
+    reason: "Zähler aus counts; kein Slot-Namensraum dafür."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-33
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Größenspanne 0,05x bis 5,0x des Ziels."
-    expect: accepted
+    expect: [NAKED_NUMBER]
+    findings: ["0,05x", "5,0x"]
     depends_on: [O1]
     category: typed_match_factor
-    reason: "size_range; exakter Wert darf weniger als zwei signifikante Stellen haben."
+    reason: "size_range; kein Slot-Namensraum dafür."
+    adapted: "O1 B: Profil free_text -> slot_text; accepted -> NAKED_NUMBER"
 
   - id: FT-34
     lang: en
-    profile: free_text
+    profile: slot_text
     session: pre_table_en
     text: "Adobe has roughly 30,000 employees."
     expect: [NAKED_NUMBER]
@@ -2191,17 +2243,19 @@ cases:
     depends_on: [O1]
     category: attack_prior_knowledge
     reason: "Kein Sitzungswert (en)."
+    adapted: "O1 B: Profil free_text -> slot_text"
 
   - id: FT-35
     lang: de
-    profile: free_text
+    profile: slot_text
     session: pre_table
     text: "Für Q3 hat Scout keine Daten."
     expect: [NAKED_NUMBER]
     findings: ["Q3"]
     depends_on: [O1]
     category: quarter
-    reason: "Quartale immer blockiert (Klasse 10)."
+    reason: "Quartale immer blockiert."
+    adapted: "O1 B: Profil free_text -> slot_text"
 
   - id: FT-36
     lang: de
@@ -2212,7 +2266,8 @@ cases:
     rendered: "ADBE, GJ 2024: Umsatz 19.410 Mio. USD."
     depends_on: [O1]
     category: fin_slot
-    reason: "Nur bei O1 B/C — Werte aus get_financials per Handle-Slot, auch vor der Tabelle."
+    reason: "Werte aus get_financials per Handle-Slot (fin:), auch vor der Tabelle."
+    adapted: "reason umformuliert (O1 B entschieden); Erwartung unverändert"
 
   - id: FT-37
     lang: de
@@ -2223,4 +2278,5 @@ cases:
     findings: ["[[fin:fin_0099:revenue]]"]
     depends_on: [O1]
     category: fin_slot
-    reason: "Nur bei O1 B/C — unbekanntes Financials-Handle."
+    reason: "Unbekanntes Financials-Handle."
+    adapted: "reason umformuliert (O1 B entschieden); Erwartung unverändert"
