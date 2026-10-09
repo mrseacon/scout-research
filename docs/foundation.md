@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.6 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.7 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -342,22 +342,27 @@ Fehler-Feedback an den Agenten statt harter Crash.
 | `run_quality_checks` | Comps-Struktur | Liste von Warnungen | Ausreißer, Lücken, FY-Mismatch |
 | `export_deliverable` | Comps-Struktur, Format | Dateipfad | XLSX / CSV / MD |
 
-**Stand der Umsetzung (v1.5)** — die L2-Funktionen hinter den Tools existieren (Phase 1/2), die Tools
-selbst (L3) noch nicht (Phase 3). Bekannte Abweichungen zwischen Katalog und L2-Funktionen:
+**Stand der Umsetzung (v1.6.7)** — Phase 3, Schritt 5: Die L3-Handler für `resolve_company`,
+`find_peer_candidates`, `get_financials`, `get_market_data`, `compute_comps_table` und das neue Gate-Tool
+`propose_peer_set` existieren (`src/scout_research/tools/`); `submit_commentary` (Slots, Backstop) folgt in
+Schritt 6. Der Tool-Katalog oben ist die Skizze von v1.0; maßgeblich sind die Verträge in
+`docs/decisions/phase-3-plan.md` (Abschnitt 2 und 10): Handles statt Zahlen im Tool-Input, `confirm_peer_set` als
+Host-API (kein Tool), `run_quality_checks` kein Modell-Tool (Warnungen kommen mit `compute_comps_table`),
+`export_deliverable` Phase 4. Stand der Abweichungen zwischen Katalog und L2 seit v1.5:
 
-- `resolve_company`: nur **exakter Ticker** (`EdgarClient.resolve_cik`); Fuzzy-Match und
-  Mehrdeutigkeits-Kandidatenliste fehlen.
+- `resolve_company`: seit Schritt 5 deterministischer Abgleich (`tools/resolve.py`): exakter Ticker, exakter
+  normalisierter Name, sonst nur Kandidaten (Präfix, `difflib` ab 0,85); mehrere Ticker einer CIK sind eine Firma.
 - `find_peer_candidates`: liefert **keine Begründung** (bewusst Phase 3, LLM-Ranking). Die L2-Funktion
   leitet `calendar_year` seit Phase 3, Schritt 2 aus dem Periodenende des Ziels ab und prüft es gegen den
   Frame (7.3.1); der Parameter entfällt auch im Tool-Schema.
 - `get_financials` / `compute_comps_table`: L2 unterstützt die Periodenauswahl seit Phase 3, Schritt 2
-  (`build_company_metrics(..., period=PeriodSelector)`, 7.3.1, D9); die Tools (L3) stehen noch aus.
-  Keine Konzeptauswahl.
-  `get_financials` ohne Konzeptliste: feste v1-Kennzahlen.
+  (`build_company_metrics(..., period=PeriodSelector)`, 7.3.1, D9); die Tools (L3) existieren seit Schritt 5.
+  Keine Konzeptauswahl: `get_financials` liefert acht feste Kennzahlen mit Konzept und Accession Number je Wert.
+  `compute_comps_table` hat **keinen** `period`-Parameter (immer das jüngste Geschäftsjahr; Entscheidung E3).
 - `get_market_data`: Kurs aus Finnhub, Shares aus `companyfacts`; bei **Mehrklassen-Aktien** sind
   Shares so nicht ermittelbar (siehe 8.6, D11).
 
-#### 7.3.1 Periodenauswahl (D9 — in L2 umgesetzt, Phase 3 Schritt 2; Tools stehen aus)
+#### 7.3.1 Periodenauswahl (D9 — in L2 umgesetzt, Phase 3 Schritt 2; in `find_peer_candidates` und `get_financials` verfügbar)
 
 Optionaler Parameter `period` an `get_financials` und `compute_comps_table` (für das Ziel). Ohne
 `period` bleibt es beim heutigen Verhalten: jüngstes 10-K (FY) je Unternehmen.
@@ -820,6 +825,7 @@ CompsTable
 
 QualityWarning
   severity (info | warning | critical), company, message, affected_field
+  (+ kind, params — Phase 3, Schritt 5)
 ```
 
 **Design-Regel:** `CompanyMetrics` referenziert immer die zugrundeliegenden `FinancialFact`s.
@@ -836,6 +842,9 @@ Es darf keinen Wert im Output geben, der nicht auf mindestens einen Fact zurück
   als Liste von `MultipleStatistics` (je Multiple min/median/mean/max/count_included/excluded_tickers
   und `lower_bound_tickers`); `CompanyMultiples.ev_multiples_are_lower_bound` kennzeichnet EV-Multiples
   auf Basis einer Schuld-Untergrenze.
+- `QualityWarning.kind`/`params` (Schritt 5): maschinenlesbare Art und Parameter; der Tool-Layer baut daraus Texte
+  ohne Zahlen für das Modell, `message` bleibt der ausführliche Text. `CompanyMultiples.excluded_codes` ist das
+  Gegenstück zu `excluded_reasons`.
 - `CompanyMultiples` trägt keine eigenen Fact-Referenzen — die Provenance läuft über `CompsTable.target`
   / `.peers` und deren `source_facts`. Zusammengesetzte Fakten (Schuld) nennen alle Konzepte im `concept`
   (`LongTermDebt+CommercialPaper`) und alle Accession Numbers (`A+B`).
@@ -1095,9 +1104,12 @@ scout-research/
 │   │   ├── multiples.py
 │   │   ├── quality.py
 │   │   └── comps.py               [neu] CompsTable-Orchestrierung
-│   ├── tools/                     # L3  (nur __init__.py)
-│   │   ├── definitions.py         [fehlt] Phase 3
-│   │   └── handlers.py            [fehlt] Phase 3
+│   ├── tools/                     # L3  [neu] Phase 3, Schritt 5
+│   │   ├── handlers.py            # Handler, Dispatcher, Tool-Registry
+│   │   ├── session.py             # ToolContext, Handles, Gate, Host-API confirm_peer_set
+│   │   ├── schemas.py             # Eingabemodelle, Strict-Schema
+│   │   ├── errors.py, payloads.py, resolve.py, literal.py, sanitize.py, numbers.py
+│   │   └── commentary.py          [fehlt] Schritt 6
 │   ├── agent/                     # L4  (nur __init__.py)
 │   │   ├── loop.py                [fehlt] Phase 3
 │   │   └── prompts.py             [fehlt] Phase 3
@@ -1164,7 +1176,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.4 | 2026-10-08 | Phase 3, Schritt 3 (Daten-Härtung): Periodenprüfung nach Tagen statt Monat (gefalteter Abstand ±14 Tage → "Fiskaljahresende weicht ab"; Peer-Ende ≥ 300 Tage vor dem Ziel → "veraltetes 10-K"; nur Warnungen; D3-Zeile); Größenfilter über alle Umsatz-Konzepte (lazy, Zähler) und Fix `resolve_calendar_year` (Frame des Anker-Konzepts); Frames-Cache (SQLite, 7 Tage); typisierte EDGAR-Fehler inkl. neuem Code `DATA_NOT_FOUND` (7.3.2); keine Header/Keys in Fehlern. |
 | 1.6.5 | 2026-10-08 | Sicherheit: Finnhub-Fehler bereinigt (`MarketDataUnavailable` ohne URL/Token/Ausnahmekette) und httpx-Anfragezeilen im Log geschwärzt — vorher stand der API-Key in `str`/`repr` des Fehlers und in INFO-Logzeilen von httpx (Befund aus Schritt 3; nicht erreichbar, solange `CachedProvider` Fehler verschluckt). Sicherheits-Absatz in 7.3.2 erweitert. |
 | 1.6.6 | 2026-10-08 | Phase 3, Schritt 4: Review der Tool-Verträge gegen den Code (Plan, Abschnitt 10: Befunde F1–F21, offene Entscheidungen E1–E7). Eindeutige Korrekturen nur im Plan; hier ergänzt: `RevenueNotFoundError` → `TARGET_REVENUE_NOT_FOUND` in 7.3.2. Kein Code geändert. |
+| 1.6.7 | 2026-10-09 | Phase 3, Schritt 5 (Tool-Handler): `tools/` mit sechs Handlern, Sitzungsspeicher, Gate (`propose_peer_set`, Host-API `confirm_peer_set`), Allowlist, Dispatcher mit `LOOP_GUARD`. Entscheidungen E1–E7 (Plan, Abschnitt 10). L1: alle `httpx.HTTPError`, 3xx und ungültiges JSON typisiert (EDGAR) bzw. bereinigt (Finnhub); SIC-Suche meldet den Abbruch am Seitenlimit; `list_companies`. L2: `QualityWarning.kind/params`, `CompanyMultiples.excluded_codes`, `peers.rank_candidates` (max. 40), `PeerSearchCounts.sic_search_truncated`. Nachgeführt: 7.3 (Stand), 10 (Datenmodell), 15 (Repo-Struktur). |
 
 ---
 
-*Ende Dokumentversion 1.6.6*
+*Ende Dokumentversion 1.6.7*

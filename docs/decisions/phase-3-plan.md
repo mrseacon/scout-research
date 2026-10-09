@@ -349,19 +349,19 @@ schon für `user_requested_additions`. **(Q3, bestätigt.)**
 | `TARGET_REVENUE_NOT_FOUND` | nein | kein Umsatz-Konzept für das Ziel |
 | `PEER_SEARCH_NOT_POSSIBLE` | nein | Ziel ohne SIC-Code oder mit Umsatz ≤ 0; `details.reason` (E7 A) |
 | `NO_VALID_PEERS` | nein | kein Peer übrig |
-| `PEER_SET_NOT_CONFIRMED` | nein | `compute_comps_table` ohne bestätigtes Set |
+| `PEER_SET_NOT_CONFIRMED` | nein | `compute_comps_table` mit einem bekannten, noch unbestätigten Vorschlags-Handle (`pp_…`); jedes andere falsche oder unbekannte Handle ist `UNKNOWN_HANDLE` |
 | `NOT_IN_ALLOWLIST` | nein | `get_financials`/`get_market_data` außerhalb der Allowlist |
 | `PEER_NOT_IN_CANDIDATES` | nein | Vorschlag außerhalb der Liste |
 | `USER_ADDITION_NOT_IN_MESSAGES` | nein | behaupteter Nutzerwunsch nicht in den Nachrichten |
 | `SLOT_UNKNOWN` | nein | unbekannter Ticker, unbekanntes Feld oder falsche Grammatik |
 | `SLOT_VALUE_UNAVAILABLE` | nein | Slot zeigt auf `None`; `details.reason` aus `excluded` |
-| `NAKED_NUMBER` | nein | ausgeschriebene Zahl außerhalb eines Slots |
+| `NAKED_NUMBER` | nein | ausgeschriebene Zahl außerhalb eines Slots; in Schritt 5 auch Ziffern in Peer-Begründungen (`propose_peer_set`) |
 | `FRAME_YEAR_UNRESOLVED` | nein | Ziel in keinem Frame ±1 (geprüft gegen den Frame des Umsatz-Konzepts seines Ankers) |
 | `DATA_NOT_FOUND` | nein | SEC 404, z. B. Unternehmen ohne `companyfacts` (entschieden 2026-10-08, Schritt 3) |
 | `UPSTREAM_UNAVAILABLE` | ja | Netz/Timeout/5xx, nach begrenzten Wiederholungen mit Backoff |
 | `UPSTREAM_RATE_LIMITED` | nein | SEC 429/403 (bewusst keine Wiederholung); `details.retry_after_seconds` aus `Retry-After`, falls vorhanden |
 | `TOOL_TIMEOUT` | ja (1×) | Zeitbudget des Tools überschritten |
-| `LOOP_GUARD` | nein | gleicher Aufruf nach nicht wiederholbarem Fehler |
+| `LOOP_GUARD` | nein | gleicher Aufruf (Tool + Argumente) nach nicht wiederholbarem Fehler, bzw. zum dritten Mal nach einem wiederholbaren; der Speicher dazu wird bei einer Nutzernachricht, einer Bestätigung und einem Erfolg des Aufrufs geleert |
 | `UNKNOWN_TOOL` | nein | Tool-Name nicht in der Tool-Liste (z. B. ein halluziniertes `confirm_peer_set`); jeder `tool_use`-Block braucht ein `tool_result` |
 | `AWAITING_PEER_CONFIRMATION` | nein | weiterer `tool_use`-Block in derselben Antwort nach erfolgreichem `propose_peer_set`; wird nicht ausgeführt |
 | `INTERNAL_ERROR` | nein | unerwartete Ausnahme; Meldung bereinigt, Stacktrace nur im Trace |
@@ -524,6 +524,7 @@ httpx-Timeouts. Threads sind in Python nicht hart abbrechbar.
 | `find_peer_candidates` | 90 s |
 | `get_financials` | 45 s |
 | `get_market_data` | 30 s |
+| `propose_peer_set` | 20 s |
 | `compute_comps_table` | 180 s |
 | `submit_commentary` | 5 s |
 
@@ -663,7 +664,7 @@ derzeit im iCloud-Desktop (Foundation §9).
 | 2 | **D9 in L2:** `build_company_metrics(period_end=…)`, `PeriodSelector`-Auflösung, `PeriodNotAvailable`, Ableitung `calendar_year` mit Frame-Prüfung. **Periodentests:** AAPL und NVDA (52/53-Wochen-Jahre; Ende letzter Samstag im September bzw. letzter Sonntag im Januar), MSFT (30. Juni), ADSK (31. Januar); Golden-Set-Seed als Referenzwerte | Sonnet | T6 grün; Seed-Werte exakt reproduziert (Toleranz 0); 114 Alt-Tests grün |
 | 3 | L2/L1-Härtung: Check auf veraltete Periode, Frames über alle Umsatz-Konzepte mit Zählern, typisierte EDGAR-Fehler | Sonnet | T10 grün, Fehler-Mapping-Tests |
 | 4 | Tool-Verträge fixieren: Fehlertaxonomie, Handles, Payload-Rundung, Bereinigung externer Strings, Sitzungsspeicher | Opus-Review, dann Sonnet | Schemas aus Pydantic, Snapshot-Tests, T7 |
-| 5 | Handler für die 7 Modell-Tools inkl. Allowlist und `resolve_company`-Namensabgleich | Sonnet | T1, T3, T4, T13; T12 für Tool-Ergebnisse; vorher E1–E7 entschieden |
+| 5 | Handler für die Modell-Tools inkl. Allowlist und `resolve_company`-Namensabgleich — **sechs von sieben; `submit_commentary` gehört zu Schritt 6** | Sonnet | T1, T3, T4, T13; T12 für Tool-Ergebnisse; vorher E1–E7 entschieden. **Umgesetzt (2026-10-09)** |
 | 6 | **Slot-Renderer, `submit_commentary`, Backstop** | Opus (Grammatik, Korpus, Grenzfälle), dann Sonnet | T2 mit ≥ 40 Fällen |
 | 7 | System-Prompt und Loop: Zustandsmaschine, Gate- und Kommentar-Ende, Budgets, Adapter | Opus (Prompt), Loop Sonnet | T3, T5, geskripteter End-to-End-Lauf |
 | 8 | Trace (JSONL), `EvalSessionConfig` | Sonnet | T9, T11, T12 für Trace und Logs |
@@ -881,3 +882,35 @@ Schritt 5 beheben.
 | F18 | Empfehlung umgesetzt: Namen/Ticker des Kandidatensets von der Ziffernprüfung ausgenommen; `notable_exclusions.cik` muss im Kandidatenset liegen |
 | F19 | **nicht übernommen:** der Vertrag bleibt `get_market_data { ticker }`; Ticker → CIK über die SEC-Ticker-Map, Allowlist nach CIK |
 | F20 | Empfehlung umgesetzt (Prozent als Prozentzahl mit einer Stelle, `size_ratio` zwei Stellen, ein Wert ≠ 0 wird nie als 0 ausgegeben) |
+
+### Umsetzungsnotizen Schritt 5 (2026-10-09)
+
+Alles, was über den Vertragstext hinaus beim Umsetzen festgelegt werden musste (keine inhaltliche Entscheidung, aber
+für Schritt 6/7 wissenswert):
+
+- **`submit_commentary` ist noch nicht registriert** (Schritt 6): der Name liefert vorerst `UNKNOWN_TOOL`. Die Codes
+  `SLOT_UNKNOWN` und `SLOT_VALUE_UNAVAILABLE` sind in der Code-Liste, aber noch ohne Szenario (Test
+  `STEP_6_CODES`). `NAKED_NUMBER` entsteht schon in Schritt 5 (Peer-Begründungen) — mit der einfachen Regel „keine
+  Ziffer“ (`tools/numbers.py`); der typisierte Backstop ersetzt sie in Schritt 6.
+- **Hinweis für Schritt 6:** Der Backstop muss Formnamen wie „10-K“ und „10-Q“ ausnehmen — das Modell schreibt sie
+  im freien Text, und die Tool-Ergebnisse (`unavailable_reason`, Fehlermeldungen) enthalten sie ebenfalls. Warnungs-
+  und Ausschlusstexte selbst sind ziffernfrei (Test).
+- **Gate-Zustand im `ToolContext`**: `propose_peer_set` setzt `awaiting_confirmation`; `dispatch` antwortet bis zur
+  nächsten `record_user_message` oder `confirm_peer_set` mit `AWAITING_PEER_CONFIRMATION`. Der Loop (Schritt 7) ruft
+  `record_user_message` für jede Eingabe des Menschen auf — und nur dafür.
+- **Ein Ticker je CIK (F9)** ohne L2-Änderung: `ToolContext.ticker_for` (erster Ticker der SEC-Map, oder der zuerst
+  vom Nutzer/Host genannte); `ctx.metadata()` setzt ihn an den Anfang von `CompanyMetadata.tickers`, und der Kurs wird
+  mit ihm abgefragt — dadurch nutzen `CompanyMultiples.company_ticker`, die Warnungen und die Statistik denselben
+  Ticker. `get_market_data` bildet einen Alias-Ticker auf die CIK ab und antwortet mit dem Sitzungs-Ticker.
+- **Grenzen, die der Plan offen ließ:** höchstens 15 `notable_exclusions` und 15 `user_requested_additions`
+  (wie `peers`); Warnungs-ID der Peer-Suche ist `P1` (die der Tabelle `W1…`); `basis.units` bekommt
+  `price: "USD je Aktie"`, weil `price` sonst ohne Einheit wäre.
+- **Reihenfolge der Prüfungen in `propose_peer_set`:** Handle → Dubletten → nur Kandidaten → Slot-Zeichen → Ziffern →
+  Nutzerergänzungen (nicht auflösbar → `INVALID_ARGUMENTS`; nicht wörtlich → `USER_ADDITION_NOT_IN_MESSAGES`;
+  Ziel/Dublette → `INVALID_ARGUMENTS`). Je Prüfung stehen alle Probleme in `details.problems`.
+- **Ausnahme von der Ziffernprüfung (F18):** Namen und Ticker des Kandidatensets sowie deren Wörter mit Ziffern
+  („3M“).
+- **`confirm_peer_set`** lehnt den Kanal `eval` ab, solange `ToolContext.eval_session` nicht belegt ist (Schritt 8
+  liefert `EvalSessionConfig`); `gate_log` hält Vorschlag und Bestätigung für den Trace (Schritt 8).
+- **L1 (F5b, F12):** siehe Foundation 1.6.7. Die Sicherheitstests (T12) schlagen ohne die Schwärzung im Trace und ohne
+  die Fehlerbereinigung an (Mutationsprobe).
