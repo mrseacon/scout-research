@@ -10,7 +10,7 @@ import pytest
 from scout_research.data.market_provider import FinnhubProvider
 from scout_research.tools.handlers import dispatch
 from tests.unit.tool_world import (
-    AAPL_CIK, FINNHUB_KEY, MSFT_CIK, NVDA_CIK, SECRETS, UA, World, call, propose, standard_world, start,
+    AAPL_CIK, FINNHUB_KEY, MSFT_CIK, NVDA_CIK, SECRETS, UA, World, standard_world,
 )
 
 ALL_SECRETS = [*SECRETS, "welt.tester", "example.invalid", "FAKE-FINNHUB-KEY"]

@@ -19,7 +19,7 @@ from scout_research.tools.schemas import (
     strict_schema,
 )
 from tests.unit.factories import make_metrics
-from tests.unit.tool_world import AAPL_CIK, NVDA_CIK, call, confirmed, standard_world, start
+from tests.unit.tool_world import NVDA_CIK, call, confirmed, standard_world, start
 
 SNAPSHOTS = Path(__file__).resolve().parents[1] / "snapshots"
 

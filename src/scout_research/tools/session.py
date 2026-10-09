@@ -13,14 +13,14 @@ import secrets
 import time
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
 
 from scout_research.data.edgar_client import CompanyMetadata, EdgarClient, pad_cik
 from scout_research.data.market_provider import MarketDataProvider
 from scout_research.domain.models import CompsTable
-from scout_research.tools.errors import ToolFailure, fail
+from scout_research.tools.errors import fail
 from scout_research.tools.literal import query_is_literal
 from scout_research.tools.resolve import Company, group_by_cik, normalize_ticker, resolve
 from scout_research.tools.sanitize import Redactor, clean_text, is_valid_ticker

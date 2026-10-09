@@ -3,12 +3,11 @@
 import re
 from pathlib import Path
 
-import httpx
 import pytest
 
 from scout_research.tools.errors import CODES, RETRYABLE
 from scout_research.tools.handlers import TOOLS, dispatch
-from tests.unit.tool_world import AAPL_CIK, MSFT_CIK, NVDA_CIK, World, call, confirmed, propose, resolved, standard_world, start
+from tests.unit.tool_world import AAPL_CIK, MSFT_CIK, NVDA_CIK, call, confirmed, propose, resolved, standard_world, start
 
 PLAN = Path(__file__).resolve().parents[2] / "docs" / "decisions" / "phase-3-plan.md"
 STEP_6_CODES = {"SLOT_UNKNOWN", "SLOT_VALUE_UNAVAILABLE"}

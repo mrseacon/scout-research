@@ -868,7 +868,7 @@ Schritt 5 beheben.
 | F2 | umgesetzt (E1 A) |
 | F3 | umgesetzt (Bereinigung auch in Warnungstexten bzw. Warnungstexte ohne Namen; Ticker-Prüfung) |
 | F4 | umgesetzt (E4 A: `kind`/`params` an `QualityWarning`, `excluded_codes` an `CompanyMultiples`; zahlenfreie Vorlagen) |
-| F5 | (a) umgesetzt (kein Query-String/Header im Trace-Vertrag, T12); (b) umgesetzt: L1 fängt alle `httpx.HTTPError`, 3xx und ungültiges JSON → typisierte Fehler, Finnhub: ungültige Antwort → `MarketDataUnavailable`; Tests |
+| F5 | (a) Vertrag und `Redactor` umgesetzt (kein Query-String/Header im Trace-Vertrag, Whitelist statt `Settings`, T12 für Tool-Ergebnisse und das `trace`-Feld des Dispatchers; der JSONL-Schreiber selbst kommt in Schritt 8 und erbt T12); (b) umgesetzt: L1 fängt alle `httpx.HTTPError`, 3xx und ungültiges JSON → typisierte Fehler, Finnhub: ungültige Antwort → `MarketDataUnavailable`; Tests |
 | F6 | umgesetzt (E3 A) |
 | F7 | umgesetzt (E5 A) |
 | F8 | umgesetzt (Gate-Regeln in Abschnitt 5) |
