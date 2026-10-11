@@ -171,3 +171,17 @@ def test_lt_17_an_internal_error_reaches_the_model_without_details_and_no_secret
     assert "kaputt" not in payload and not any(secret in payload for secret in SECRETS)
     assert not any(secret in json.dumps(run.loop.events, ensure_ascii=False) for secret in SECRETS)
     run.assert_invariants()
+
+
+def test_lt_17b_an_unexpected_exception_in_the_loop_fails_the_turn_and_the_event_is_redacted() -> None:
+    def exploding(ctx, name, args):
+        raise RuntimeError(f"boom {FINNHUB_KEY} {UA}")
+
+    run = Run(standard_world(), [use(("resolve_company", {"query": "NVDA"})), say("nie")], dispatch=exploding)
+    result = run.say("Mach Comps für NVDA")
+    assert result.outcome == "failed" and result.reason == "loop_error"
+    assert shown_texts(result) == ["Interner Fehler: Die Anfrage konnte technisch nicht verarbeitet werden."]
+    event = [e for e in run.loop.events if e["event"] == "loop_error"][0]
+    assert event["error_class"] == "RuntimeError" and "<redacted>" in event["traceback"]
+    assert FINNHUB_KEY not in event["traceback"] and UA not in event["traceback"]
+    assert run.loop.state is LoopState.IDLE

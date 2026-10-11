@@ -384,7 +384,7 @@ class AgentLoop:
             elif turn.tools >= cfg.max_tools_per_turn:
                 ended = "limit_tools"
                 outcome = coded_outcome("TURN_ENDED")
-            elif self._clock() - turn.started > cfg.turn_seconds:
+            elif turn.started + cfg.turn_seconds < self._clock():
                 ended = "turn_deadline"
                 outcome = coded_outcome("TURN_ENDED")
             else:
