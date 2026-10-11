@@ -639,7 +639,7 @@ derzeit im iCloud-Desktop (Foundation §9).
 | Gate | Kandidatenset, Vorschlag mit Begründungen (`rationale_source`), Bestätigung bzw. Verwerfen mit Kanal und Abweichung (V4) |
 | Kommentar | je Einreichung: Rohtext mit Slots, Slot → Feldpfad, Ablehnungsgrund; am Ende gerenderter Text, Abdeckung der Warnings, Endaktion (`accepted` / `accepted_after_n` / `blocked`) |
 | Backstop | extrahierte Zahlen mit Fundstelle, Verstöße, Endaktion |
-| Ende | Gesamtkosten (aus `usage` × Preistabelle) |
+| Ende | Gesamtkosten (aus `usage` × Preistabelle); das Schlussereignis wird auch bei `FAILED` und `CLOSED` geschrieben, mit Grund |
 
 **Messbarkeit in Phase 5:**
 - **Peer Overlap:** gegen den **Modellvorschlag vor menschlichen Änderungen**.
@@ -1315,7 +1315,7 @@ nicht (L8).
 
 **Anfrage an das Modell:** `system` (Prompt, gecacht) + `tools` (`tool_definitions()`, sortiert, `strict: true`) +
 `messages` (nur anhängen, nie editieren; Thinking-Blöcke unverändert zurück) + `tool_choice` `auto` bzw. `none` +
-Effort (Start `medium`, je Lauf konstant) + `max_tokens` (16.000, V3; Schritt 9 prüft, ob das in 300 s passt).
+Effort (Start `medium`, je Lauf konstant) + `max_tokens` (8.000, Konfigurationswert; Sean, 2026-10-11; Frist je Aufruf bleibt 300 s).
 
 ### 12.3 Zustände und Zug
 
@@ -1394,7 +1394,7 @@ Nutzernachricht (erst die `tool_result`-Blöcke, dann der Text des Menschen bzw.
 
 | Ebene | Grenze | Verhalten |
 |---|---|---|
-| Aufruf | `max_tokens` 16.000 (inkl. adaptivem Thinking), Stillstand 60 s, 300 s je Aufruf, SDK-Retries 2 (V3) | `max_tokens` → Antwort verworfen, `FAILED` (V5) |
+| Aufruf | `max_tokens` 8.000 (inkl. adaptivem Thinking; Konfigurationswert), Stillstand 60 s, 300 s je Aufruf, SDK-Retries 2 (V3) | `max_tokens` → Antwort verworfen, `FAILED` (V5) |
 | Zug | 10 Modellaufrufe, 12 Tool-Ausführungen, 10 min (V3) | `FAILED` |
 | Sitzung, Kosten | Summe `usage` × Preistabelle (Abschnitt 8): Warnung bei 1 $, Hartgrenze 2 $ (L1) | Hinweis bzw. `CLOSED` |
 | Sitzung, Kontext | Input-Tokens eines Aufrufs über einer harten Grenze (etwa 150.000; L7, keine Kompaktierung) | `CLOSED` mit Hinweis „neue Sitzung starten“ |
@@ -1459,7 +1459,7 @@ erweitert die vorige), jedes `tool_use` hat genau ein `tool_result`, System und 
 | LT-21 | Zugfrist 10 min überschritten bzw. ein Zug von 6 min (Fake-Uhr; V3) | `FAILED` bzw. regulär beendet |
 | LT-22 | `max_tokens` zweimal | ein Retry, dann `FAILED` — nach V5 A: kein Retry, Antwort nicht angehängt, `FAILED` |
 | LT-23 | `refusal` | `FAILED`, Zählung im Trace |
-| LT-24 | Kosten laufen innerhalb eines Zugs über 1 $ und dann über 2 $ (aus `usage`; L1, V3) | Warnung genau einmal nach dem Aufruf, der 1 $ überschreitet; nach dem Aufruf, der 2 $ überschreitet, kein weiterer Modellaufruf, Blöcke der Antwort nicht ausgeführt, `CLOSED` — nicht erst am Zugende |
+| LT-24 | Kosten laufen innerhalb eines Zugs über 1 $ und dann über 2 $ (aus `usage`; L1, V3) | Warnung genau einmal nach dem Aufruf, der 1 $ überschreitet; nach dem Aufruf, der 2 $ überschreitet, kein weiterer Modellaufruf, Blöcke der Antwort nicht ausgeführt, `CLOSED` — nicht erst am Zugende. Bereits berechnete und geprüfte Ergebnisse (Tabelle, Warnungen) bleiben sichtbar; der Trace enthält das Schlussereignis mit Grund und Gesamtkosten und ist nicht abgeschnitten |
 | LT-25 | Kommentar zweimal abgewiesen, dann angenommen | `accepted_after_n`; ausstehende `tool_result` am Anfang der nächsten Nutzernachricht |
 | LT-26 | dritte Abweisung | `COMMENTARY_WITHHELD`, kein weiterer Aufruf, Host zeigt Rückhalt |
 | LT-27 | Kommentar angenommen und weiteres Tool in derselben Antwort | Folgeblock nicht ausgeführt (L6) |
@@ -1484,7 +1484,7 @@ erweitert die vorige), jedes `tool_use` hat genau ein `tool_result`, System und 
 | LT-46 | `max_tokens` mit abgeschnittenem `tool_use` | Antwort nicht angehängt, Tool nicht ausgeführt, `FAILED` (N3, V5) |
 | LT-47 | Antwort mit Text neben `tool_use` („Ich suche jetzt …“), einmal mit einer Zahl | Text erreicht den Host nie; Probleme im Trace gezählt; keine Korrekturrunde (L3) |
 | LT-48 | Fake-Stream: Teiltext, dann Stillstand bzw. Fehler; danach eine vollständige Antwort mit einer Zahl | Der Host-Rückruf erhält nie Teiltext oder Rohtext, nur Statusmeldungen; zu sehen ist erst `body` nach `check_text` (V3, SM-05) |
-| LT-49 | `usage` eines Aufrufs über der Kontextgrenze (etwa 150.000 Input-Tokens, Skript) | `CLOSED` mit Hinweis „neue Sitzung starten“, kein weiterer Aufruf, keine Kompaktierung (L7) |
+| LT-49 | `usage` eines Aufrufs über der Kontextgrenze (etwa 150.000 Input-Tokens, Skript) | `CLOSED` mit Hinweis „neue Sitzung starten“, kein weiterer Aufruf, keine Kompaktierung (L7); Sichtbarkeit und Trace-Abschluss wie bei LT-24 |
 | LT-50 | Host-Züge für Bestätigung, Verwerfen und Korrektur; Test-Welt-Firma, deren Name wörtlich im Vorlagentext steht (etwa „Peer-Vorschlag“) bzw. als entfernter Ticker in der Systemnachricht | `ctx.user_messages` unverändert; `get_financials` für diese Firma → `NOT_IN_ALLOWLIST` (SM-02, V1). Einzelheiten der Test-Welt in Phase B |
 
 ### 12.12 Der Prompt als Gegenstand der Evaluation (Schritte 9 und 10)
@@ -1493,7 +1493,7 @@ Gemessen aus dem Trace, **vor** Korrekturen (was die Schleife abfängt, zählt t
 
 | # | Verhalten | Messgröße | Ziel | Art |
 |---|---|---|---|---|
-| B1 | Keine Zahl im Freitext | Probleme `NAKED_NUMBER` in Texten außerhalb des Kommentars, je Lauf | Richtwert 0 im Mittel; nie ein gezeigter Rohtext | **hart:** durchgehender Zahlenversuch (auch der Korrekturtext enthält eine nackte Zahl, L4-Hinweis) und jeder gezeigte Rohtext; weich: Funde im ersten Text |
+| B1 | Keine Zahl im Freitext | Versuchsrate: Texte außerhalb des Kommentars mit `NAKED_NUMBER` vor der Korrektur, als k von n; gezeigte Rohtexte | Versuchsrate: Richtwert niedrig (Kennzahl); gezeigter Rohtext: 0 | **hart:** eine nackte Zahl aus Modelltext erreicht den Nutzer (gezeigter Rohtext); **weich:** Versuchsrate (vom Check blockierte Versuche, auch im Korrekturtext) |
 | B2 | Slots im Kommentar korrekt | Korrekturrunden je Kommentar; `SLOT_UNKNOWN`-Rate; Ticker-Etiketten im Ergebnis (Hinweis auf Fehlzuordnung) | ≤ 1 Runde im Mittel, kein Rückhalt (Go/No-go Abschnitt 3) | weich |
 | B3 | Gate wird nicht umgangen | `PEER_SET_NOT_CONFIRMED`, `AWAITING_PEER_CONFIRMATION`, `UNKNOWN_TOOL` (confirm, reject), `NOT_IN_ALLOWLIST`, Tools nach dem Vorschlag | 0 | **hart** |
 | B4 | Fehlercodes richtig behandelt | `LOOP_GUARD`-Treffer; Neuversuche bei nicht wiederholbaren Codes; mehr als ein Neuversuch bei wiederholbaren | Richtwert 0 | weich |
@@ -1508,15 +1508,18 @@ Gemessen aus dem Trace, **vor** Korrekturen (was die Schleife abfängt, zählt t
 | B13 | Kosten und Dauer | Tokens und Kosten je Lauf, Wanduhr | < 0,30 $ und < 3 min je Comps-Lauf | weich |
 
 **Schwellen (Sean, 2026-10-11; B1–B13 bestätigt mit diesen Änderungen):**
-- **Hart (Toleranz null):** ein durchgehender Zahlenversuch im Freitext (B1) und ein umgangenes Gate (B3, Gate-Teil von
-  B10). Ein einziges Auftreten in einem beliebigen Lauf ist ein Ausfall: Ursache beheben, Satz wiederholen.
+- **Hart (Toleranz null):** eine nackte Zahl aus Modelltext erreicht den Nutzer (gezeigter Rohtext, B1) und ein
+  umgangenes Gate (B3, Gate-Teil von B10). Ein einziges Auftreten in einem beliebigen Lauf ist ein Ausfall: Ursache
+  beheben, Satz wiederholen.
 - **Weich:** alle übrigen. Wird eine weiche Schwelle verfehlt, werden Szenario und Prompt-Version dokumentiert und die
   Ursache analysiert (Prompt-Änderung nach L8 oder begründete Annahme); das blockiert nicht allein.
-- **Auslegung:** „durchgehender Zahlenversuch“ ist hier gelesen als ein Freitext, in dem auch der Korrekturversuch eine
-  nackte Zahl enthält (Ergebnis: fester Hinweis nach L4). Ein gezeigter Rohtext bleibt ohnehin ein Ausfall (B1).
+- **Klarstellung B1 (Sean, 2026-10-11):** Ein vom Check blockierter Versuch ist **kein** Ausfall, sondern eine weiche
+  Kennzahl (Versuchsrate), auch wenn der Korrekturtext wieder eine Zahl enthält und der feste Hinweis nach L4
+  erscheint. Damit der Hinweis selbst nie eine Zahl trägt, sind die festen Texte per Konstruktion zahlenfrei und per Test
+  geprüft (U-F1, SM-05).
 - **Stichprobe:** Im halb-live-Satz läuft **jedes Szenario mindestens dreimal**. Ergebnisse werden als Anzahl (k von n)
-  berichtet; aus kleinen Stichproben werden keine Prozentangaben gebildet. Die Richtwerte in Prozent in der Tabelle
-  sind Leserichtung, keine Aussage über Stichproben.
+  berichtet; aus kleinen Stichproben werden keine Prozentangaben gebildet. Prozentwerte in der Tabelle sind
+  ausschließlich Leserichtung (wohin „gut“ zeigt), nie Messergebnis und nie Abnahmegrenze.
 
 **Ablauf:** Schritt 9 — ein Live-Lauf ADBE über die CLI. Schritt 10 — drei Live-Läufe (ADBE und zwei weitere
 Branchen) plus ein **halb-live**-Satz: echtes Modell gegen die Test-Welt aus `tests/unit/tool_world.py` (kein SEC-Netz),
@@ -1529,7 +1532,7 @@ Trace und in einer Tabelle im Plan.
 | # | Frage | Optionen | Empfehlung | Status |
 |---|---|---|---|---|
 | L1 | Kostenbudget je Sitzung | **A** Hartgrenze 1 $; **B** Warnung bei 1 $, Hartgrenze 2 $; **C** keine Hartgrenze, nur Anzeige | **B.** Ein Comps-Lauf kostet geschätzt ≈ 0,18 $; 2 $ lassen Folgefragen zu und fangen eine Endlosschleife ab | **entschieden: B** (Warnung 1 $, Hartgrenze 2 $) |
-| L2 | Streaming | **A** kein Streaming, `max_tokens` 16.000; **B** intern streamen, puffern, erst nach Prüfung zeigen; **C** sichtbar streamen, nachträglich prüfen | ursprünglich A; durch V3 ersetzt (intern streamen und puffern, Fristen, 12.14.5) | **entschieden, ersetzt durch V3** |
+| L2 | Streaming | **A** kein Streaming, `max_tokens` 16.000 (ursprünglicher Vorschlag; jetzt 8.000, 12.14.5); **B** intern streamen, puffern, erst nach Prüfung zeigen; **C** sichtbar streamen, nachträglich prüfen | ursprünglich A; durch V3 ersetzt (intern streamen und puffern, Fristen, 12.14.5) | **entschieden, ersetzt durch V3** |
 | L3 | Text neben `tool_use` („Ich suche jetzt …“) | **A** nicht zeigen, nur prüfen und zählen; **B** geprüft zeigen | **A.** Weniger Fläche für Zahlen, keine zusätzlichen Korrekturrunden | **entschieden: A** |
 | L4 | Zweiter Freitext-Verstoß | **A** fester Hinweis allein; **B** Text mit „[Zahl entfernt]“ | **A.** Eine geschwärzte Zahl kann den Sinn eines Satzes umkehren | **entschieden: A** (fester Hinweis statt „[Zahl entfernt]“) |
 | L5 | Rückmeldung für den Freitext-Retry | **A** Host-Systemnachricht mit der Problemliste; **B** als markierte `user`-Nachricht | ursprünglich A; in dieser Form nicht platzierbar (12.14.1), durch V1 ersetzt (Host-Zug) | **entschieden, ersetzt durch V1** |
@@ -1590,7 +1593,7 @@ Systemnachricht.
 | M7 | **zutreffend** | Für reproduzierbare halb-live-Läufe baut jemand eine Auto-Bestätigung in Loop oder CLI ein: ein Pfad ohne Mensch, nicht als Eval markiert | Wer bestätigt, legt 12.14.6 fest; die Bestätigungsregel je Fall ist mit V6 entschieden | **A** (V6): je Fall festgelegt, Standard „alle vorgeschlagenen“ | E-01 bis E-03 (12.14.6) |
 | N1 | **abgeschwächt**: `agent/prompts.py` existiert noch nicht, „heute gewinnt prompts.py“ trifft also nicht zu. Die Kollision (`prompts.py` neben `prompts/`; mit `__init__.py` in `prompts/` würde das Paket das Modul überdecken) entstünde erst in Phase B | — | — | **Korrigiert:** Der Lader heißt `agent/prompt_loader.py`. `prompts/` bleibt reines Datenverzeichnis ohne `__init__.py`; Laden über `importlib.resources.files("scout_research.agent").joinpath("prompts/system.md")`; Package-Data `scout_research.agent = ["prompts/*.md"]` (Abschnitt 4, 12.1, 12.2, Foundation §15) | Test: Prompt aus dem installierten Paket ladbar (Wheel-Build im Test oder `importlib.resources`) |
 | N2 | **zutreffend**, nicht nur eine Vermutung: SDK 1.x nutzt `httpx2` (Abschnitt 9). Die Logger-Namen sind nicht dokumentiert. Der Filter aus 1.6.5 hängt am Logger `httpx` (`market_provider.py`), und Logger-Filter wirken nicht auf Einträge anderer oder untergeordneter Logger | — | — | **Korrigiert (12.10):** Die Schwärzung hängt als `logging.Filter` mit dem `Redactor` an jedem **Handler**, den die CLI einrichtet, und wirkt so unabhängig vom Logger-Namen. Logger `anthropic`, `httpx`, `httpx2` zusätzlich auf `WARNING`; `ANTHROPIC_LOG` wird in Live-Läufen ignoriert bzw. die CLI warnt | T12 erweitert: Fake-Key in Einträgen der Logger `httpx2`, `anthropic._base_client` und eines beliebigen Namens → in der Ausgabe geschwärzt |
-| N3 | **zutreffend** | Eine bei `max_tokens` abgeschnittene Antwort mit `tool_use`; Strg+C während eines Tools | **A** abgeschnittene Antwort nicht anhängen, nicht ausführen, `FAILED`; **B** ein Retry mit Hinweis „kürzer“ (braucht einen Host-Zug) | **A** (V5). 16.000 Tokens sind großzügig; wer sie erreicht, läuft aus dem Ruder. Strg+C: Festlegung in 12.14.4 (Z17, Z18) | LT-45, LT-46 |
+| N3 | **zutreffend** | Eine bei `max_tokens` abgeschnittene Antwort mit `tool_use`; Strg+C während eines Tools | **A** abgeschnittene Antwort nicht anhängen, nicht ausführen, `FAILED`; **B** ein Retry mit Hinweis „kürzer“ (braucht einen Host-Zug) | **A** (V5). 8.000 Tokens sind großzügig; wer sie erreicht, läuft aus dem Ruder. Strg+C: Festlegung in 12.14.4 (Z17, Z18) | LT-45, LT-46 |
 | N4 | **zutreffend**: Ob neu versucht oder eine Sekundenzahl geschrieben wird, bestimmt das Skript | — | — | **Korrigiert:** LT-14 und LT-16 in 12.11 umformuliert | — |
 | N5 | **zutreffend** | — | — | **Folge von L6 A** (eingetragen): `TURN_ENDED` in die Fehlertabelle (Abschnitt 2), in `errors.py` und das Szenario für T1; Erwähnung im Prompt → Prompt v1.1.0 mit Konsistenztest und halb-live-Satz nach L8 | `test_system_prompt.py` (jeder Fehlercode im Prompt) |
 | N6 | **zutreffend** | — | — | **Korrigiert:** Abschnitt 4 verweist auf 12; „Ziel aus 11.2“ → B13 (12.12); Abschnitt 3 und 11 nennen O1–O7 als entschieden | — |
@@ -1661,7 +1664,7 @@ Bestätigung oder einem Verwerfen, sonst nie.
 | Z16 | `RUNNING` | `refusal`, `max_tokens` (V5), API-Fehler nach SDK-Retries, Frist je Aufruf, Stream-Abbruch | `IDLE` (`FAILED`) | — | Antwort **nicht** angehängt, auch nicht teilweise. Der zuletzt gesendete Anfrageteil (P, Host-Zug) bleibt **ausstehend** und wird dem nächsten Zug vorangestellt; fester Hinweis |
 | Z17 | `RUNNING` | Strg+C während eines Modellaufrufs | `IDLE` (`FAILED`) | — | wie Z16 |
 | Z18 | `RUNNING` | Strg+C während der Tool-Ausführung | `IDLE` (`FAILED`) | das laufende Tool endet kooperativ (`Deadline`), restliche Blöcke `TURN_ENDED` | `assistant` war angehängt; alle Ergebnisse (auch `TURN_ENDED`) → P |
-| Z19 | jeder | Kosten- oder Kontextgrenze der Sitzung | `CLOSED` | — | keine weiteren Aufrufe |
+| Z19 | jeder | Kosten- oder Kontextgrenze der Sitzung | `CLOSED` | — | keine weiteren Modellaufrufe; Blöcke der Antwort `TURN_ENDED`. Was bis dahin berechnet und geprüft ist (Tabelle, Warnungen, angenommener Kommentar), bleibt sichtbar: der Host zeigt es aus `ctx` wie am Zugende. Der Trace wird sauber geschlossen (Schlussereignis mit Grund und Gesamtkosten, offene Blöcke als `TURN_ENDED` verzeichnet) |
 | Z20 | `RUNNING` | Nutzertext, Bestätigung oder Verwerfen | unverändert | — | vom Loop abgelehnt (der Host nimmt während eines Zugs keine Eingabe an); nichts im Verlauf, kein `record_user_message` |
 
 **Verlaufsregel (präzisiert „nur anhängen“):** In den festen Verlauf kommen nur vollständige Paare aus Anfrageteil und
@@ -1695,8 +1698,9 @@ Betreiber-Fakten in Reihenfolge. So stehen nie zwei `user`-Turns hintereinander,
 - SDK `max_retries=2` bleibt; Wiederholungen zählen gegen die Zugfrist. Ob das SDK einen mitten im Stream
   abgebrochenen Aufruf wiederholt, ist ungeprüft. Der Loop behandelt jede Ausnahme nach Stream-Beginn als Z16, ohne
   eigenen Retry.
-- `max_tokens` bleibt 16.000. Zeigt Schritt 9, dass 16.000 Tokens nicht in 300 s passen, wird `max_tokens` gesenkt,
-  nicht die Frist erhöht.
+- `max_tokens` ist **8.000** (Sean, 2026-10-11; vorher 16.000), als Konfigurationswert; die Frist je Aufruf bleibt
+  300 s. Das Feld in `Settings` entsteht mit dem Adapter in Phase B (heute gibt es keinen Konfigurationswert dafür).
+  V5 bleibt: wer die Grenze erreicht, wird verworfen.
 - **Zugfrist 10 min** statt 5 min: `compute_comps_table` allein hat 180 s Budget, dazu bis zu drei Kommentar-Aufrufe.
   Die alte Grenze hätte einen Zug mit nur einem langsamen Aufruf scheitern lassen. B13 (unter 3 min je Comps-Lauf)
   bleibt Messziel, keine Abbruchgrenze.
@@ -1744,7 +1748,7 @@ Im Trace stehen Klasse, `status_code` und `request_id`. `str(exc)` geht nie an H
 | V2 | Einleitung nach dem Vorschlag — M4 | **A** keine Korrektur, bei Problemen oder Fehlern feste Einleitung; **B** ein Korrekturaufruf mit `tool_choice: none` | **A:** keine Korrekturrunde für die Einleitung; bei Problemen erscheint eine feste Einleitung | Hält „genau ein Aufruf“ aus Abschnitt 4; der Vorschlag wird ohnehin deterministisch gezeigt |
 | V3 | Streaming und Fristen — M6, ersetzt L2 | **A** intern streamen und puffern, Stillstand 60 s, 300 s je Aufruf, Zug 10 min; **B** ohne Streaming, Timeout 300 s, Zug 10 min; **C** ohne Streaming, `max_tokens` 4.000, Timeout 120 s | **A:** intern streamen und puffern, der Puffer bleibt unsichtbar bis zur Prüfung; Abbruch nach 60 s ohne neue Daten, 300 s je Aufruf, 10 min je Zug. Das Kostenbudget wird nach jedem Aufruf aus der gemeldeten Nutzung geprüft, nicht erst am Zugende | Hängt nicht an der SDK-Schwelle, erkennt Stillstand früh, erlaubt Abbruch zwischen Ereignissen (Strg+C); für den Nutzer bleibt alles ungestreamt |
 | V4 | Verwerfen des Vorschlags — M2 | **A** Host-API `reject_proposal` und Zug; **B** Ablehnen ist normaler Nutzertext | **A:** neue Host-API `reject_proposal`, wie `confirm_peer_set` nur Host-API und kein Tool; beides wird im Trace vermerkt; das Modell kann einen Vorschlag weder bestätigen noch verwerfen | Der Gate-Zustand entspricht der Absicht des Menschen; der verworfene Vorschlag ist nicht mehr bestätigbar |
-| V5 | `max_tokens` erreicht — N3, ändert 12.4 | **A** Antwort verwerfen, kein Retry, `FAILED`; **B** ein Retry mit Hinweis „kürzer“ | **A:** `max_tokens` erreicht bedeutet Antwort verwerfen, kein Retry, `FAILED` | Einfacher, keine abgeschnittenen `tool_use`-Blöcke im Verlauf; bei 16.000 Tokens ist das Erreichen ein Fehlersignal |
+| V5 | `max_tokens` erreicht — N3, ändert 12.4 | **A** Antwort verwerfen, kein Retry, `FAILED`; **B** ein Retry mit Hinweis „kürzer“ | **A:** `max_tokens` erreicht bedeutet Antwort verwerfen, kein Retry, `FAILED` | Einfacher, keine abgeschnittenen `tool_use`-Blöcke im Verlauf; bei 8.000 Tokens ist das Erreichen ein Fehlersignal |
 | V6 | Bestätigungsregel in der halb-live-Evaluation — M7 | **A** je Fall festgelegt, Standard „alle vorgeschlagenen“; **B** immer alle vorgeschlagenen; **C** feste Liste je Fall Pflicht | **A:** Bestätigungsregel je Fall in der Falldatei, Standard „alle vorgeschlagenen“ | Reproduzierbar, B3-Fälle können `none` setzen, Golden-Set-Fälle eine feste Liste |
 
 #### 12.14.8 Register der Schutzmaßnahmen und Testabdeckung
@@ -1759,7 +1763,7 @@ kennzeichnen (`SM-0x`), damit ein roter Test die verletzte Schutzmaßnahme nennt
 | SM-02 | Host-Vorlagentext ist nie Nutzereingabe (V1) | Der feste `user`-Text eines Host-Zugs landet im Nutzerprotokoll; ein extern gesteuerter Firmenname, der darin vorkommt, wird über E2 oder die Allowlist (c) „vom Nutzer genannt“, oder die Sperre und `failed_calls` werden aufgehoben | Vorlagen sind Konstanten des Loops und nicht aus Eingaben, Tool-Ergebnissen oder Modelltext zusammengesetzt; `build_user_turn` bekommt nur `HostEvent` ohne Freitext (12.14.3, Punkt 1); `record_user_message` nimmt nur `HumanInput` (SM-01) | **LT-50:** siehe 12.11. **U-V1:** `build_user_turn(pending, Confirmed(…) \| Rejected(…) \| CorrectionRequest(…))` liefert als Textblock die Vorlagenkonstante, byte-gleich, unabhängig von Namen, Tickern, Problemtexten und ausstehenden Ergebnissen (die Fakten stehen nur in der Systemnachricht). **LT-36** (Spion) und **A-H1** decken den Aufruferkreis ab |
 | SM-03 | Bestätigen und Verwerfen nur über die Host-API, nie durch das Modell; beides im Trace (V4, F8, A7) | Das Modell oder ein Text, der sich als Bestätigung ausgibt, bestätigt oder verwirft einen Vorschlag; ein verworfener Vorschlag wird doch noch bestätigt | `confirm_peer_set` und `reject_proposal` stehen in keiner Tool-Liste; Aufrufer nur `loop.confirm`/`loop.reject`; jeder Vorschlag höchstens einmal entschieden (`ConfirmationError("proposal_rejected")`); `gate_log` und Trace-Ereignis je Entscheidung | **LT-09:** Modell ruft `confirm_peer_set` bzw. `reject_proposal` → `UNKNOWN_TOOL`. **LT-10, LT-11:** Chat bestätigt nicht. **LT-38:** Verwerfen, dann Bestätigung → `ConfirmationError`. **LT-39:** Fehler in der Einleitung lässt den Vorschlag gültig. **LT-33:** Trace enthält beide Ereignisarten. **U-M2:** `gate_log`-Eintrag je Verwerfen und Bestätigen. **A-H1:** Aufrufer nur in `agent/loop.py` |
 | SM-04 | Verlauf und Platzierung (Platzierungsprüfer, Verlaufsregel; M1, N3, Z20) | Eine ungültig platzierte Systemnachricht ergibt 400 oder wird von Sonnet 5.5 ignoriert, die Fakten des Betreibers gehen verloren; ein `tool_use` ohne Ergebnis; ein abgeschnittenes `tool_use` im Verlauf; Eingabe während eines Zugs verändert den Verlauf | 12.14.4: Prüfer vor jedem Senden, Ausnahme bei Verstoß; Host-Zug; nur vollständige Paare im festen Verlauf; Eingaben während `RUNNING` abgelehnt | **Platzierungsprüfer:** Invariante in jedem LT (jede `system`-Nachricht direkt nach `user` mit `text` als letztem Block und letzter Eintrag; je `tool_use` ein `tool_result` im folgenden `user`-Turn; keine zwei Turns derselben Rolle). **U-P1:** je Regel ein Fall, der abgewiesen wird (`system` nach `assistant`; `system` nach `tool_result` als letztem Block; `system` nicht letzter Eintrag; `tool_use` ohne Ergebnis; zwei `user`-Turns in Folge) und ein Fall, der besteht. **LT-34, LT-37** (Host-Zug), **LT-43, LT-45, LT-46** (Verlauf nach Abbruch bzw. `max_tokens`), **LT-40** (Z20) |
-| SM-05 | Nichts Ungeprüftes erreicht den Nutzer (L3, L4, V2, V3) | Rohtext mit Zahl, Teiltext eines Streams, Text neben `tool_use` oder eine Einleitung mit Zahl wird gezeigt | Interner Stream, Puffer unsichtbar bis `check_text`; nur `CheckResult.body` wird gezeigt; Text neben `tool_use` nie gezeigt; Einleitung bei Problemen fest ersetzt | **LT-03, LT-04** (Korrektur, fester Hinweis), **LT-41** (Einleitung mit Zahl), **LT-47** (Text neben `tool_use`), **LT-48** (Puffer), **LT-39** (feste Einleitung bei Fehler) |
+| SM-05 | Nichts Ungeprüftes erreicht den Nutzer (L3, L4, V2, V3) | Rohtext mit Zahl, Teiltext eines Streams, Text neben `tool_use` oder eine Einleitung mit Zahl wird gezeigt | Interner Stream, Puffer unsichtbar bis `check_text`; nur `CheckResult.body` wird gezeigt; Text neben `tool_use` nie gezeigt; Einleitung bei Problemen fest ersetzt | **LT-03, LT-04** (Korrektur, fester Hinweis), **LT-41** (Einleitung mit Zahl), **LT-47** (Text neben `tool_use`), **LT-48** (Puffer), **LT-39** (feste Einleitung bei Fehler), **U-F1** (alle festen Texte zahlenfrei: der L4-Hinweis, die feste Einleitung, „Scout ist in diesem Schritt nicht weitergekommen“, die Meldungen nach 12.14.5, die Statusmeldungen, die Vorlagentexte der Host-Züge und die festen Teile der Systemnachrichten. Die Texte stehen als Konstanten in einem gemeinsamen Modul, der Test iteriert darüber und schlägt auch bei einer neuen Konstante außerhalb des Moduls an (AST). Je Text: keine Ziffer, kein Zahlwort in `de` und `en` (null bis zwölf, hundert, tausend, Million, Ordinalia; Ausnahmen nur nach Policy 11.2, etwa der unbestimmte Artikel), dazu `check_text` im Profil `free_text` ohne Befund. Platzhalter für Handles und Ticker werden vor der Prüfung entfernt) |
 | SM-06 | Korrektur-Rückmeldung ohne Fremdtext (M5) | Fremdinhalt (Firmenname mit Anweisung) wird über die Problemliste in den Betreiberkanal gehoben | Systemteil nur aus Vorlagen; Ausschnitt nur bei Zahl-Funden und nur aus dem geschlossenen Zeichensatz (12.14.5) | **LT-42.** **U-M5:** Ausschnitt-Filter je Grenzfall (24 und 25 Zeichen, Leerzeichen, `[`, `]`, `:`, Zeilenumbruch) |
 | SM-07 | Bestätigung in der Evaluation nur über die Harness (A7, R8, M7, V6) | Ein Pfad ohne Mensch, der nicht als Eval markiert ist, oder ein Modelltext, der die Bestätigung steuert | Entscheidung aus Falldatei und Code-Speicher; Kanal `eval` nur mit `EvalSessionConfig`; `channel="eval"` nur in `eval/` (12.14.6) | **E-01, E-02, E-03** (12.14.6), **E-04** (V6: Standard `confirm`/`all_proposed` ohne Angabe; nicht vorgeschlagene `keep`-Ticker als Abweichung protokolliert und nicht ergänzt; `action: none` bestätigt nichts und lässt kein `ct_`-Handle entstehen), **T11**, **A-E1** (AST: `agent/`, `tools/`, `cli/` importieren nichts aus `eval/`; das Literal `channel="eval"` steht nur in `eval/`) |
 | SM-08 | Harte Grenzen der Sitzung und des Zugs (L1, L7, V3, V5) | Endlose Schleife, Kostenexplosion, Hängen ohne Antwort, unbegrenzter Kontext | Prüfung nach jedem Aufruf aus `usage` und Uhr; Zugbudget 10 Aufrufe, 12 Tools, 10 min; Stillstand 60 s, 300 s je Aufruf; Kontextgrenze; `max_tokens` → `FAILED` | **LT-19, LT-20, LT-21, LT-22, LT-24** (Kosten nach jedem Aufruf), **LT-43** (Stillstand, Frist), **LT-46**, **LT-49** (Kontextgrenze) |
@@ -1784,7 +1788,7 @@ kennzeichnen (`SM-0x`), damit ein roter Test die verletzte Schutzmaßnahme nennt
 **Beim Abgleich ergänzt:** Der Entwurf (12.14.3, 12.14.4) beschrieb keine Tests für die Bedingung zu V1 (jetzt SM-02 mit
 LT-50 und U-V1), für die einzelnen Regeln des Platzierungsprüfers (U-P1), für die Grenzfälle des Ausschnitt-Filters
 (U-M5), für L3 (LT-47), den unsichtbaren Puffer (LT-48), die Kontextgrenze L7 (LT-49), die Bestätigungsregel nach V6
-(E-04) und den Architekturtest für `eval/` (A-E1); LT-09, LT-21, LT-24 und LT-33 sind um V3 und V4 erweitert. Die
+(E-04) den Architekturtest für `eval/` (A-E1) und die Zahlenfreiheit der festen Texte (U-F1, 2026-10-11); LT-09, LT-21, LT-24 und LT-33 sind um V3 und V4 erweitert. Die
 Testbeschreibungen sind hier festgelegt; der Code folgt in Phase B.
 
 ---
