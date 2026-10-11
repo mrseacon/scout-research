@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.12 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.13 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -348,7 +348,7 @@ Fehler-Feedback an den Agenten statt harter Crash.
 nackte Zahlen, Pflichtwarnungen) kam mit Schritt 6 (v1.6.9) dazu — Policy und Entscheidungen O1–O7 in Plan,
 Abschnitt 11, Umsetzung in 11.8. Der Systemprompt liegt seit v1.6.10 versioniert in
 `src/scout_research/agent/prompts/system.md`; das Design der Agent-Schleife steht in Plan, Abschnitt 12. Der Tool-Katalog oben ist die Skizze von v1.0; maßgeblich sind die Verträge in
-`docs/decisions/phase-3-plan.md` (Abschnitt 2 und 10): Handles statt Zahlen im Tool-Input, `confirm_peer_set` als
+`docs/decisions/phase-3-plan.md` (Abschnitt 2 und 10): Handles statt Zahlen im Tool-Input, `confirm_peer_set` und `reject_proposal` als
 Host-API (kein Tool), `run_quality_checks` kein Modell-Tool (Warnungen kommen mit `compute_comps_table`),
 `export_deliverable` Phase 4. Stand der Abweichungen zwischen Katalog und L2 seit v1.5:
 
@@ -1188,7 +1188,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.10 | 2026-10-09 | Phase 3, Schritt 7, Phase A (Opus): Systemprompt v1.0.0 als versionierte Datei (`agent/prompts/system.md`; Zahlenregel für jeden Text, sechs Slot-Namensräume mit geprüften Beispielen, Gate, Fehlercodes nach Handlungsgruppen, Injektionsschutz, Umfang, Sprache aus `output_language`), Konsistenztest gegen Tools, Fehlercodes und Slot-Grammatik; Design der Agent-Schleife, Testszenarien und Evaluationskriterien des Prompts in Plan, Abschnitt 12. Offen: L1–L9. Keine Schleife implementiert. |
 | 1.6.11 | 2026-10-11 | Arbeitsweise: drei Subagent-Typen (`reviewer`, `push-check`, `corpus-adversary`) unter `.claude/agents/` eingecheckt; Einsatzregeln in Plan, Abschnitt 13 (Review vor Push in Schritt 7–9, Push-Check vor jedem Push, Adversary nach Änderungen an Check oder Prompt und in Schritt 10; keine Umsetzung durch Subagents). Kein Code geändert. |
 | 1.6.12 | 2026-10-11 | Phase 3, Schritt 7: Review des Loop-Designs (Commit 49067d0, Subagent `reviewer`) in Plan 12.14 überführt (Opus). Befunde H1, M1–M7, N1–N7 gegen Code und Doku geprüft (M5, N1 abgeschwächt). Neue Belege: Platzierung von Systemnachrichten mitten im Gespräch und SDK-Timeouts (Plan, Abschnitt 9). Trennung Nutzereingabe/Tool-Ergebnisse strukturell spezifiziert (SM-01), Zustandstabelle Z1–Z20, Bestätigung in der halb-live-Evaluation; eindeutige Korrekturen eingetragen (Lader `agent/prompt_loader.py`, Log-Schwärzung am Handler, Hash der Tool-Liste, LT-14/16). Offen: V1–V6, L1–L9. Kein Code geändert. |
+| 1.6.13 | 2026-10-11 | Phase 3, Schritt 7: Entscheidungen V1–V6 (Review des Loop-Designs) und L1–L9 in Plan, Abschnitt 12 eingetragen (Sean): Host-Zug mit festem Vorlagentext, der nie Nutzereingabe ist (V1, ersetzt L5); keine Korrekturrunde für die Einleitung (V2); interner Stream mit unsichtbarem Puffer, Fristen 60 s/300 s/10 min und Kostenprüfung nach jedem Aufruf (V3, ersetzt L2); Host-API `reject_proposal` neben `confirm_peer_set`, beides kein Tool und im Trace (V4); `max_tokens` → `FAILED` ohne Retry (V5); Bestätigungsregel je Fall der halb-live-Evaluation (V6); L9: Haiku-Vergleich gestrichen. Bewertungsgrößen B1–B13 bestätigt (harte Ausfälle: durchgehender Zahlenversuch im Freitext, umgangenes Gate; sonst weiche Schwellen; jedes halb-live-Szenario mindestens dreimal, k von n). Abschnitte 4, 5, 12.3–12.9 angeglichen, Register der Schutzmaßnahmen SM-01 bis SM-09 mit Testabdeckung (12.14.8), neue Tests LT-47 bis LT-50, U-V1, U-P1, U-M5, E-04, A-E1. Kein Code geändert. |
 
 ---
 
-*Ende Dokumentversion 1.6.12*
+*Ende Dokumentversion 1.6.13*
