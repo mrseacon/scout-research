@@ -7,6 +7,7 @@ import logging
 import httpx
 import pytest
 
+from scout_research.tools.session import HumanInput
 from scout_research.data.market_provider import FinnhubProvider
 from scout_research.tools.handlers import dispatch
 from tests.unit.tool_world import (
@@ -25,7 +26,7 @@ def _full_flow(w: World, market=None):
     if market is not None:
         w.market = market
     ctx = w.context()
-    ctx.record_user_message("Comps für NVDA, dazu AAPL")
+    ctx.record_user_message(HumanInput("Comps für NVDA, dazu AAPL"))
     outcomes = [dispatch(ctx, "resolve_company", {"query": "NVDA"}), dispatch(ctx, "resolve_company", {"query": "AAPL"})]
     found = dispatch(ctx, "find_peer_candidates", {"target_cik": NVDA_CIK})
     outcomes.append(found)

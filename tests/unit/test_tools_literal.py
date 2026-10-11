@@ -2,6 +2,7 @@
 
 import pytest
 
+from scout_research.tools.session import HumanInput
 from scout_research.tools.literal import query_is_literal
 from tests.unit.tool_world import AAPL_CIK, MSFT_CIK, NVDA_CIK, call, confirmed, propose, standard_world, start
 
@@ -63,14 +64,14 @@ def test_host_and_system_messages_do_not_count_because_only_the_host_protocol_do
 def test_a_company_the_user_named_is_allowed_once_resolved() -> None:
     ctx, _ = start(standard_world())
     call(ctx, "resolve_company", query="AAPL")
-    ctx.record_user_message("Zeig mir bitte auch AAPL")
+    ctx.record_user_message(HumanInput("Zeig mir bitte auch AAPL"))
     assert call(ctx, "get_financials", cik=AAPL_CIK, metrics=["revenue"])["values"]["revenue"]["value"] == 416161
     assert call(ctx, "get_market_data", ticker="AAPL")["ticker"] == "AAPL"
 
 
 def test_user_naming_without_resolving_is_not_enough() -> None:
     ctx, _ = start(standard_world())
-    ctx.record_user_message("Zeig mir bitte auch AAPL")
+    ctx.record_user_message(HumanInput("Zeig mir bitte auch AAPL"))
     assert call(ctx, "get_financials", cik=AAPL_CIK)["error"]["code"] == "NOT_IN_ALLOWLIST"
 
 
@@ -82,7 +83,7 @@ def test_the_target_is_allowed_because_it_is_user_named_and_resolved() -> None:
 def test_a_target_the_user_never_named_is_rejected_for_the_peer_search() -> None:
     """E1 A: Auch find_peer_candidates verlangt Allowlist (c) — ein Ziel schaltet nichts frei."""
     ctx = standard_world().context()
-    ctx.record_user_message("Hallo")
+    ctx.record_user_message(HumanInput("Hallo"))
     call(ctx, "resolve_company", query="NVDA")
     assert call(ctx, "find_peer_candidates", target_cik=NVDA_CIK)["error"]["code"] == "NOT_IN_ALLOWLIST"
 
@@ -100,7 +101,7 @@ def test_confirmed_peers_are_allowed_and_removed_candidates_are_not() -> None:
 def test_unconfirmed_proposal_does_not_open_the_allowlist() -> None:
     ctx, set_id = start(standard_world())
     propose(ctx, set_id)
-    ctx.record_user_message("weiter")  # die Sperre ist weg, bestätigt ist trotzdem nichts
+    ctx.record_user_message(HumanInput("weiter"))  # die Sperre ist weg, bestätigt ist trotzdem nichts
     assert call(ctx, "get_financials", cik=AAPL_CIK)["error"]["code"] == "NOT_IN_ALLOWLIST"
 
 

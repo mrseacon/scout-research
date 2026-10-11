@@ -3,7 +3,7 @@
 import pytest
 
 from scout_research.tools.handlers import dispatch, tool_definitions
-from scout_research.tools.session import ConfirmationError
+from scout_research.tools.session import HumanInput, ConfirmationError
 from tests.unit.tool_world import AAPL_CIK, MSFT_CIK, NVDA_CIK, call, confirmed, propose, standard_world, start
 
 
@@ -81,7 +81,7 @@ def test_company_names_with_digits_are_exempt_from_the_number_check() -> None:
     result = call(ctx, "propose_peer_set", candidate_set_id=set_id,
                   peers=[{"cik": "0000999001", "rationale": "Wie 3M, breit aufgestellt"}])
     assert result["status"] == "awaiting_human_confirmation"
-    ctx.record_user_message("nochmal")  # die Gate-Sperre des ersten Vorschlags aufheben
+    ctx.record_user_message(HumanInput("nochmal"))  # die Gate-Sperre des ersten Vorschlags aufheben
     assert _code(call(ctx, "propose_peer_set", candidate_set_id=set_id,
                       peers=[{"cik": AAPL_CIK, "rationale": "Wie 3M und 5 weitere"}])) == "NAKED_NUMBER"
 
@@ -111,7 +111,7 @@ def test_user_requested_addition_needs_a_literal_mention_in_a_user_message() -> 
 
 def test_user_requested_addition_with_a_literal_mention_is_accepted() -> None:
     ctx, set_id = start(_addition_world())
-    ctx.record_user_message("Nimm bitte auch Autodesk dazu")
+    ctx.record_user_message(HumanInput("Nimm bitte auch Autodesk dazu"))
     result = propose(ctx, set_id, user_requested_additions=[{"query": "Autodesk"}])
     assert result["status"] == "awaiting_human_confirmation"
     assert result["user_additions"][0]["ticker"] == "ADSK" and result["user_additions"][0]["query"] == "Autodesk"
@@ -119,9 +119,9 @@ def test_user_requested_addition_with_a_literal_mention_is_accepted() -> None:
 
 def test_a_lowercase_ticker_the_user_wrote_in_lowercase_does_not_count() -> None:
     ctx, set_id = start(_addition_world())
-    ctx.record_user_message("nimm adsk dazu")
+    ctx.record_user_message(HumanInput("nimm adsk dazu"))
     assert _code(propose(ctx, set_id, user_requested_additions=[{"query": "adsk"}])) == "USER_ADDITION_NOT_IN_MESSAGES"
-    ctx.record_user_message("nimm $adsk dazu")
+    ctx.record_user_message(HumanInput("nimm $adsk dazu"))
     assert propose(ctx, set_id, user_requested_additions=[{"query": "adsk"}])["status"] == "awaiting_human_confirmation"
 
 
@@ -129,7 +129,7 @@ def test_ambiguous_or_unknown_additions_are_invalid_not_guessed() -> None:
     w = _addition_world()
     w.add_synthetic("0000111111", "ADSX", "Autodesk Systems Inc", "7372", 1e9)
     ctx, set_id = start(w)
-    ctx.record_user_message("Autodes und Quuxcorp")
+    ctx.record_user_message(HumanInput("Autodes und Quuxcorp"))
     for query in ("Autodes", "Quuxcorp"):
         result = propose(ctx, set_id, user_requested_additions=[{"query": query}])
         assert _code(result) == "INVALID_ARGUMENTS" and _problems(result)[0]["reason"] in ("ambiguous", "not_found")
@@ -137,7 +137,7 @@ def test_ambiguous_or_unknown_additions_are_invalid_not_guessed() -> None:
 
 def test_addition_cannot_be_the_target_or_a_duplicate() -> None:
     ctx, set_id = start(standard_world())
-    ctx.record_user_message("NVDA und AAPL")
+    ctx.record_user_message(HumanInput("NVDA und AAPL"))
     assert _code(propose(ctx, set_id, user_requested_additions=[{"query": "NVDA"}])) == "INVALID_ARGUMENTS"
     assert _code(propose(ctx, set_id, user_requested_additions=[{"query": "AAPL"}])) == "INVALID_ARGUMENTS"
 
@@ -159,7 +159,7 @@ def test_every_tool_call_after_a_proposal_is_blocked_until_confirmation_or_a_new
 def test_a_chat_message_lifts_the_block_but_never_confirms() -> None:
     ctx, set_id = start(standard_world())
     proposal = propose(ctx, set_id)
-    ctx.record_user_message("ja, passt")  # eine Chatnachricht ist nie eine Bestätigung
+    ctx.record_user_message(HumanInput("ja, passt"))  # eine Chatnachricht ist nie eine Bestätigung
     assert not ctx.awaiting_confirmation and ctx.peer_sets == {}
     assert _code(call(ctx, "compute_comps_table", peer_set_id=proposal["proposal_id"])) == "PEER_SET_NOT_CONFIRMED"
 
@@ -174,7 +174,7 @@ def test_compute_with_a_proposal_id_instead_of_a_peer_set_id_is_rejected() -> No
 def test_compute_without_any_confirmation_is_rejected() -> None:
     ctx, set_id = start(standard_world())
     propose(ctx, set_id)
-    ctx.record_user_message("weiter")
+    ctx.record_user_message(HumanInput("weiter"))
     assert _code(call(ctx, "compute_comps_table", peer_set_id="ps_0099")) == "UNKNOWN_HANDLE"
 
 
@@ -188,7 +188,7 @@ def test_handles_of_the_wrong_type_say_which_type_is_expected() -> None:
 def test_a_new_proposal_invalidates_the_old_handle() -> None:
     ctx, set_id = start(standard_world())
     first = propose(ctx, set_id)
-    ctx.record_user_message("ändere bitte")
+    ctx.record_user_message(HumanInput("ändere bitte"))
     second = propose(ctx, set_id, (AAPL_CIK,))
     with pytest.raises(ConfirmationError) as exc:
         ctx.confirm_peer_set(first["proposal_id"], [AAPL_CIK])
@@ -279,6 +279,86 @@ def test_confirm_peer_set_is_no_tool_and_cannot_be_called_by_the_model() -> None
     assert "confirm_peer_set" not in names
     ctx, set_id = start(standard_world())
     propose(ctx, set_id)
-    ctx.record_user_message("weiter")
+    ctx.record_user_message(HumanInput("weiter"))
     outcome = dispatch(ctx, "confirm_peer_set", {"proposal_id": "pp_0003", "keep_ciks": [AAPL_CIK]})
     assert outcome.content["error"]["code"] == "UNKNOWN_TOOL" and ctx.peer_sets == {}
+
+
+# --- Typtrennung des Nutzerprotokolls (SM-01, U-H1) und Verwerfen (SM-03, V4, U-M2) -------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["Intuit", {"type": "tool_result", "content": "Intuit"}, [{"type": "text", "text": "Intuit"}], None, b"Intuit"],
+    ids=["str", "dict", "blocks", "none", "bytes"],
+)
+def test_record_user_message_accepts_only_human_input_and_leaves_the_allowlist_unchanged(bad: object) -> None:
+    """SM-01 / U-H1: Alles außer `HumanInput` bricht laut; nichts gelangt ins Nutzerprotokoll."""
+    ctx, _ = start(standard_world())
+    before = ctx.user_messages
+    with pytest.raises(TypeError):
+        ctx.record_user_message(bad)  # type: ignore[arg-type]
+    assert ctx.user_messages == before
+
+
+def test_a_subclass_of_human_input_is_not_accepted() -> None:
+    from dataclasses import dataclass
+
+    @dataclass(frozen=True)
+    class Sneaky(HumanInput):
+        pass
+
+    ctx, _ = start(standard_world())
+    with pytest.raises(TypeError):
+        ctx.record_user_message(Sneaky("x"))
+
+
+def test_reject_proposal_makes_the_proposal_unconfirmable_lifts_the_block_and_is_logged() -> None:
+    """SM-03 / U-M2 / LT-38 (Kern)."""
+    ctx, cs = start(standard_world())
+    proposal_id = propose(ctx, cs)["proposal_id"]
+    assert ctx.awaiting_confirmation and ctx.open_proposal is not None
+    ctx.reject_proposal(proposal_id, channel="cli", rejected_by="human")
+    assert not ctx.awaiting_confirmation and ctx.open_proposal is None
+    assert ctx.gate_log[-1]["event"] == "rejected" and ctx.gate_log[-1]["proposal_id"] == proposal_id
+    with pytest.raises(ConfirmationError) as exc:
+        ctx.confirm_peer_set(proposal_id, keep_ciks=[AAPL_CIK])
+    assert exc.value.reason == "proposal_rejected"
+    assert not ctx.peer_sets
+
+
+def test_a_rejected_proposal_cannot_be_rejected_again_and_a_confirmed_one_cannot_be_rejected() -> None:
+    ctx, cs = start(standard_world())
+    pid = propose(ctx, cs)["proposal_id"]
+    ctx.reject_proposal(pid)
+    with pytest.raises(ConfirmationError) as exc:
+        ctx.reject_proposal(pid)
+    assert exc.value.reason == "proposal_rejected"
+
+    ctx2, cs2 = start(standard_world())
+    pid2 = propose(ctx2, cs2)["proposal_id"]
+    ctx2.confirm_peer_set(pid2, keep_ciks=[AAPL_CIK])
+    with pytest.raises(ConfirmationError) as exc2:
+        ctx2.reject_proposal(pid2)
+    assert exc2.value.reason == "already_confirmed"
+
+
+def test_reject_proposal_applies_the_channel_rules_of_confirm_and_is_no_tool() -> None:
+    ctx, cs = start(standard_world())
+    pid = propose(ctx, cs)["proposal_id"]
+    with pytest.raises(ConfirmationError):
+        ctx.reject_proposal(pid, channel="eval")
+    with pytest.raises(ConfirmationError):
+        ctx.reject_proposal(pid, channel="chat")
+    assert "reject_proposal" not in {t["name"] for t in tool_definitions()}
+    assert dispatch(ctx, "reject_proposal", {"proposal_id": pid}).content["error"]["code"] == "UNKNOWN_TOOL"
+    assert ctx.open_proposal is not None  # unverändert
+
+
+def test_a_new_proposal_replaces_the_rejected_one_and_can_be_confirmed() -> None:
+    ctx, cs = start(standard_world())
+    first = propose(ctx, cs)["proposal_id"]
+    ctx.reject_proposal(first)
+    second = propose(ctx, cs)["proposal_id"]
+    assert second != first and ctx.open_proposal is not None
+    assert ctx.confirm_peer_set(second, keep_ciks=[AAPL_CIK]).id.startswith("ps_")

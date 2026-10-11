@@ -19,7 +19,7 @@ from scout_research.data.edgar_client import EdgarClient
 from scout_research.data.market_provider import PriceQuote
 from scout_research.domain.metrics import REVENUE_CONCEPTS, extract_latest_annual_revenue
 from scout_research.domain.periods import derive_calendar_year
-from scout_research.tools.session import ToolContext
+from scout_research.tools.session import HumanInput, ToolContext
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 UA = "Scout Research (welt.tester@example.invalid)"
@@ -205,7 +205,7 @@ def propose(ctx: ToolContext, candidate_set_id: str, ciks: tuple[str, ...] = (AA
 def resolved(w: World, user_message: str = "Mach Comps für NVDA") -> ToolContext:
     """Der Nutzer nennt das Ziel, das Modell löst es auf (noch keine Kandidatensuche)."""
     ctx = w.context()
-    ctx.record_user_message(user_message)
+    ctx.record_user_message(HumanInput(user_message))
     assert call(ctx, "resolve_company", query="NVDA")["status"] == "resolved"
     return ctx
 

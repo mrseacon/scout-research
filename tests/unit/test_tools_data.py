@@ -2,6 +2,7 @@
 
 import httpx
 
+from scout_research.tools.session import HumanInput
 from tests.unit.tool_world import AAPL_CIK, MSFT_CIK, NVDA_CIK, World, call, standard_world, start
 
 
@@ -42,7 +43,7 @@ def test_a_debt_lower_bound_is_flagged() -> None:
     w = standard_world()
     cik = w.add_real("CDNS")
     ctx, _ = start(w)
-    ctx.record_user_message("Und CDNS?")
+    ctx.record_user_message(HumanInput("Und CDNS?"))
     call(ctx, "resolve_company", query="CDNS")
     debt = call(ctx, "get_financials", cik=cik, metrics=["total_debt"])["values"]["total_debt"]
     from scout_research.domain.metrics import DEBT_LOWER_BOUND_CONCEPTS
@@ -53,7 +54,7 @@ def test_a_debt_lower_bound_is_flagged() -> None:
 def test_a_missing_value_is_explained_not_estimated() -> None:
     w = standard_world()
     ctx, _ = start(w)
-    ctx.record_user_message("Und MSFT?")
+    ctx.record_user_message(HumanInput("Und MSFT?"))
     call(ctx, "resolve_company", query="MSFT")
     values = call(ctx, "get_financials", cik=MSFT_CIK, metrics=["ebitda", "ebit"])["values"]
     assert values["ebitda"] == {"unavailable_reason": values["ebitda"]["unavailable_reason"]}

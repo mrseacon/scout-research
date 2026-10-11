@@ -52,6 +52,42 @@ class Deadline:
             raise fail("TOOL_TIMEOUT")
 
 
+@dataclass(frozen=True)
+class HumanInput:
+    """Text, den der **Mensch** eingegeben hat — und nichts sonst (Plan 12.14.3, SM-01). Nur das Host-Eingangsmodul
+    (`cli/`, später `ui/`) und Tests konstruieren es; `agent/` und `tools/` nie (Architekturtest A-H1)."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class Confirmed:
+    """Host-Ereignis: Der Mensch hat einen Vorschlag bestätigt. Trägt keinen Freitext (SM-02)."""
+
+    peer_set_id: str
+    removed: tuple[str, ...] = ()
+    added: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Rejected:
+    """Host-Ereignis: Der Mensch hat einen Vorschlag verworfen. Trägt keinen Freitext (SM-02)."""
+
+    proposal_id: str
+
+
+@dataclass(frozen=True)
+class CorrectionRequest:
+    """Host-Ereignis: Die letzte Modellantwort wurde nicht gezeigt. `problems` sind `Problem.as_detail()`-Einträge;
+    der Loop übernimmt daraus nur Code, Art, Hinweis aus der Vorlage und einen gefilterten Ausschnitt (12.14.5)."""
+
+    problems: tuple[dict[str, Any], ...] = ()
+    positions: tuple[tuple[int, int], ...] = ()
+
+
+HostEvent = Confirmed | Rejected | CorrectionRequest
+
+
 class ConfirmationError(Exception):
     """Die Host-API `confirm_peer_set` lehnt eine Bestätigung ab (Host-Fehler, kein Tool-Fehler)."""
 
@@ -91,6 +127,7 @@ class Proposal:
     user_additions: list[dict[str, Any]]
     superseded: bool = False
     confirmed: bool = False
+    rejected: bool = False
 
 
 @dataclass
@@ -205,11 +242,15 @@ class ToolContext:
 
     # --- Host-Eingang ------------------------------------------------------------------------------------
 
-    def record_user_message(self, text: str) -> None:
-        """Der Host protokolliert hier jede Nachricht, die der Mensch eingegeben hat — und nichts sonst (keine
-        Tool-Ergebnisse, keine Host-Nachrichten). Eine neue Nutzernachricht hebt die Gate-Sperre auf und lässt
-        Wiederholungen früher gescheiterter Aufrufe wieder zu (der Kontext hat sich geändert)."""
-        self._user_messages.append(text)
+    def record_user_message(self, msg: HumanInput) -> None:
+        """Der Loop protokolliert hier jede Nachricht, die der Mensch eingegeben hat — und nichts sonst (keine
+        Tool-Ergebnisse, keine Host-Vorlagen, keine Systemnachrichten, kein Modelltext). Die Laufzeitprüfung macht
+        einen falschen Aufruf laut: `str`, `dict` und Listen von Inhaltsblöcken sind ausgeschlossen (SM-01, H1).
+        Eine neue Nutzernachricht hebt die Gate-Sperre auf und lässt Wiederholungen früher gescheiterter Aufrufe
+        wieder zu (der Kontext hat sich geändert)."""
+        if type(msg) is not HumanInput:
+            raise TypeError("record_user_message verlangt HumanInput (Eingabe des Menschen), nichts sonst")
+        self._user_messages.append(msg.text)
         self.awaiting_confirmation = False
         self.failed_calls.clear()
         self.commentary_state.clear()  # neue Anfrage: neue Korrekturrunden für den Kommentar
@@ -317,6 +358,40 @@ class ToolContext:
 
     # --- Host-API: Gate ----------------------------------------------------------------------------------
 
+    @property
+    def open_proposal(self) -> Proposal | None:
+        """Der Vorschlag, den der Mensch jetzt bestätigen oder verwerfen kann (12.14.4: „offener Vorschlag“)."""
+        if self.current_proposal_id is None:
+            return None
+        proposal = self.proposals.get(self.current_proposal_id)
+        if proposal is None or proposal.confirmed or proposal.rejected or proposal.superseded:
+            return None
+        return proposal
+
+    def reject_proposal(self, proposal_id: str, channel: str = "cli", rejected_by: str = "human") -> None:
+        """Verwirft den **jüngsten** Vorschlag (V4): nicht mehr bestätigbar, Sperre aus, Wiederholungsgedächtnis
+        geleert, Eintrag im `gate_log`. Nur der Mensch über einen Kanal für Menschen; **kein Tool**."""
+        if channel not in CHANNELS:
+            raise ConfirmationError("unknown_channel", channel=channel)
+        if channel == "eval" and self.eval_session is None:
+            raise ConfirmationError("eval_channel_requires_eval_session")
+        proposal = self.proposals.get(proposal_id)
+        if proposal is None:
+            raise ConfirmationError("unknown_proposal")
+        if proposal.rejected:
+            raise ConfirmationError("proposal_rejected")
+        if proposal.confirmed:
+            raise ConfirmationError("already_confirmed")
+        if proposal.superseded or proposal_id != self.current_proposal_id:
+            raise ConfirmationError("proposal_superseded")
+        proposal.rejected = True
+        self.awaiting_confirmation = False
+        self.failed_calls.clear()
+        self.gate_log.append(
+            {"event": "rejected", "proposal_id": proposal_id, "channel": channel, "rejected_by": rejected_by,
+             "rejected_at": self.now().isoformat()}
+        )
+
     def confirm_peer_set(
         self,
         proposal_id: str,
@@ -337,6 +412,8 @@ class ToolContext:
         proposal = self.proposals.get(proposal_id)
         if proposal is None:
             raise ConfirmationError("unknown_proposal")
+        if proposal.rejected:
+            raise ConfirmationError("proposal_rejected")
         if proposal.confirmed:
             raise ConfirmationError("already_confirmed")
         if proposal.superseded or proposal_id != self.current_proposal_id:

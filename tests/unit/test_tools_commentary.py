@@ -4,6 +4,7 @@ Das Prüfkorpus selbst läuft in `test_number_check_corpus.py`."""
 
 import pytest
 
+from scout_research.tools.session import HumanInput
 from scout_research.tools.commentary import build_check_session, check_text
 from scout_research.tools.handlers import dispatch
 from tests.unit.tool_world import AAPL_CIK, MSFT_CIK, NVDA_CIK, call, confirmed, propose, standard_world, start
@@ -13,7 +14,7 @@ def _table(w=None, **context_kwargs):
     w = w or standard_world()
     if context_kwargs:
         ctx = w.context(**context_kwargs)
-        ctx.record_user_message("Mach Comps für NVDA")
+        ctx.record_user_message(HumanInput("Mach Comps für NVDA"))
         call(ctx, "resolve_company", query="NVDA")
         set_id = call(ctx, "find_peer_candidates", target_cik=NVDA_CIK)["candidate_set_id"]
         proposal = propose(ctx, set_id)
@@ -105,7 +106,7 @@ def test_two_correction_rounds_then_the_commentary_is_withheld_and_the_table_is_
     assert ctx.commentary_log[-1]["action"] == "withheld"
     # auch ein korrekter Kommentar wird jetzt nicht mehr angenommen, bis der Mensch wieder schreibt
     assert _code(_submit(ctx, tid, "Median: [[stat:pe:median]].")) == "COMMENTARY_WITHHELD"
-    ctx.record_user_message("Versuch es bitte noch einmal")
+    ctx.record_user_message(HumanInput("Versuch es bitte noch einmal"))
     assert _submit(ctx, tid, "Median: [[stat:pe:median]].")["status"] == "accepted"
     assert ctx.commentaries[tid].status == "accepted"
 
@@ -154,12 +155,12 @@ def test_a_skipped_peer_is_a_mandatory_warning_that_the_code_adds_when_the_model
     assert "- [W1: AAPL] (warning) Der Peer wurde übersprungen (bei der SEC liegen keine Daten für das Unternehmen vor)" in ctx.commentaries[tid].rendered
     assert "Übersprungen: AAPL." in ctx.commentaries[tid].rendered.split("\n")[0]
 
-    ctx.record_user_message("nochmal")
+    ctx.record_user_message(HumanInput("nochmal"))
     covered = _submit(ctx, tid, "AAPL fehlt in der Tabelle ([[warn:W1]]).")
     assert covered["warnings_not_addressed"] == [] or "W1" not in covered["warnings_not_addressed"]
     assert "AAPL fehlt in der Tabelle ([W1: AAPL])." in ctx.commentaries[tid].rendered
 
-    ctx.record_user_message("und AAPL?")
+    ctx.record_user_message(HumanInput("und AAPL?"))
     refused = _submit(ctx, tid, "AAPL: [[co:AAPL:revenue]]")
     problem = refused["error"]["details"]["problems"][0]
     assert _code(refused) == "SLOT_VALUE_UNAVAILABLE" and problem["kind"] == "peer_skipped"
@@ -196,10 +197,10 @@ def test_fin_and_mkt_slots_resolve_against_the_tool_results_the_model_saw() -> N
     text = f"NVDA: Umsatz [[fin:{fid}:revenue]], EBITDA [[fin:{fid}:ebitda]], Kurs [[mkt:NVDA:price]]."
     assert _submit(ctx, tid, text)["status"] == "accepted"
     assert "NVDA: Umsatz 215.938 Mio. USD, EBITDA 133.230 Mio. USD*, Kurs 180,00 USD." in ctx.commentaries[tid].rendered
-    ctx.record_user_message("weiter")
+    ctx.record_user_message(HumanInput("weiter"))
     assert _code(_submit(ctx, tid, f"[[fin:{fid}:total_assets]]")) == "SLOT_UNKNOWN"  # nicht abgefragt
     assert _code(_submit(ctx, tid, "[[fin:fin_zzzz:revenue]]")) == "SLOT_UNKNOWN"
-    ctx.record_user_message("und weiter")  # die dritte Abweisung in einer Runde würde den Kommentar zurückhalten
+    ctx.record_user_message(HumanInput("und weiter"))  # die dritte Abweisung in einer Runde würde den Kommentar zurückhalten
     assert _code(_submit(ctx, tid, "[[mkt:AAPL:price]]")) == "SLOT_UNKNOWN"  # get_market_data nie für AAPL aufgerufen
 
 

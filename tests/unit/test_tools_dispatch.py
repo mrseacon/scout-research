@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from scout_research.tools.session import HumanInput
 from scout_research.tools.errors import CODES, RETRYABLE
 from scout_research.tools.handlers import TOOLS, dispatch
 from tests.unit.tool_world import AAPL_CIK, MSFT_CIK, NVDA_CIK, call, confirmed, propose, resolved, standard_world, start
@@ -63,7 +64,7 @@ def _scn_no_valid_peers():
 def _scn_not_confirmed():
     ctx, set_id = start(standard_world())
     proposal = propose(ctx, set_id)
-    ctx.record_user_message("weiter")
+    ctx.record_user_message(HumanInput("weiter"))
     return _err(ctx, "compute_comps_table", peer_set_id=proposal["proposal_id"])
 
 
@@ -227,7 +228,7 @@ def test_non_object_arguments_are_invalid_not_a_crash() -> None:
 
 def test_tool_inputs_are_validated_on_the_server_for_every_bound() -> None:
     ctx, set_id = start(standard_world())
-    ctx.record_user_message("x")
+    ctx.record_user_message(HumanInput("x"))
     too_many = [{"cik": str(100 + i), "rationale": "x"} for i in range(16)]
     cases = [
         ("resolve_company", {"query": ""}),
@@ -271,7 +272,7 @@ def test_a_retryable_error_may_be_repeated_once() -> None:
 def test_a_new_user_message_allows_the_call_again() -> None:
     ctx, _ = start(standard_world())
     assert dispatch(ctx, "get_market_data", {"ticker": "AAPL"}).is_error
-    ctx.record_user_message("Zeig mir auch AAPL")
+    ctx.record_user_message(HumanInput("Zeig mir auch AAPL"))
     call(ctx, "resolve_company", query="AAPL")
     assert not dispatch(ctx, "get_market_data", {"ticker": "AAPL"}).is_error
 
