@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.16 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.17 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -1192,7 +1192,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.14 | 2026-10-11 | Phase 3, Schritt 7: Klarstellungen zu Plan, Abschnitt 12 (Sean): B1 hart nur bei gezeigtem Rohtext, blockierte Versuche sind eine weiche Versuchsrate; feste Texte (L4-Hinweis, feste Einleitung, Vorlagen) per Test zahlenfrei (U-F1); bei Kosten- oder Kontextgrenze bleiben berechnete und geprüfte Ergebnisse sichtbar und der Trace wird geschlossen; `max_tokens` 8.000 statt 16.000 bei Frist 300 s je Aufruf; Prozentwerte nur als Leserichtung. Kein Code geändert. |
 | 1.6.15 | 2026-10-11 | Phase 3, Schritt 7: Konfigurationsfeld `anthropic_compare_model` und `ANTHROPIC_COMPARE_MODEL` entfernt (Folge von L9, Haiku-Vergleich gestrichen); Test und `.env.example` angepasst. Kleiner Code-Commit vor Phase B. |
 | 1.6.16 | 2026-10-11 | Arbeitsweise, Teil 2 (Sonnet): `scripts/push_gate.py` (Suite ohne xfail und über Skip-Baseline, sauberer Stand, `.env`, Geheimnisse nur in hinzugefügten Zeilen mit Ausgabe „Art, Datei:Zeile“, Commit-Liste, Marker `.git/push_gate_ok`) ersetzt den Agenten `push-check`; Hook `.claude/hooks/require_push_gate.py` (PreToolUse/PostToolUse, `.claude/settings.json`) blockiert `git push` ohne gültigen Marker (30 Minuten, passend zu HEAD), jeden erzwungenen Push und verkettete Aufrufe; Tests `test_push_gate.py`, `test_require_push_gate_hook.py`; Register der Schutzmaßnahmen `docs/security-guards.md` (SG-01 bis SG-12 mit Tests und Mutationen, sieben als geplant oder teilweise markiert); Agenten `mutation-prober` (isolierter Worktree) und `trace-triager`; Plan, Abschnitt 13 neu (Baustein-Tabelle, Regel „Deterministische Prüfungen sind Skripte oder Tests; Agenten nur für Urteilsarbeit“). Kein Anwendungscode geändert. |
+| 1.6.17 | 2026-10-11 | Phase 3, Schritt 7, Phase B (Sonnet): Agent-Schleife umgesetzt (`agent/loop.py`: Zustandsmaschine Z1–Z20, Host-Zug nach V1, `reject_proposal`/`confirm` nur über den Loop, Intro ohne Korrektur, `TURN_ENDED`, Zug- und Sitzungsgrenzen, Kosten- und Kontextgrenze nach jedem Aufruf), `agent/model_client.py` (Platzierungsprüfer, `ScriptedModelClient`, SDK-Adapter mit internem Stream; ungeprüft gegen die echte API), `agent/budgets.py`, `agent/texts.py`, `agent/prompt_loader.py`; Typtrennung `HumanInput` mit Architekturtests A-H1/A-E1/T8; `TURN_ENDED` im Fehlervertrag, Prompt v1.1.0, `anthropic_max_tokens` (Default 8000), `runs/` in `.gitignore`, Package-Data; Szenarien LT-01 bis LT-50 mit `ScriptedModelClient`; Register der Schutzmaßnahmen um SG-13 bis SG-17 und Zuordnung SG/SM; Plan 12.15 mit Zuordnung zu Schritt 7/8/9 und den Festlegungen P1–P9. Kein Trace-Schreiber, keine CLI, kein API-Aufruf. |
 
 ---
 
-*Ende Dokumentversion 1.6.16*
+*Ende Dokumentversion 1.6.17*

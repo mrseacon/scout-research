@@ -690,7 +690,7 @@ derzeit im iCloud-Desktop (Foundation §9).
 | 4 | Tool-Verträge fixieren: Fehlertaxonomie, Handles, Payload-Rundung, Bereinigung externer Strings, Sitzungsspeicher | Opus-Review, dann Sonnet | Schemas aus Pydantic, Snapshot-Tests, T7 |
 | 5 | Handler für die Modell-Tools inkl. Allowlist und `resolve_company`-Namensabgleich — **sechs von sieben; `submit_commentary` gehört zu Schritt 6** | Sonnet | T1, T3, T4, T13; T12 für Tool-Ergebnisse; vorher E1–E7 entschieden. **Umgesetzt (2026-10-09)** |
 | 6 | **Slot-Renderer, `submit_commentary`, Backstop** | Opus (Grammatik, Korpus, Grenzfälle), dann Sonnet | T2 mit dem Korpus (Abschnitt 11.6). **Phase A (Policy, Korpus) und Entscheidungen O1–O7 erledigt 2026-10-09; Phase B (Umsetzung) erledigt 2026-10-09, Abschnitt 11.8** |
-| 7 | System-Prompt und Loop: Zustandsmaschine, Gate- und Kommentar-Ende, Budgets, Adapter | Opus (Prompt), Loop Sonnet | T3, T5, geskripteter End-to-End-Lauf. **Phase A (Prompt v1.0.0, Loop-Design, Abschnitt 12) erledigt 2026-10-09; Review eingearbeitet, L1–L9 und V1–V6 entschieden (2026-10-11); Phase B (Umsetzung) offen** |
+| 7 | System-Prompt und Loop: Zustandsmaschine, Gate- und Kommentar-Ende, Budgets, Adapter | Opus (Prompt), Loop Sonnet | T3, T5, geskripteter End-to-End-Lauf. **Phase A (Prompt v1.0.0, Loop-Design, Abschnitt 12) erledigt 2026-10-09; Review eingearbeitet, L1–L9 und V1–V6 entschieden (2026-10-11); Phase B (Umsetzung) erledigt 2026-10-11, Abschnitt 12.15** |
 | 8 | Trace (JSONL), `EvalSessionConfig` | Sonnet | T9, T11, T12 für Trace und Logs |
 | 9 | CLI-Chat mit Gate-Abfrage (Host-API) | Sonnet | manueller Live-Lauf ADBE (API-Key nötig), Kosten im Trace |
 | 10 | Live-Review: 3 Läufe (ADBE + 2 Branchen), Prompt-Tuning, Go/No-go Slots (Abschnitt 3), Foundation Doc v1.7 (§7.3 neu, D9-Detail, `submit_commentary`) | Opus | Gate eingehalten; 0 falsche Zahlen im gerenderten Output; Verstöße vor Korrektur dokumentiert |
@@ -1791,6 +1791,33 @@ LT-50 und U-V1), für die einzelnen Regeln des Platzierungsprüfers (U-P1), für
 (U-M5), für L3 (LT-47), den unsichtbaren Puffer (LT-48), die Kontextgrenze L7 (LT-49), die Bestätigungsregel nach V6
 (E-04) den Architekturtest für `eval/` (A-E1) und die Zahlenfreiheit der festen Texte (U-F1, 2026-10-11); LT-09, LT-21, LT-24 und LT-33 sind um V3 und V4 erweitert. Die
 Testbeschreibungen sind hier festgelegt; der Code folgt in Phase B.
+
+### 12.15 Umsetzung Phase B (Sonnet, 2026-10-11)
+
+**Zuordnung zu den Schritten (vor dem Start abgeglichen):**
+
+| Teil | Schritt | Stand |
+|---|---|---|
+| Typen `HumanInput`, `Confirmed`, `Rejected`, `CorrectionRequest`; Laufzeitprüfung in `record_user_message`; `reject_proposal`, `open_proposal`; A-H1, A-E1, T8 (AST) | 7 | umgesetzt |
+| `agent/loop.py` (Zustandsmaschine Z1–Z20, Host-Zug, Budgets, `TURN_ENDED`, `LOOP_GUARD`, L3, L4, V2, V5), `agent/model_client.py` (Protokoll, Platzierungsprüfer, `ScriptedModelClient`, SDK-Adapter), `agent/prompt_loader.py`, `agent/budgets.py`, `agent/texts.py` | 7 | umgesetzt |
+| `TURN_ENDED` in `errors.py` und Abschnitt 2, Prompt v1.1.0, `anthropic_max_tokens`, `runs/` in `.gitignore`, Package-Data | 7 | umgesetzt |
+| LT-01 bis LT-50 (LT-33 und LT-44 nur der Teil, der die Schleife betrifft), U-V1, U-M5, U-F1, U-P1, U-H1, U-M2, A-H1, A-E1 | 7 | umgesetzt |
+| Trace-Schreiber, Schema, Schlussereignis in der Datei, T9, T12 für Trace und Logs, LT-33 vollständig, `EvalSessionConfig`, Harness in `eval/` mit E-01, E-02, E-04 | 8 | **nicht gebaut** |
+| CLI (`cli/`, Konstruktion von `HumanInput` im Host-Eingang, Handler-Filter mit `Redactor`, Scan nach dem Lauf, `make_sdk_client` live) | 9 | **nicht gebaut** |
+
+**Festlegungen, die der Plan nicht ausdrücklich trifft (Sean bitte bestätigen oder ändern):**
+
+| # | Punkt | Festlegung | Grund |
+|---|---|---|---|
+| P1 | Platzierungsregel „letzter Eintrag“ (12.14.4) | Der Prüfer verlangt, dass eine `system`-Nachricht entweder letzter Eintrag ist **oder direkt von einem `assistant`-Turn gefolgt wird** (so 12.14.1). Wörtlich „und ist der letzte Eintrag“ würde jede schon beantwortete Systemnachricht im festen Verlauf abweisen | 12.14.1 ist die belegte Regel der API; 12.14.4 ist an dieser Stelle verkürzt |
+| P2 | Wer ruft `confirm_peer_set` (12.7 Schritt 2 gegen 12.14.3) | `loop.confirm(proposal_id, keep_ciks, add_queries, channel, confirmed_by)` ruft `ctx.confirm_peer_set` selbst; der Host ruft es nie direkt (A-H1) | 12.14.3 ist verbindlich und später entstanden |
+| P3 | Schnittstelle zum Trace | `AgentLoop.events`: Liste einfacher Ereignisse (`model_call`, `tool`, `text_check`, `gate`, `model_error`, `unusable_response`, `loop_error`, `turn_end`) mit Zählern, Codes, Klasse, Status, `request_id` — nie Text, nie Secrets (`loop_error` mit geschwärztem Stacktrace). Kein Schema, kein Schreiben | Die Szenarien LT-23, LT-24, LT-44, LT-47 prüfen „im Trace gezählt“; der Schreiber ist Schritt 8 |
+| P4 | Text am Limit | Trifft der Aufruf, der die Kosten- oder Kontextgrenze überschreitet, einen `end_turn`-Text, zeigt der Loop ihn nach `check_text`; bei Problemen gibt es keine Korrekturrunde, sondern den festen Hinweis (L4). Tool-Blöcke dieser Antwort werden `TURN_ENDED` | 12.4 regelt nur die Blöcke; der Text ist bezahlt und geprüft |
+| P5 | Cache-Write-Preis | 1,25 × Input (2,50 $ je MTok), **ungeprüft**; belegt sind nur Input, Output und Cache-Read (Abschnitt 9) | Konservativ (eher zu hoch); nur das Budget ist betroffen |
+| P6 | Argumente von `messages.stream` | `system` mit `cache_control: ephemeral`, `thinking: {type: adaptive}`, `output_config: {effort}`: **ungeprüft** gegen die echte API; `make_sdk_client` ist ungetestet. Beides prüft der Live-Lauf in Schritt 9 | In Schritt 7 wird nichts gegen die API gerufen |
+| P7 | Feste Texte | Wortlaut der Hinweise für `refusal`, `max_tokens`, Abbruch, Kosten- und Kontextgrenze, feste Einleitung und der Vorlagentexte der Host-Züge steht in `agent/texts.py` (zahlenfrei, U-F1), deutsch und englisch; nur L4, `unavailable`, `auth` und die Vorlagen der Host-Züge stehen wörtlich im Plan | Plan nennt „fester Hinweis“, nicht den Wortlaut |
+| P8 | Prompt v1.1.0 | Nur `TURN_ENDED` ergänzt (Folge von L6, N5). Der halb-live-Satz nach L8 steht aus (Schritt 10). Ob der Prompt das Paar „Vorlagentext des Hosts + Systemnachricht“ erklären soll, ist offen und gehört in den halb-live-Satz | Ohne die Zeile schlägt der Konsistenztest an; inhaltliche Erweiterungen brauchen L8 |
+| P9 | Mehrere `tool_use` in der Einleitung (Z10) | Die Blöcke laufen durch den Dispatcher (Antwort `AWAITING_PEER_CONFIRMATION`); der Host zeigt die feste Einleitung | Z10 nennt nur das Ergebnis |
 
 ---
 
