@@ -181,7 +181,7 @@ def decide(command: str, cwd: str, now: datetime | None = None) -> list[str]:
             reasons.append(f"Erzwungener Push ({force}) ist immer blockiert.")
         if any(o in {"-C", "--git-dir", "--work-tree"} or o.startswith("--git-dir=") for o in push.global_opts):
             reasons.append("Push mit -C/--git-dir/--work-tree ist blockiert; push aus dem Projektverzeichnis.")
-    if "push_gate" in command:
+    if "push_gate.py" in command:
         reasons.append("push_gate.py und git push in einem Aufruf: getrennte Aufrufe, erst das Gate, dann der Push.")
     problem = marker_problem(cwd, now)
     if problem:

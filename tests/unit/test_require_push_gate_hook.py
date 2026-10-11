@@ -85,6 +85,11 @@ def test_chaining_the_gate_and_the_push_is_blocked_even_with_a_valid_marker(repo
         assert done.returncode == 2 and "getrennte Aufrufe" in done.stderr, command
 
 
+def test_mentioning_the_marker_file_is_not_chaining_the_gate(repo: Path) -> None:
+    _marker(repo)
+    assert _run(repo, "git push --dry-run origin main; ls .git/push_gate_ok").returncode == 0
+
+
 def test_a_marker_older_than_30_minutes_is_blocked(repo: Path) -> None:
     _marker(repo, age_minutes=31)
     done = _run(repo, "git push origin main")
