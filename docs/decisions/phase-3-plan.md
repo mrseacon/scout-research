@@ -1819,6 +1819,36 @@ Testbeschreibungen sind hier festgelegt; der Code folgt in Phase B.
 | P8 | Prompt v1.1.0 | Nur `TURN_ENDED` ergänzt (Folge von L6, N5). Der halb-live-Satz nach L8 steht aus (Schritt 10). Ob der Prompt das Paar „Vorlagentext des Hosts + Systemnachricht“ erklären soll, ist offen und gehört in den halb-live-Satz | Ohne die Zeile schlägt der Konsistenztest an; inhaltliche Erweiterungen brauchen L8 |
 | P9 | Mehrere `tool_use` in der Einleitung (Z10) | Die Blöcke laufen durch den Dispatcher (Antwort `AWAITING_PEER_CONFIRMATION`); der Host zeigt die feste Einleitung | Z10 nennt nur das Ergebnis |
 
+### 12.16 Review der Umsetzung Phase B (Subagent `reviewer`, Opus, 2026-10-11)
+
+Geprüft: Diff `origin/main..HEAD` (Commit bfd2cb3). Kein kritischer Befund. **Drei hohe Befunde (H1–H3) sind offen und
+nicht eingearbeitet; sie warten auf Entscheidung (Sean)** — alle drei wurden mit einem kurzen Skript gegen den Code
+reproduziert. Der Push ist bis dahin zurückgestellt. Die mittleren und niedrigen Befunde stehen hier zur Bearbeitung.
+
+| # | Stufe | Befund | Vorschlag des Reviews | Status |
+|---|---|---|---|---|
+| H1 | hoch | Nach einer Ausnahme zwischen `_commit` und dem Setzen der Ergebnisse (dispatch wirft, Strg+C, Z10) bleibt ein `tool_use` ohne `tool_result` im Verlauf; jeder Folgezug endet mit `PlacementError` (reproduziert) | `pending` direkt nach `_commit` mit `TURN_ENDED` für alle `tool_use`-IDs vorbelegen, Block für Block ersetzen; LT-17b um Invarianten und Folgezug erweitern | **offen, Entscheidung** |
+| H2 | hoch | Leere Modellantwort (`content == []`) wird angehängt, der Nutzer sieht nichts, danach `PlacementError` bei jedem Zug (reproduziert) | wie `unexpected_stop` behandeln: nicht anhängen, `pending` behalten, fester Hinweis; LT-Fall und U-P1-Fall | **offen, Entscheidung** |
+| H3 | hoch | Roher Tool-Name aus der Modellantwort geht in die Statuszeile des Hosts (`f"{name} …"`); eine Zahl im Namen erreicht den Nutzer (reproduziert) | nur bekannte Tool-Namen, feste Statustexte je Tool in `texts.py`; Test mit erfundenem Namen | **offen, Entscheidung** |
+| M1 | mittel | Ein von der API abgelehnter Anfrageteil (`BadRequestError`, etwa leerer Text) bleibt ausstehend; jeder Folgezug scheitert | `run_turn` weist leeren Text ab (`ValueError`); nach `bad_request` `pending` verwerfen oder Sitzung schließen (Abweichung von Z16 im Plan festhalten) | offen |
+| M2 | mittel | Gescheiterte Aufrufe (Stillstand, Frist, Strg+C) sind teilweise bezahlt, werden aber nicht verbucht; die Hartgrenze kann unbemerkt überschritten werden | `usage` aus `message_start`/`message_delta` mitzählen und an `ModelCallError` hängen; sonst konservativ schätzen; als Festlegung eintragen | offen |
+| M3 | mittel | U-F1 prüft nur `USER_TEXTS` und `HOST_TEMPLATES`, nicht Statusmeldungen, `FACT_*`, AST-Test auf neue Konstanten und `free_text`-Profil (SM-05); Abweichung steht nicht in 12.15 | Test erweitern oder als P10 in 12.15 eintragen | offen |
+| M4 | mittel | Mutationen überleben: `if self._closing or turn.corrections >= 1:` ohne `_closing` (P4 ungetestet), `except KeyboardInterrupt` in `_run_tools`; LT-36 prüft `reject` nicht | LT-49 mit Zahl im Text am Limit (erwartet `withheld`, ein Aufruf); Test mit `KeyboardInterrupt` aus `dispatch`; `run.reject()` in LT-36 | offen |
+| N1 | niedrig | `_intro` (Z10) prüft Text neben `tool_use` nicht, schreibt den rohen Tool-Namen ins Event (P3), kein `TURN_ENDED` bei Schließen/Abbruch, kein Tool-Limit | denselben Codepfad wie `_run_tools` nutzen | offen |
+| N2 | niedrig | Strg+C während eines laufenden Tools meldet `TURN_ENDED` („nicht ausgeführt“), obwohl Nebenwirkungen eingetreten sein können (etwa `propose_peer_set`) | `TOOL_TIMEOUT`/eigener Hinweis oder das echte Ergebnis behalten, wenn der Dispatch zurückkam | offen |
+| N3 | niedrig | Zugfrist nur zwischen Aufrufen und Tools geprüft; ein Zug kann bis etwa 600 s + 300 s dauern | Restfrist als Aufruffrist übergeben oder Toleranz im Plan festhalten | offen |
+| N4 | niedrig | `LoopConfig.call_seconds` und `stall_seconds` werden nicht gelesen; Client und Adapter haben eigene Defaults (12.8 „an einer Stelle“) | Werte aus der Konfiguration an Client und Adapter geben | offen |
+| N5 | niedrig | `FACT_*` nur deutsch (P7 sagt „deutsch und englisch“); `LoopConfig.language` kann von `ctx.output_language` abweichen | Sprache aus `ctx` ableiten oder im Konstruktor auf Gleichheit prüfen; P7 berichtigen | offen |
+| N6 | niedrig | Kein `_closing`-Schutz am Kopf von `_drive` vor `_send` | Schutz in der Tiefe ergänzen | offen |
+| N7 | niedrig | Ein eigener `stop_reason` der API für die Kontextgrenze (Name ungeprüft) landet als `FAILED` statt `CLOSED` | in `_unusable` abbilden, sobald belegt | offen |
+| N8 | niedrig | Scheitert der Korrekturaufruf, wird der ausstehende Korrektur-Host-Zug mit der nächsten Nutzerfrage zusammengelegt (inhaltlich irreführend) | Korrektur bei Fehler verwerfen erwägen | offen |
+| N9 | niedrig | A-H1 (AST) erkennt `getattr(...)` und Aliasse nicht | im Register vermerken | offen |
+
+**Hinweise aus dem Mutationslauf (`mutation-prober`, 35 Mutationen, keine zahnlos):** SG-14 hängt bei der Mutation
+`Shown("text", text)` nur an LT-05, SG-06 schlägt bei LT-20 und dem Dispatch-Test nicht an; mehrere Maßnahmen hängen
+je Mutation an einem einzigen Test (SG-03b, SG-03c, SG-05 (2), SG-07, SG-09, SG-11b, SG-12, SG-13 (2), SG-17).
+Das Register ist an zwei Stellen berichtigt (SG-11a Fragment, SG-03b Kontext).
+
 ---
 
 ## 13. Arbeitsweise mit Subagents und Guards (Sean, 2026-10-11)
