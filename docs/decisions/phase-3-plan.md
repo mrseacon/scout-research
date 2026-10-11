@@ -1793,32 +1793,59 @@ Testbeschreibungen sind hier festgelegt; der Code folgt in Phase B.
 
 ---
 
-## 13. Arbeitsweise mit Subagents (Sean, 2026-10-11)
+## 13. Arbeitsweise mit Subagents und Guards (Sean, 2026-10-11)
 
-Drei Subagent-Typen sind als Dateien unter `.claude/agents/` eingecheckt: `reviewer`, `push-check`, `corpus-adversary`.
-Sie prüfen, sie setzen nichts um.
+**Grundregel: Deterministische Prüfungen sind Skripte oder Tests; Agenten nur für Urteilsarbeit.** Was sich
+eindeutig als Ja/Nein berechnen lässt (Suite, Arbeitsstand, Geheimnisse im Diff, Push-Freigabe), ist Code mit Test.
+Ein Agent kommt dort ins Spiel, wo ein Urteil nötig ist (Review, Angriffsideen, Einordnung von Fehlern) oder wo
+Mutationen und Testläufe in einer isolierten Kopie nötig sind.
 
-| Typ | Werkzeuge | Aufgabe | Wann |
-|---|---|---|---|
-| `reviewer` | `Read`, `Grep`, `Glob` (kein `Bash`, kein Schreiben) | Kritisches Review eines Diffs gegen diesen Plan: Provenance, Gate, Allowlist, Secrets, Prompt-Injection, Testaussagekraft, Widersprüche | Vor dem Push in Schritt 7, 8 und 9 |
-| `push-check` | `Bash`, `Read` | a) volle Suite, b) `git status` und `.env`, c) Diff `origin/main..HEAD` auf echte Geheimnisse, d) `git log origin/main..HEAD`; meldet, pusht nie | Vor jedem Push |
-| `corpus-adversary` | `Read`, `Bash`, `Write` | Versucht, Number-Check und Slot-Grammatik zu brechen; schreibt Angriffsfälle samt erwartetem Ergebnis nach Policy (Abschnitt 11) in eine Datei im Scratchpad, ändert weder Korpus noch Code | Nach Änderungen an Check oder Prompt und in Schritt 10 |
+Vier Subagent-Typen liegen als Dateien unter `.claude/agents/`; die deterministischen Mittel sind
+`scripts/push_gate.py` und der Hook `.claude/hooks/require_push_gate.py` (Konfiguration `.claude/settings.json`).
+Der frühere Agent `push-check` entfällt (v1.6.16); seine Prüfungen sind jetzt `push_gate.py`.
+
+| Baustein | Auslöser | Modell | Eingabe | Ausgabe |
+|---|---|---|---|---|
+| `scripts/push_gate.py` (Skript, kein Agent) | Vor jedem Push, eigener Aufruf | — | Repo, `.env`, `scripts/push_gate_baseline.json` | Bericht a)–d), bei Erfolg Marker `.git/push_gate_ok`; Exit-Code ungleich 0 sonst |
+| Hook `require_push_gate.py` | Jeder Bash-Aufruf des Agenten (PreToolUse, PostToolUse) | — | Hook-JSON (`tool_input.command`, `cwd`) | Exit 2 mit Grund, oder Durchlass; nach echtem Push Marker löschen |
+| `reviewer` | Vor dem Push in Schritt 7, 8 und 9 | Opus | Diff als Datei (vom Hauptagenten geschrieben) | Befunde nach Schweregrad mit Fundstelle, Szenario, Vorschlag |
+| `mutation-prober` | Nach **jedem** Schritt, der Schutzmaßnahmen ändert | Sonnet | `docs/security-guards.md`, isolierter Worktree | Tabelle je Maßnahme: `angeschlagen` / `zahnlos` / `nicht anwendbar`; Testvorschläge für zahnlose |
+| `trace-triager` | Ab Schritt 9, nach jedem Lauf mit Fehlern | Sonnet | Pfade unter `runs/` (Trace-JSONL, Abschnitt 6) | Einordnung je Fehler: Prompt-Problem / Code-Fehler / Modell-Zufall / Artefakt der Testwelt, minimaler Korrekturvorschlag |
+| `corpus-adversary` | Nach Änderungen an Check oder Prompt, und in Schritt 10 | Sonnet | Policy (Abschnitt 11), Check, Korpus | Angriffsfälle samt Erwartung nach Policy in einer Datei im Scratchpad |
+
+| Typ | Werkzeuge | Schreibschutz |
+|---|---|---|
+| `reviewer` | `Read`, `Grep`, `Glob` | durch Werkzeugbeschränkung |
+| `trace-triager` | `Read`, `Grep`, `Glob` | durch Werkzeugbeschränkung; Geheimnisse nur per Anweisung |
+| `corpus-adversary` | `Read`, `Bash`, `Write` | nur per Anweisung |
+| `mutation-prober` | `Read`, `Grep`, `Glob`, `Edit`, `Bash`, `isolation: worktree` | Arbeitsverzeichnis isoliert; Hauptverzeichnis nur per Anweisung und Selbstprüfung (`git-dir` enthält `/worktrees/`) |
 
 **Regeln**
 
-1. **Reviewer:** Der Hauptagent schreibt den Diff in eine Datei und übergibt deren Pfad; der Reviewer hat kein `Bash`
+1. **Push-Prozess.** Zuerst `scripts/push_gate.py` in einem eigenen Aufruf; der Hauptagent gibt die Ausgabe wörtlich
+   wieder. Danach, in einem eigenen späteren Aufruf, `git push origin main` (nie `--force`). Der Hook blockiert den
+   Push, wenn der Marker fehlt, älter als 30 Minuten ist oder nicht zu HEAD passt, bei jedem erzwungenen Push, und
+   wenn Gate und Push im selben Befehl stehen. Nach einem erfolgreichen Push löscht der Hook den Marker; ein
+   `--dry-run` löscht ihn nicht.
+2. **Grenzen des Hooks.** Er sieht nur Bash-Aufrufe des Agenten, nicht das Terminal des Nutzers, und erkennt
+   `git push` in der Form `git [Optionen] push` (auch hinter `&&`, `;`, `bash -c`, `env`); Aliasse oder Skripte, die
+   intern pushen, erkennt er nicht. Der Hook ist ein Schutz gegen Versehen, keine Sicherheitsgrenze.
+3. **Reviewer:** Der Hauptagent schreibt den Diff in eine Datei und übergibt deren Pfad; der Reviewer hat kein `Bash`
    und holt sich den Diff nicht selbst. Seine Befunde sind Vorschläge. Was daraus folgt, entscheidet Sean, und
    Festlegungen kommen mit Eintrag in den Plan.
-2. **Push-Check und Push bleiben getrennte Aufrufe.** Der Standardprozess: `push-check` läuft (a bis d), der Hauptagent
-   gibt das Ergebnis wörtlich wieder, erst danach folgt der Push als eigener Aufruf (e). Ein Push im selben Aufruf wie
-   die Prüfung ist ausgeschlossen. `push-check` selbst pusht nie.
-3. **Corpus-Adversary** ändert den Prüfkorpus nicht selbst. Übernommen wird ein Fall erst, nachdem Sean oder der
+4. **Register.** `docs/security-guards.md` führt jede Schutzmaßnahme mit Modul, Tests und Mutation. Ein Schritt, der
+   Schutzmaßnahmen ändert oder hinzufügt, ändert das Register im selben Commit und lässt danach den
+   `mutation-prober` laufen; `zahnlos` ist ein Befund, der vor dem Push zu bearbeiten ist.
+5. **Corpus-Adversary** ändert den Prüfkorpus nicht selbst. Übernommen wird ein Fall erst, nachdem Sean oder der
    Hauptagent das erwartete Ergebnis gegen die Policy bestätigt hat; die Erwartung folgt der Policy, nicht dem Code.
-4. **Keine Umsetzung durch Subagents.** Die Schritte 7 bis 10 setzt der Hauptagent um. Subagents werden nicht für
-   Code, Tests, Plan oder Doku eingesetzt, die in ein Commit gehen.
-5. **Berichte sind Modellausgabe, keine Freigabe.** „Push möglich“ von `push-check` ersetzt nicht die Entscheidung des
+6. **Trace-Triager** ändert nichts und gibt keine tokenähnlichen Zeichenketten aus; ungeschwärzte Werte im Trace
+   meldet er nur als Fundstelle (SG-09). Seine Einordnung ist ein Vorschlag; bei n = 1 ist „Modell-Zufall“
+   vorläufig.
+7. **Keine Umsetzung durch Subagents.** Die Schritte 7 bis 10 setzt der Hauptagent um. Subagents werden nicht für
+   Code, Tests, Plan oder Doku eingesetzt, die in ein Commit gehen; der `mutation-prober` schlägt Tests nur vor.
+8. **Berichte sind Modellausgabe, keine Freigabe.** Ein bestandenes Gate ersetzt nicht die Entscheidung des
    Menschen, und ein Review ohne Befund ist kein Beweis, dass es keine gibt.
-6. **Grenzen der Mittel:** Der Schreibschutz von `reviewer` beruht auf der Werkzeugbeschränkung. `push-check` und
-   `corpus-adversary` haben `Bash` beziehungsweise `Write`; dort gilt der Schreibschutz nur per Anweisung in der
-   Definition, nicht durch das Werkzeug. Agent-Definitionen werden beim Start einer Sitzung geladen; eine Änderung
-   wirkt erst in der nächsten Sitzung.
+9. **Laden der Definitionen.** Agent-Definitionen werden beim Sitzungsstart gelesen und bei Änderungen in
+   bestehenden Verzeichnissen beobachtet; ein neues Verzeichnis oder ein Hook in `.claude/settings.json` wirkt unter
+   Umständen erst in einer neuen Sitzung. Der Hook war in der Sitzung, in der er angelegt wurde, sofort wirksam
+   (Probe: `git push --dry-run` ohne Marker wurde blockiert).
