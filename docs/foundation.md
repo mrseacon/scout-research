@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.14 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.15 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -1190,7 +1190,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.12 | 2026-10-11 | Phase 3, Schritt 7: Review des Loop-Designs (Commit 49067d0, Subagent `reviewer`) in Plan 12.14 überführt (Opus). Befunde H1, M1–M7, N1–N7 gegen Code und Doku geprüft (M5, N1 abgeschwächt). Neue Belege: Platzierung von Systemnachrichten mitten im Gespräch und SDK-Timeouts (Plan, Abschnitt 9). Trennung Nutzereingabe/Tool-Ergebnisse strukturell spezifiziert (SM-01), Zustandstabelle Z1–Z20, Bestätigung in der halb-live-Evaluation; eindeutige Korrekturen eingetragen (Lader `agent/prompt_loader.py`, Log-Schwärzung am Handler, Hash der Tool-Liste, LT-14/16). Offen: V1–V6, L1–L9. Kein Code geändert. |
 | 1.6.13 | 2026-10-11 | Phase 3, Schritt 7: Entscheidungen V1–V6 (Review des Loop-Designs) und L1–L9 in Plan, Abschnitt 12 eingetragen (Sean): Host-Zug mit festem Vorlagentext, der nie Nutzereingabe ist (V1, ersetzt L5); keine Korrekturrunde für die Einleitung (V2); interner Stream mit unsichtbarem Puffer, Fristen 60 s/300 s/10 min und Kostenprüfung nach jedem Aufruf (V3, ersetzt L2); Host-API `reject_proposal` neben `confirm_peer_set`, beides kein Tool und im Trace (V4); `max_tokens` → `FAILED` ohne Retry (V5); Bestätigungsregel je Fall der halb-live-Evaluation (V6); L9: Haiku-Vergleich gestrichen. Bewertungsgrößen B1–B13 bestätigt (harte Ausfälle: durchgehender Zahlenversuch im Freitext, umgangenes Gate; sonst weiche Schwellen; jedes halb-live-Szenario mindestens dreimal, k von n). Abschnitte 4, 5, 12.3–12.9 angeglichen, Register der Schutzmaßnahmen SM-01 bis SM-09 mit Testabdeckung (12.14.8), neue Tests LT-47 bis LT-50, U-V1, U-P1, U-M5, E-04, A-E1. Kein Code geändert. |
 | 1.6.14 | 2026-10-11 | Phase 3, Schritt 7: Klarstellungen zu Plan, Abschnitt 12 (Sean): B1 hart nur bei gezeigtem Rohtext, blockierte Versuche sind eine weiche Versuchsrate; feste Texte (L4-Hinweis, feste Einleitung, Vorlagen) per Test zahlenfrei (U-F1); bei Kosten- oder Kontextgrenze bleiben berechnete und geprüfte Ergebnisse sichtbar und der Trace wird geschlossen; `max_tokens` 8.000 statt 16.000 bei Frist 300 s je Aufruf; Prozentwerte nur als Leserichtung. Kein Code geändert. |
+| 1.6.15 | 2026-10-11 | Phase 3, Schritt 7: Konfigurationsfeld `anthropic_compare_model` und `ANTHROPIC_COMPARE_MODEL` entfernt (Folge von L9, Haiku-Vergleich gestrichen); Test und `.env.example` angepasst. Kleiner Code-Commit vor Phase B. |
 
 ---
 
-*Ende Dokumentversion 1.6.14*
+*Ende Dokumentversion 1.6.15*

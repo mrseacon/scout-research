@@ -15,10 +15,8 @@ class Settings(BaseSettings):
     finnhub_api_key: str | None = None
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-5-5"
-    anthropic_compare_model: str | None = None
-    """Optionales Vergleichsmodell für Evaluationsläufe (Phase 5), z. B. `claude-haiku-4-5-20251001`."""
     anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
-    """Effort-Stufe (`output_config.effort`); Haiku 4.5 unterstützt sie nicht (Adapter-Thema, Schritt 7)."""
+    """Effort-Stufe (`output_config.effort`); der Modellvergleich läuft über diese Stufen (Plan, L9)."""
     output_language: Literal["de", "en"] = "de"
 
     edgar_requests_per_second: int = 10
@@ -41,11 +39,6 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return cls.model_fields[info.field_name].default
         return value
-
-    @field_validator("anthropic_compare_model", mode="before")
-    @classmethod
-    def _blank_compare_model_is_none(cls, value: object) -> object:
-        return None if isinstance(value, str) and not value.strip() else value
 
     @property
     def edgar_user_agent(self) -> str:

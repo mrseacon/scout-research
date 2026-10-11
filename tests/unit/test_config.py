@@ -16,30 +16,27 @@ def _settings(**overrides) -> Settings:
 def test_agent_defaults():
     settings = _settings()
     assert settings.anthropic_model == "claude-sonnet-5-5"
-    assert settings.anthropic_compare_model is None
     assert settings.anthropic_effort == "medium"
     assert settings.output_language == "de"
+    assert not hasattr(settings, "anthropic_compare_model")  # Haiku-Vergleich gestrichen (Plan, L9)
 
 
 def test_agent_settings_from_environment(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_MODEL", "claude-opus-5-5")
-    monkeypatch.setenv("ANTHROPIC_COMPARE_MODEL", "claude-haiku-4-5-20251001")
     monkeypatch.setenv("ANTHROPIC_EFFORT", "high")
     monkeypatch.setenv("OUTPUT_LANGUAGE", "en")
     settings = _settings()
     assert settings.anthropic_model == "claude-opus-5-5"
-    assert settings.anthropic_compare_model == "claude-haiku-4-5-20251001"
     assert settings.anthropic_effort == "high"
     assert settings.output_language == "en"
 
 
 def test_blank_values_fall_back_to_defaults(monkeypatch):
     # `FOO=` in der .env darf weder ein leeres Modell noch eine leere Sprache ergeben.
-    for name in ("ANTHROPIC_MODEL", "ANTHROPIC_COMPARE_MODEL", "ANTHROPIC_EFFORT", "OUTPUT_LANGUAGE"):
+    for name in ("ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "OUTPUT_LANGUAGE"):
         monkeypatch.setenv(name, "")
     settings = _settings()
     assert settings.anthropic_model == "claude-sonnet-5-5"
-    assert settings.anthropic_compare_model is None
     assert settings.anthropic_effort == "medium"
     assert settings.output_language == "de"
 
