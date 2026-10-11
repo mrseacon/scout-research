@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.11 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.12 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -1117,7 +1117,7 @@ scout-research/
 │   ├── agent/                     # L4
 │   │   ├── prompts/system.md      [neu] Systemprompt v1.0.0 (Schritt 7, Phase A)
 │   │   ├── loop.py                [fehlt] Phase 3
-│   │   └── prompts.py             [fehlt] Phase 3
+│   │   └── prompt_loader.py       [fehlt] Phase 3 (Lader für prompts/system.md; Plan 12.14, N1)
 │   ├── export/                    # L5  (nur __init__.py)
 │   │   ├── excel.py               [fehlt] Phase 4
 │   │   └── markdown.py            [fehlt] Phase 4
@@ -1187,7 +1187,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.9 | 2026-10-09 | Phase 3, Schritt 6, Phase B (Umsetzung): `submit_commentary` mit Slot-Rendering (`co`, `stat`, `basis`, `warn`, `fin`, `mkt`), Backstop gegen nackte Zahlen (Profile `slot_text`/`rationale`; `free_text` entfällt mit O1 B), Pflichtwarnungen (Marker plus automatischer Block), feste Basiszeile, zwei Korrekturrunden mit Rückhalt (neuer Code `COMMENTARY_WITHHELD`); Warn-/Ausschlussvorlagen zweisprachig; `tools/numbers.py` entfällt. Entscheidungen O1–O7 (Sean, 2026-10-09) in Plan 11.7; Prüfkorpus 239 Fälle als Abnahmetest. Neu in 7.3 und 15. |
 | 1.6.10 | 2026-10-09 | Phase 3, Schritt 7, Phase A (Opus): Systemprompt v1.0.0 als versionierte Datei (`agent/prompts/system.md`; Zahlenregel für jeden Text, sechs Slot-Namensräume mit geprüften Beispielen, Gate, Fehlercodes nach Handlungsgruppen, Injektionsschutz, Umfang, Sprache aus `output_language`), Konsistenztest gegen Tools, Fehlercodes und Slot-Grammatik; Design der Agent-Schleife, Testszenarien und Evaluationskriterien des Prompts in Plan, Abschnitt 12. Offen: L1–L9. Keine Schleife implementiert. |
 | 1.6.11 | 2026-10-11 | Arbeitsweise: drei Subagent-Typen (`reviewer`, `push-check`, `corpus-adversary`) unter `.claude/agents/` eingecheckt; Einsatzregeln in Plan, Abschnitt 13 (Review vor Push in Schritt 7–9, Push-Check vor jedem Push, Adversary nach Änderungen an Check oder Prompt und in Schritt 10; keine Umsetzung durch Subagents). Kein Code geändert. |
+| 1.6.12 | 2026-10-11 | Phase 3, Schritt 7: Review des Loop-Designs (Commit 49067d0, Subagent `reviewer`) in Plan 12.14 überführt (Opus). Befunde H1, M1–M7, N1–N7 gegen Code und Doku geprüft (M5, N1 abgeschwächt). Neue Belege: Platzierung von Systemnachrichten mitten im Gespräch und SDK-Timeouts (Plan, Abschnitt 9). Trennung Nutzereingabe/Tool-Ergebnisse strukturell spezifiziert (SM-01), Zustandstabelle Z1–Z20, Bestätigung in der halb-live-Evaluation; eindeutige Korrekturen eingetragen (Lader `agent/prompt_loader.py`, Log-Schwärzung am Handler, Hash der Tool-Liste, LT-14/16). Offen: V1–V6, L1–L9. Kein Code geändert. |
 
 ---
 
-*Ende Dokumentversion 1.6.11*
+*Ende Dokumentversion 1.6.12*
