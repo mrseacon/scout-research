@@ -1484,3 +1484,35 @@ SEC-Daten zu manipulieren. Ergebnisse je Prompt-Version im Trace und in einer Ta
 | L7 | Kontextgrenze der Sitzung | **A** harte Grenze (Vorschlag 150.000 Input-Tokens) → Sitzung schließen; **B** Kompaktierung älterer Züge | **A** in Phase 3. Kompaktierung widerspricht „Verlauf nur anhängen“ und braucht eigene Prüfung |
 | L8 | Prozess bei Prompt-Änderungen | **A** neue Version + halb-live-Satz vor jedem Merge; **B** neue Version, Evaluation nur vor Meilensteinen | **A** für inhaltliche Änderungen, B für reine Formulierungen ohne Regeländerung |
 | L9 | Vergleichslauf mit Haiku 4.5 | **A** streichen (Retirement „not sooner than 2026-10-15“, keine Systemnachrichten mitten im Gespräch, eigener Codepfad); **B** behalten, solange verfügbar | **A.** Vergleich stattdessen über Effort-Stufen (`low`/`medium`/`high`) von Sonnet 5.5; vereinfacht den Adapter |
+
+---
+
+## 13. Arbeitsweise mit Subagents (Sean, 2026-10-11)
+
+Drei Subagent-Typen sind als Dateien unter `.claude/agents/` eingecheckt: `reviewer`, `push-check`, `corpus-adversary`.
+Sie prüfen, sie setzen nichts um.
+
+| Typ | Werkzeuge | Aufgabe | Wann |
+|---|---|---|---|
+| `reviewer` | `Read`, `Grep`, `Glob` (kein `Bash`, kein Schreiben) | Kritisches Review eines Diffs gegen diesen Plan: Provenance, Gate, Allowlist, Secrets, Prompt-Injection, Testaussagekraft, Widersprüche | Vor dem Push in Schritt 7, 8 und 9 |
+| `push-check` | `Bash`, `Read` | a) volle Suite, b) `git status` und `.env`, c) Diff `origin/main..HEAD` auf echte Geheimnisse, d) `git log origin/main..HEAD`; meldet, pusht nie | Vor jedem Push |
+| `corpus-adversary` | `Read`, `Bash`, `Write` | Versucht, Number-Check und Slot-Grammatik zu brechen; schreibt Angriffsfälle samt erwartetem Ergebnis nach Policy (Abschnitt 11) in eine Datei im Scratchpad, ändert weder Korpus noch Code | Nach Änderungen an Check oder Prompt und in Schritt 10 |
+
+**Regeln**
+
+1. **Reviewer:** Der Hauptagent schreibt den Diff in eine Datei und übergibt deren Pfad; der Reviewer hat kein `Bash`
+   und holt sich den Diff nicht selbst. Seine Befunde sind Vorschläge. Was daraus folgt, entscheidet Sean, und
+   Festlegungen kommen mit Eintrag in den Plan.
+2. **Push-Check und Push bleiben getrennte Aufrufe.** Der Standardprozess: `push-check` läuft (a bis d), der Hauptagent
+   gibt das Ergebnis wörtlich wieder, erst danach folgt der Push als eigener Aufruf (e). Ein Push im selben Aufruf wie
+   die Prüfung ist ausgeschlossen. `push-check` selbst pusht nie.
+3. **Corpus-Adversary** ändert den Prüfkorpus nicht selbst. Übernommen wird ein Fall erst, nachdem Sean oder der
+   Hauptagent das erwartete Ergebnis gegen die Policy bestätigt hat; die Erwartung folgt der Policy, nicht dem Code.
+4. **Keine Umsetzung durch Subagents.** Die Schritte 7 bis 10 setzt der Hauptagent um. Subagents werden nicht für
+   Code, Tests, Plan oder Doku eingesetzt, die in ein Commit gehen.
+5. **Berichte sind Modellausgabe, keine Freigabe.** „Push möglich“ von `push-check` ersetzt nicht die Entscheidung des
+   Menschen, und ein Review ohne Befund ist kein Beweis, dass es keine gibt.
+6. **Grenzen der Mittel:** Der Schreibschutz von `reviewer` beruht auf der Werkzeugbeschränkung. `push-check` und
+   `corpus-adversary` haben `Bash` beziehungsweise `Write`; dort gilt der Schreibschutz nur per Anweisung in der
+   Definition, nicht durch das Werkzeug. Agent-Definitionen werden beim Start einer Sitzung geladen; eine Änderung
+   wirkt erst in der nächsten Sitzung.
