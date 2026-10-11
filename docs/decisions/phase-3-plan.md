@@ -371,6 +371,7 @@ schon für `user_requested_additions`. **(Q3, bestätigt.)**
 | `LOOP_GUARD` | nein | gleicher Aufruf (Tool + Argumente) nach nicht wiederholbarem Fehler, bzw. zum dritten Mal nach einem wiederholbaren; der Speicher dazu wird bei einer Nutzernachricht, einer Bestätigung und einem Erfolg des Aufrufs geleert |
 | `UNKNOWN_TOOL` | nein | Tool-Name nicht in der Tool-Liste (z. B. ein halluziniertes `confirm_peer_set`); jeder `tool_use`-Block braucht ein `tool_result` |
 | `AWAITING_PEER_CONFIRMATION` | nein | weiterer `tool_use`-Block in derselben Antwort nach erfolgreichem `propose_peer_set`; wird nicht ausgeführt |
+| `TURN_ENDED` | nein | `tool_use`-Block, der nach dem Ende des Zugs oder der Sitzung nicht mehr ausgeführt wird (Kommentar angenommen oder zurückgehalten, Limit, Kosten- oder Kontextgrenze, Abbruch); vom Loop vergeben, nie vom Dispatcher (L6, 12.14.4) |
 | `INTERNAL_ERROR` | nein | unerwartete Ausnahme; Meldung bereinigt, Stacktrace nur im Trace |
 
 Fehlende Marktdaten sind kein Fehler, sondern Warnings im Ergebnis.

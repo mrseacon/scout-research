@@ -699,6 +699,11 @@ class ToolOutcome:
         return json.dumps(self.content, ensure_ascii=False)
 
 
+def coded_outcome(code: str) -> ToolOutcome:
+    """Fehlerergebnis ohne Ausführung — für Codes, die der Loop selbst vergibt (`TURN_ENDED`)."""
+    return ToolOutcome(is_error=True, content=make_error(code).to_content())
+
+
 def _error_outcome(ctx: ToolContext, error: ToolError, exc: BaseException | None = None) -> ToolOutcome:
     trace: dict[str, Any] | None = None
     if exc is not None:

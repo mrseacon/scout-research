@@ -46,9 +46,14 @@ class Deadline:
     def __init__(self, budget_seconds: float, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
         self._end = clock() + budget_seconds
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Kooperativer Abbruch (Strg+C, Z18): Das laufende Tool endet bei der nächsten Prüfung."""
+        self._cancelled = True
 
     def check(self) -> None:
-        if self._clock() > self._end:
+        if self._cancelled or self._clock() > self._end:
             raise fail("TOOL_TIMEOUT")
 
 
@@ -78,11 +83,11 @@ class Rejected:
 
 @dataclass(frozen=True)
 class CorrectionRequest:
-    """Host-Ereignis: Die letzte Modellantwort wurde nicht gezeigt. `problems` sind `Problem.as_detail()`-Einträge;
-    der Loop übernimmt daraus nur Code, Art, Hinweis aus der Vorlage und einen gefilterten Ausschnitt (12.14.5)."""
+    """Host-Ereignis: Die letzte Modellantwort wurde nicht gezeigt. `problems` tragen je Problem `code`, `kind`,
+    `start`, `end` und `match`; der Loop übernimmt daraus nur Code, Art, Position, den Hinweis aus der Vorlage des
+    Codes und — bei Zahl-Funden — einen gefilterten Ausschnitt (12.14.5, SM-06)."""
 
     problems: tuple[dict[str, Any], ...] = ()
-    positions: tuple[tuple[int, int], ...] = ()
 
 
 HostEvent = Confirmed | Rejected | CorrectionRequest

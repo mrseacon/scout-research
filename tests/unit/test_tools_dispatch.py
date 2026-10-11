@@ -166,6 +166,13 @@ def _scn_internal():
     return _err(ctx, "get_market_data", ticker="NVDA")
 
 
+def _scn_turn_ended():
+    """Vom Loop vergeben (Block nach Zugende, L6), nicht vom Dispatcher."""
+    from scout_research.tools.handlers import coded_outcome
+
+    return coded_outcome("TURN_ENDED")
+
+
 SCENARIOS = {
     "INVALID_ARGUMENTS": _scn_invalid_arguments, "UNKNOWN_HANDLE": _scn_unknown_handle,
     "PERIOD_NOT_AVAILABLE": _scn_period_not_available, "HISTORICAL_VALUATION_NOT_SUPPORTED": _scn_historical,
@@ -178,7 +185,7 @@ SCENARIOS = {
     "FRAME_YEAR_UNRESOLVED": _scn_frame_year, "DATA_NOT_FOUND": _scn_data_not_found,
     "UPSTREAM_UNAVAILABLE": _scn_unavailable, "UPSTREAM_RATE_LIMITED": _scn_rate_limited,
     "TOOL_TIMEOUT": _scn_timeout, "LOOP_GUARD": _scn_loop_guard, "UNKNOWN_TOOL": _scn_unknown_tool,
-    "AWAITING_PEER_CONFIRMATION": _scn_awaiting, "INTERNAL_ERROR": _scn_internal,
+    "AWAITING_PEER_CONFIRMATION": _scn_awaiting, "INTERNAL_ERROR": _scn_internal, "TURN_ENDED": _scn_turn_ended,
 }
 
 

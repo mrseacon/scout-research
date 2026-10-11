@@ -57,6 +57,7 @@ ERROR_SPECS: dict[str, ErrorSpec] = {
     "LOOP_GUARD": ErrorSpec(False, "Dieser identische Aufruf ist bereits fehlgeschlagen.", "Wiederhole ihn nicht; ändere die Eingabe oder erkläre dem Nutzer, was fehlt."),
     "UNKNOWN_TOOL": ErrorSpec(False, "Dieses Tool gibt es nicht.", "Verwende nur Tools aus der Tool-Liste. Eine Bestätigung des Peer-Sets ist kein Tool, sondern Sache des Menschen."),
     "AWAITING_PEER_CONFIRMATION": ErrorSpec(False, "Das Peer-Set wartet auf die Bestätigung durch den Menschen; bis dahin werden keine weiteren Tools ausgeführt.", "Beende deinen Zug mit einer kurzen Einleitung zum Vorschlag."),
+    "TURN_ENDED": ErrorSpec(False, "Der Zug war bereits beendet; dieser Aufruf wurde nicht ausgeführt.", "Rufe das Tool nicht erneut auf; der Nutzer hat die Antwort der Anwendung schon bekommen oder das Limit des Zugs ist erreicht."),
     "INTERNAL_ERROR": ErrorSpec(False, "Es ist ein interner Fehler aufgetreten.", "Erkläre dem Nutzer, dass die Anfrage technisch nicht beantwortet werden konnte; gib keine technischen Details weiter."),
 }
 

@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-5-5"
     anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     """Effort-Stufe (`output_config.effort`); der Modellvergleich läuft über diese Stufen (Plan, L9)."""
+    anthropic_max_tokens: int = 8000
+    """`max_tokens` je Modellaufruf inkl. adaptivem Thinking (Plan 12.8; Sean, 2026-10-11). Wer die Grenze erreicht,
+    wird verworfen (V5); es gibt keinen Retry."""
     output_language: Literal["de", "en"] = "de"
 
     edgar_requests_per_second: int = 10
@@ -30,6 +33,18 @@ class Settings(BaseSettings):
                 "EDGAR_CONTACT_EMAIL muss eine echte Kontakt-Adresse sein "
                 "(SEC Fair Access Policy verlangt einen aussagekräftigen User-Agent)."
             )
+        return value
+
+    @field_validator("anthropic_max_tokens", mode="before")
+    @classmethod
+    def _blank_max_tokens_is_default(cls, value: object) -> object:
+        return 8000 if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("anthropic_max_tokens")
+    @classmethod
+    def _positive_max_tokens(cls, value: int) -> int:
+        if value < 256:
+            raise ValueError("ANTHROPIC_MAX_TOKENS muss mindestens 256 sein.")
         return value
 
     @field_validator("anthropic_model", "anthropic_effort", "output_language", mode="before")
