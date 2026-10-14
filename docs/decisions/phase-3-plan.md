@@ -1907,3 +1907,4 @@ Der frühere Agent `push-check` entfällt (v1.6.16); seine Prüfungen sind jetzt
    bestehenden Verzeichnissen beobachtet; ein neues Verzeichnis oder ein Hook in `.claude/settings.json` wirkt unter
    Umständen erst in einer neuen Sitzung. Der Hook war in der Sitzung, in der er angelegt wurde, sofort wirksam
    (Probe: `git push --dry-run` ohne Marker wurde blockiert).
+10. **README.** Nach jedem Meilenstein (Schritt 9, Phase 4, Phase 5) wird die Status-Tabelle im README aktualisiert; Zahlen darin tragen ein Datum und werden neu gezählt.
