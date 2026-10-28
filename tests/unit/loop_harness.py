@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 from typing import Any, Callable
 
+from scout_research.agent import texts
 from scout_research.agent.budgets import LoopConfig, Usage
 from scout_research.agent.loop import AgentLoop, TurnResult
 from scout_research.agent.model_client import (
@@ -110,11 +111,13 @@ class Run:
 
     def assert_invariants(self) -> None:
         """Verlauf gültig, auch mit dem ausstehenden Teil; jede Anfrage erweitert die vorige (der Client prüft das
-        bei jedem Aufruf); System und Tools sind in allen Anfragen identisch."""
+        bei jedem Aufruf); System und Tools sind in allen Anfragen identisch; jede Statuszeile ist ein fester Text."""
         history = self.loop.history
         probe = list(history) + [{"role": "user", "content": [*map(dict, self.loop.pending.blocks), text_block("x")]}]
         check_placement(probe)
         assert len({(r.system, str(r.tools)) for r in self.client.requests}) <= 1
+        language = self.loop.config.language  # Statuszeile nur aus festen Texten (H3, SG-14)
+        assert set(self.status) <= {*texts.TOOL_STATUS[language].values(), texts.user_text(language, "status_working")}
 
     def last_user_text(self, request_index: int = -1) -> str:
         request = self.client.requests[request_index]

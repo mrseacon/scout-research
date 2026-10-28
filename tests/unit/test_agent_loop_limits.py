@@ -1,4 +1,4 @@
-"""Schleifen-Szenarien zu Budgets, Abbrüchen und Fehlern: LT-14/15/18–24, LT-40, LT-43–46, LT-49, LT-51, LT-53,
+"""Schleifen-Szenarien zu Budgets, Abbrüchen und Fehlern: LT-14/15/18–24, LT-40, LT-43–46, LT-49, LT-51/51b, LT-53/53b,
 Z17, Z20."""
 
 from __future__ import annotations
@@ -9,11 +9,11 @@ import pytest
 
 from scout_research.agent import texts
 from scout_research.agent.budgets import Usage
-from scout_research.agent.loop import LoopBusyError, LoopState, SessionClosedError
+from scout_research.agent.loop import LoopBusyError, LoopState, Pending, SessionClosedError
 from scout_research.agent.model_client import ModelCallError, Streamed
 from scout_research.tools.handlers import dispatch as real_dispatch
 from scout_research.tools.session import HumanInput
-from tests.unit.loop_harness import Run, codes_in, reply, say, shown_texts, use
+from tests.unit.loop_harness import Run, codes_in, reply, say, shown_texts, text_block, use
 from tests.unit.tool_world import NVDA_CIK, standard_world
 
 
@@ -236,6 +236,36 @@ def test_lt_51_an_interrupt_between_commit_and_results_leaves_a_valid_history_an
     run.loop._on_status = None
     assert shown_texts(run.say("Und jetzt?")) == ["Jetzt klappt es."]
     assert [codes_in(r) for r in run.tool_results(-1)] == ["TURN_ENDED", "TURN_ENDED"]
+    run.assert_invariants()
+
+
+def test_lt_51b_results_before_the_interrupt_stay_and_only_the_rest_is_turn_ended() -> None:
+    statuses: list[str] = []
+
+    def status(text: str) -> None:  # Strg+C in der Statuszeile des zweiten Tools: das erste ist schon gelaufen
+        statuses.append(text)
+        if len(statuses) == 3:
+            raise KeyboardInterrupt
+
+    spy = _Spy()
+    resolve = ("resolve_company", {"query": "NVDA"})
+    run = _run([use(resolve, resolve), say("Jetzt klappt es.")], spy)
+    run.loop._on_status = status
+    result = run.say("Mach Comps für NVDA")
+    assert result.outcome == "failed" and result.reason == "interrupted" and spy.calls == ["resolve_company"]
+    first, second = (json.loads(b["content"]) for b in run.loop.pending.blocks)
+    assert first["status"] == "resolved" and first["company"]["cik"] == NVDA_CIK and codes_in(second) == "TURN_ENDED"
+    run.assert_invariants()
+
+
+def test_lt_53b_tool_use_stop_with_text_but_without_a_block_is_appended_and_reported_as_unexpected() -> None:
+    run = _run([reply(text_block("Ich rufe gleich ein Tool auf."), stop="tool_use"), say("Jetzt klappt es.")])
+    result = run.say("Frage eins")
+    assert result.outcome == "failed" and result.reason == "unexpected_stop"
+    assert [e["empty"] for e in run.loop.events if e["event"] == "unusable_response"] == [False]
+    assert run.loop.history[-1]["role"] == "assistant" and run.loop.pending == Pending()
+    run.assert_invariants()
+    assert shown_texts(run.say("Frage zwei")) == ["Jetzt klappt es."]
     run.assert_invariants()
 
 

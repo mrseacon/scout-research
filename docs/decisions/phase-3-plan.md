@@ -371,7 +371,7 @@ schon für `user_requested_additions`. **(Q3, bestätigt.)**
 | `LOOP_GUARD` | nein | gleicher Aufruf (Tool + Argumente) nach nicht wiederholbarem Fehler, bzw. zum dritten Mal nach einem wiederholbaren; der Speicher dazu wird bei einer Nutzernachricht, einer Bestätigung und einem Erfolg des Aufrufs geleert |
 | `UNKNOWN_TOOL` | nein | Tool-Name nicht in der Tool-Liste (z. B. ein halluziniertes `confirm_peer_set`); jeder `tool_use`-Block braucht ein `tool_result` |
 | `AWAITING_PEER_CONFIRMATION` | nein | weiterer `tool_use`-Block in derselben Antwort nach erfolgreichem `propose_peer_set`; wird nicht ausgeführt |
-| `TURN_ENDED` | nein | `tool_use`-Block, der nach dem Ende des Zugs oder der Sitzung nicht mehr ausgeführt wird (Kommentar angenommen oder zurückgehalten, Limit, Kosten- oder Kontextgrenze, Abbruch); vom Loop vergeben, nie vom Dispatcher (L6, 12.14.4) |
+| `TURN_ENDED` | nein | `tool_use`-Block, der nach dem Ende des Zugs oder der Sitzung nicht mehr ausgeführt wird (Kommentar angenommen oder zurückgehalten, Limit, Kosten- oder Kontextgrenze, Abbruch); vom Loop vergeben, nie vom Dispatcher (L6, 12.14.4); seit 12.17 auch für Blöcke, deren Ergebnis eine Ausnahme im Loop nach dem Commit verhindert hat (H1) |
 | `INTERNAL_ERROR` | nein | unerwartete Ausnahme; Meldung bereinigt, Stacktrace nur im Trace |
 
 Fehlende Marktdaten sind kein Fehler, sondern Warnings im Ergebnis.
@@ -1674,11 +1674,15 @@ Modellantwort. Scheitert ein Aufruf, bleibt der Anfrageteil ausstehend. Der näc
 Betreiber-Fakten in Reihenfolge. So stehen nie zwei `user`-Turns hintereinander, und keine Systemnachricht wird von einem
 `user`-Turn gefolgt.
 
-**Platzierungsprüfer** (`model_client.py`, vor jedem Senden, Ausnahme bei Verstoß; Invariante in jedem LT):
+**Platzierungsprüfer** (`model_client.py`, vor jedem Senden, Ausnahme bei Verstoß; Invariante in jedem LT; Stand
+nach 12.15 P1 und 12.17, maßgeblich ist `check_placement`):
+- Der erste Eintrag ist `user`, der letzte `user` oder `system` (kein Prefill).
 - Jede `system`-Nachricht folgt direkt auf einen `user`-Turn, dessen letzter Block ein `text`-Block ist, und ist der
-  letzte Eintrag.
-- Jedes `tool_use` hat genau ein `tool_result` im unmittelbar folgenden `user`-Turn.
+  letzte Eintrag oder wird direkt von einem `assistant`-Turn gefolgt (P1).
+- Jedes `tool_use` hat genau ein `tool_result` im unmittelbar folgenden `user`-Turn, und dort steht kein `tool_result`
+  ohne `tool_use` des vorangehenden `assistant`-Turns.
 - Keine zwei aufeinanderfolgenden Turns derselben Rolle.
+- Jeder `assistant`-Turn hat Inhalt: ein `tool_use` oder Text, der nicht nur Leerraum ist (12.17, H2).
 
 #### 12.14.5 Korrektur-Rückmeldung (M5) sowie Streaming, Fristen und Budgets (M6)
 
@@ -1832,7 +1836,7 @@ Push war bis dahin zurückgestellt. Die mittleren und niedrigen Befunde stehen h
 | H3 | hoch | Roher Tool-Name aus der Modellantwort geht in die Statuszeile des Hosts (`f"{name} …"`); eine Zahl im Namen erreicht den Nutzer (reproduziert) | nur bekannte Tool-Namen, feste Statustexte je Tool in `texts.py`; Test mit erfundenem Namen | umgesetzt (12.17) |
 | M1 | mittel | Ein von der API abgelehnter Anfrageteil (`BadRequestError`, etwa leerer Text) bleibt ausstehend; jeder Folgezug scheitert | `run_turn` weist leeren Text ab (`ValueError`); nach `bad_request` `pending` verwerfen oder Sitzung schließen (Abweichung von Z16 im Plan festhalten) | offen |
 | M2 | mittel | Gescheiterte Aufrufe (Stillstand, Frist, Strg+C) sind teilweise bezahlt, werden aber nicht verbucht; die Hartgrenze kann unbemerkt überschritten werden | `usage` aus `message_start`/`message_delta` mitzählen und an `ModelCallError` hängen; sonst konservativ schätzen; als Festlegung eintragen | offen |
-| M3 | mittel | U-F1 prüft nur `USER_TEXTS` und `HOST_TEMPLATES`, nicht Statusmeldungen, `FACT_*`, AST-Test auf neue Konstanten und `free_text`-Profil (SM-05); Abweichung steht nicht in 12.15 | Test erweitern oder als P10 in 12.15 eintragen | offen |
+| M3 | mittel | U-F1 prüft nur `USER_TEXTS` und `HOST_TEMPLATES`, nicht Statusmeldungen, `FACT_*`, AST-Test auf neue Konstanten und `free_text`-Profil (SM-05); Abweichung steht nicht in 12.15 | Test erweitern oder als P10 in 12.15 eintragen | teilweise (12.17: Statustexte) |
 | M4 | mittel | Mutationen überleben: `if self._closing or turn.corrections >= 1:` ohne `_closing` (P4 ungetestet), `except KeyboardInterrupt` in `_run_tools`; LT-36 prüft `reject` nicht | LT-49 mit Zahl im Text am Limit (erwartet `withheld`, ein Aufruf); Test mit `KeyboardInterrupt` aus `dispatch`; `run.reject()` in LT-36 | offen |
 | N1 | niedrig | `_intro` (Z10) prüft Text neben `tool_use` nicht, schreibt den rohen Tool-Namen ins Event (P3), kein `TURN_ENDED` bei Schließen/Abbruch, kein Tool-Limit | denselben Codepfad wie `_run_tools` nutzen | teilweise (12.17: Ereignisname, Vorbelegung) |
 | N2 | niedrig | Strg+C während eines laufenden Tools meldet `TURN_ENDED` („nicht ausgeführt“), obwohl Nebenwirkungen eingetreten sein können (etwa `propose_peer_set`) | `TOOL_TIMEOUT`/eigener Hinweis oder das echte Ergebnis behalten, wenn der Dispatch zurückkam | offen |
@@ -1876,8 +1880,28 @@ Das Register ist an zwei Stellen berichtigt (SG-11a Fragment, SG-03b Kontext). B
 | P11 | Nur Thinking | Eine Antwort nur aus Thinking-Blöcken gilt als leer | Nichts zu zeigen und nichts auszuführen |
 | P12 | Strg+C im Z10-Dispatch | Zug endet `failed/interrupted`; der Vorschlag bleibt bestätigbar, die Ergebnisse bis dahin bleiben, der Rest ist `TURN_ENDED` | Wie Z18 in `_run_tools`; der Nutzer sieht „Abgebrochen.“ statt der festen Einleitung |
 
-**Offen:** Ein leerer Text-Block **neben** anderem Inhalt besteht `has_content`; ob die API ihn im Verlauf abweist, ist
-ungeprüft (Live-Lauf, Schritt 9). Leere Nutzereingabe bleibt M1. M1–M4, N1 (Rest), N2–N9 unverändert offen.
+**Review der Umsetzung (Subagent `reviewer`, Opus, Commit f8da1c3) und Mutationslauf (`mutation-prober`, SG-06,
+SG-09, SG-13, SG-14: 10 Mutationen, alle angeschlagen):** kein kritischer, kein hoher Befund.
+
+| Stufe | Befund | Status |
+|---|---|---|
+| mittel | Schreiben von `pending` nach jedem Block in `_run_tools` ungetestet (Mutation blieb grün) | erledigt: LT-51b (erstes Ergebnis echt, Rest `TURN_ENDED`); doppelte Zeile nach der Schleife entfernt; SG-13, fünfte Mutation |
+| mittel | SG-11b-Mutation veraltet (`usable = …` gibt es nicht mehr) | erledigt: Register auf `return response, is_usable(response)` |
+| mittel (Vermutung zur API) | Leerer Text-Block neben `tool_use` kommt in den Verlauf; die API weist ihn vermutlich ab (400, dann M1) | **offen, Live-Lauf Schritt 9**; Optionen: leere Text-Blöcke in `_commit` entfernen oder Platzierungsregel verschärfen |
+| niedrig | Zweig `committed=True`/`unexpected_stop` ohne Test; `empty` hing indirekt am Parameter | erledigt: `empty` direkt aus `has_content`; LT-53b |
+| niedrig | `_commit` nicht atomar (Strg+C während `deepcopy`) | erledigt: alles vorher gebaut, Verlauf und `pending` wechseln direkt nacheinander; ein Fenster von zwei Anweisungen bleibt |
+| niedrig | Zweites Strg+C während `_finish` lässt `state == RUNNING` (vorbestehend) | offen, Schritt 9 (CLI) |
+| niedrig | `_run_tools`/`_intro` setzen die Vorbelegung aus `_commit` stillschweigend voraus | offen (Zuordnung heute geprüft, LT-51b/LT-52) |
+| niedrig | `TURN_ENDED` nach `loop_error` von Definition und Prompt-Hinweis nicht gedeckt | Definition (Abschnitt 2) ergänzt; Prompt-Hinweis offen (L8, halb-live-Satz) |
+| niedrig | 12.14.4 nannte Regel 5 nicht | erledigt |
+| niedrig | M3 stand auf offen | erledigt: teilweise |
+| niedrig | Keine Mutation für `_event_name` | erledigt: SG-09, dritte Mutation |
+| niedrig | `_intro` zeigt Text einer `tool_use`-Antwort ohne Block als Einleitung (vorbestehend) | offen |
+
+Eigene Ergänzung nach dem Mutationslauf: SG-14 (2) hing nur an LT-55; `Run.assert_invariants` prüft jetzt jede
+Statuszeile, die Mutation schlägt in 35 Tests an.
+
+**Offen:** siehe Tabelle; leere Nutzereingabe bleibt M1. M1, M2, M4, N1 (Rest), N2–N9 unverändert offen.
 
 ---
 

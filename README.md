@@ -77,7 +77,7 @@ Value, concept and accession are in the golden set. Period start and filing date
 | Independent review | A read-only reviewer agent checks diffs against the plan; findings are tracked in the plan | plan sections 12.14, 12.16 |
 | Push gate | Full suite, clean tree, secret scan on added lines; a hook enforces it for the agent's own shell calls (not for pushes from a personal terminal) | `scripts/push_gate.py`, `.claude/hooks/` |
 
-The unit and integration suite has 1044 tests (`pytest --collect-only`, as of 2026-10-28), all passing. No test is marked as live (the `live` marker selects none).
+The unit and integration suite has 1046 tests (`pytest --collect-only`, as of 2026-10-28), all passing. No test is marked as live (the `live` marker selects none).
 
 Honest limits: the golden set is five companies, a small sample. It shows the extraction path is sound on those filings, not that it is accurate in general. The agent loop has been tested only against a scripted model, not against a live one.
 
@@ -107,7 +107,7 @@ cp .env.example .env
 Fill `EDGAR_CONTACT_EMAIL` in `.env` with a real contact address (SEC fair-access policy). The Finnhub and Anthropic keys are optional for the steps below.
 
 ```bash
-pytest                        # 1044 passed
+pytest                        # 1046 passed
 python -m eval.seed_compare   # offline: extractor vs. golden set, uses fixtures
 ```
 

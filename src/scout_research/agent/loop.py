@@ -32,6 +32,7 @@ from scout_research.agent.model_client import (
     ModelResponse,
     USABLE_STOP_REASONS,
     PlacementError,
+    has_content,
     is_usable,
 )
 from scout_research.tools.commentary import build_check_session, check_text
@@ -348,22 +349,25 @@ class AgentLoop:
         return response, is_usable(response)
 
     def _commit(self, blocks, facts, response: ModelResponse) -> None:
-        self.history.append({"role": "user", "content": copy.deepcopy(blocks)})
-        if facts:
-            self.history.append({"role": "system", "content": [{"type": "text", "text": "\n".join(facts)}]})
-        self.history.append({"role": "assistant", "content": copy.deepcopy(response.content)})
         # Ab hier hat jedes tool_use ein Ergebnis: vorbelegt mit TURN_ENDED, Block für Block ersetzt. Eine Ausnahme
         # zwischen Commit und Ergebnis (Strg+C, Fehler im Loop) hinterlässt so keinen ungültigen Verlauf (H1, SG-13).
+        # Alles wird vorher gebaut; Verlauf und `pending` wechseln direkt nacheinander (kein deepcopy dazwischen).
+        entries = [{"role": "user", "content": copy.deepcopy(blocks)}]
+        if facts:
+            entries.append({"role": "system", "content": [{"type": "text", "text": "\n".join(facts)}]})
+        entries.append({"role": "assistant", "content": copy.deepcopy(response.content)})
         ended = coded_outcome("TURN_ENDED")
         uses = [b for b in response.content if b.get("type") == "tool_use"]
-        self.pending = Pending(tuple(_result_block(b, ended) for b in uses), ())
+        prefilled = Pending(tuple(_result_block(b, ended) for b in uses), ())
+        self.history.extend(entries)
+        self.pending = prefilled
 
     def _unusable(self, turn: _Turn, response: ModelResponse, committed: bool = False) -> TurnResult:
         """`refusal`, `max_tokens` (V5), unerwartete Gründe, leere Antwort (H2): verworfen, nichts ausgeführt
         (Z16)."""
         lang = self.config.language
         reasons = {"refusal": ("refusal", "refusal"), "max_tokens": ("max_tokens", "too_long")}
-        empty = response.stop_reason in USABLE_STOP_REASONS and not committed  # Grund brauchbar, aber ohne Inhalt
+        empty = response.stop_reason in USABLE_STOP_REASONS and not has_content(response.content)
         reason, key = ("empty_response", "unexpected") if empty else \
             reasons.get(response.stop_reason, ("unexpected_stop", "unexpected"))
         self.events.append({"event": "unusable_response", "stop_reason": response.stop_reason, "empty": empty})
@@ -419,7 +423,6 @@ class AgentLoop:
             results[i] = _result_block(block, outcome)
             self.pending = Pending(tuple(results), ())
 
-        self.pending = Pending(tuple(results), ())
         if self._interrupted:
             return self._finish(turn, "failed", "interrupted", [texts.user_text(lang, "interrupted")])
         if self._closing:
