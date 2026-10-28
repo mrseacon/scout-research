@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.18 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.19 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -892,7 +892,7 @@ R-Seiten, nicht aus dem Extraktor. Der Seed ist das Messlineal und an `period_en
 gepinnt, nie an "jüngstes 10-K". Einheit: Millionen USD (Shares: Stück; CDNS berichtet in Tausend, der Seed
 führt Millionen). `total_debt` = ausgewiesene Finanzschulden ohne Leasing, `cash` = nur "Cash and cash
 equivalents" (Marketable Securities und Leasingverbindlichkeiten stehen in `notes`). CDNS prüft nur `total_debt`.
-Vergleich: `python eval/seed_compare.py`; Test: `tests/unit/test_golden_reproduction.py` (Toleranz 0, außer
+Vergleich: `python -m eval.seed_compare`; Test: `tests/unit/test_golden_reproduction.py` (Toleranz 0, außer
 Seed-Feld `tolerance_abs`).
 
 **Bekannte Abweichungen** werden nicht weggetestet, sondern im Seed unter `known_deviations` je Feld mit
@@ -1194,7 +1194,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.16 | 2026-10-11 | Arbeitsweise, Teil 2 (Sonnet): `scripts/push_gate.py` (Suite ohne xfail und über Skip-Baseline, sauberer Stand, `.env`, Geheimnisse nur in hinzugefügten Zeilen mit Ausgabe „Art, Datei:Zeile“, Commit-Liste, Marker `.git/push_gate_ok`) ersetzt den Agenten `push-check`; Hook `.claude/hooks/require_push_gate.py` (PreToolUse/PostToolUse, `.claude/settings.json`) blockiert `git push` ohne gültigen Marker (30 Minuten, passend zu HEAD), jeden erzwungenen Push und verkettete Aufrufe; Tests `test_push_gate.py`, `test_require_push_gate_hook.py`; Register der Schutzmaßnahmen `docs/security-guards.md` (SG-01 bis SG-12 mit Tests und Mutationen, sieben als geplant oder teilweise markiert); Agenten `mutation-prober` (isolierter Worktree) und `trace-triager`; Plan, Abschnitt 13 neu (Baustein-Tabelle, Regel „Deterministische Prüfungen sind Skripte oder Tests; Agenten nur für Urteilsarbeit“). Kein Anwendungscode geändert. |
 | 1.6.17 | 2026-10-11 | Phase 3, Schritt 7, Phase B (Sonnet): Agent-Schleife umgesetzt (`agent/loop.py`: Zustandsmaschine Z1–Z20, Host-Zug nach V1, `reject_proposal`/`confirm` nur über den Loop, Intro ohne Korrektur, `TURN_ENDED`, Zug- und Sitzungsgrenzen, Kosten- und Kontextgrenze nach jedem Aufruf), `agent/model_client.py` (Platzierungsprüfer, `ScriptedModelClient`, SDK-Adapter mit internem Stream; ungeprüft gegen die echte API), `agent/budgets.py`, `agent/texts.py`, `agent/prompt_loader.py`; Typtrennung `HumanInput` mit Architekturtests A-H1/A-E1/T8; `TURN_ENDED` im Fehlervertrag, Prompt v1.1.0, `anthropic_max_tokens` (Default 8000), `runs/` in `.gitignore`, Package-Data; Szenarien LT-01 bis LT-50 mit `ScriptedModelClient`; Register der Schutzmaßnahmen um SG-13 bis SG-17 und Zuordnung SG/SM; Plan 12.15 mit Zuordnung zu Schritt 7/8/9 und den Festlegungen P1–P9. Kein Trace-Schreiber, keine CLI, kein API-Aufruf. |
 | 1.6.18 | 2026-10-14 | Doku: README neu auf Englisch (Problem, Kernprinzip, Ebenen, Validierung, Status, Quick Start), `docs/assets/social-preview.png`; Plan 13 Punkt 10 (README-Pflege nach Meilensteinen). Kein Code geändert. |
+| 1.6.19 | 2026-10-28 | Phase 3, Schritt 7, Phase B: hohe Review-Befunde H1–H3 aus Plan 12.16 umgesetzt (Plan 12.17, Festlegungen P10–P12): `TURN_ENDED` ab dem Commit vorbelegt (H1), leere Antworten nie im Verlauf und Platzierungsregel 5 (H2), feste Statustexte je Tool statt Tool-Name (H3); Tests LT-51 bis LT-55, LT-17b, U-F1, U-P1 erweitert; Register SG-13/SG-14 mit neuen Mutationen. Mutationsbericht vom 2026-10-11 archiviert (`docs/mutation-report-2026-10-11.md`); Aufruf `python -m eval.seed_compare` berichtigt. |
 
 ---
 
-*Ende Dokumentversion 1.6.18*
+*Ende Dokumentversion 1.6.19*

@@ -1,11 +1,14 @@
-"""Schleifen-Szenarien zu Modelltext: LT-03/04/05, LT-16/17, LT-31, LT-39/41, LT-42, LT-47, LT-48 (Plan 12.11)."""
+"""Schleifen-Szenarien zu Modelltext: LT-03/04/05, LT-16/17, LT-31, LT-39/41, LT-42, LT-47, LT-48,
+LT-52, LT-54, LT-55 (Plan 12.11, 12.17)."""
 
 from __future__ import annotations
 
 import json
 
+from scout_research.agent import texts
 from scout_research.agent.loop import LoopState
 from scout_research.agent.model_client import ModelCallError, Streamed
+from scout_research.tools.handlers import dispatch as real_dispatch
 from tests.unit.loop_harness import Run, codes_in, say, shown_texts, use, reply
 from tests.unit.tool_world import AAPL_CIK, FINNHUB_KEY, NVDA_CIK, SECRETS, UA, standard_world
 
@@ -66,6 +69,39 @@ def test_lt_41_an_introduction_with_a_number_is_replaced_by_the_fixed_one_withou
     assert [s.kind for s in result.shown] == ["intro"] and "sieben" not in result.shown[0].text
     assert len(run.client.requests) == 4  # kein Korrekturaufruf (V2)
     assert run.ctx.open_proposal is not None
+    run.assert_invariants()
+
+
+def test_lt_52_an_interrupt_in_the_z10_dispatch_keeps_every_result_and_the_proposal_confirmable() -> None:
+    def dispatch(ctx, name, args):  # Strg+C trifft das zweite tool_use der Einleitung (Z10, H1)
+        if name == "resolve_company" and ctx.awaiting_confirmation:
+            raise KeyboardInterrupt
+        return real_dispatch(ctx, name, args)
+
+    run = _flow_to_proposal(tail=[say("Bestätigt, ich rechne.")])
+    run.client._steps[3] = use(("vergleiche_42", {}), ("resolve_company", {"query": "NVDA"}))
+    run.loop._dispatch = dispatch
+    result = run.say("Mach Comps für NVDA")
+    assert result.outcome == "failed" and result.reason == "interrupted"
+    assert result.state is LoopState.AWAITING_PEER_CONFIRMATION and run.ctx.open_proposal is not None
+    assert [codes_in(json.loads(b["content"])) for b in run.loop.pending.blocks] == ["UNKNOWN_TOOL", "TURN_ENDED"]
+    assert [e["name"] for e in run.loop.events if e["event"] == "tool"][-1] == "<unknown>"  # N1
+    run.assert_invariants()
+    assert run.confirm().outcome == "done"
+    assert [codes_in(r) for r in run.tool_results(-1)] == ["UNKNOWN_TOOL", "TURN_ENDED"]
+    run.assert_invariants()
+
+
+def test_lt_54_an_empty_introduction_is_replaced_by_the_fixed_one_and_never_appended() -> None:
+    run = _flow_to_proposal(tail=[say("Bestätigt, ich rechne.")])
+    run.client._steps[3] = reply()
+    result = run.say("Mach Comps für NVDA")
+    assert result.state is LoopState.AWAITING_PEER_CONFIRMATION and result.reason == "intro_unusable"
+    assert [s.kind for s in result.shown] == ["intro"] and result.shown[0].text == texts.user_text("de", "intro")
+    assert [e["empty"] for e in run.loop.events if e["event"] == "unusable_response"] == [True]
+    assert all(m["content"] for m in run.loop.history)
+    run.assert_invariants()
+    assert run.confirm().outcome == "done"
     run.assert_invariants()
 
 
@@ -132,6 +168,17 @@ def test_lt_48_the_host_never_receives_partial_text_only_status_lines() -> None:
     run.assert_invariants()
 
 
+def test_lt_55_the_status_line_never_carries_the_tool_name_from_the_answer() -> None:
+    run = Run(standard_world(), [use(("EBITDA_marge_ist_42_Prozent", {}), ("resolve_company", {"query": "NVDA"})),
+                                 say("Fertig.")])
+    run.say("Mach Comps für NVDA")
+    allowed = {*texts.TOOL_STATUS["de"].values(), texts.user_text("de", "status_working")}
+    assert set(run.status) <= allowed and "Scout sucht das Unternehmen …" in run.status
+    assert not any(ch.isdigit() for status in run.status for ch in status) and "EBITDA" not in str(run.status)
+    assert [e["name"] for e in run.loop.events if e["event"] == "tool"] == ["<unknown>", "resolve_company"]
+    run.assert_invariants()
+
+
 def test_lt_16_rate_limited_is_never_retried_by_the_loop_and_a_written_wait_time_is_not_shown() -> None:
     w = standard_world()
     w.status_overrides["/companyfacts/"] = 429
@@ -177,7 +224,8 @@ def test_lt_17b_an_unexpected_exception_in_the_loop_fails_the_turn_and_the_event
     def exploding(ctx, name, args):
         raise RuntimeError(f"boom {FINNHUB_KEY} {UA}")
 
-    run = Run(standard_world(), [use(("resolve_company", {"query": "NVDA"})), say("nie")], dispatch=exploding)
+    run = Run(standard_world(), [use(("resolve_company", {"query": "NVDA"})), say("Weiter geht es.")],
+              dispatch=exploding)
     result = run.say("Mach Comps für NVDA")
     assert result.outcome == "failed" and result.reason == "loop_error"
     assert shown_texts(result) == ["Interner Fehler: Die Anfrage konnte technisch nicht verarbeitet werden."]
@@ -185,3 +233,9 @@ def test_lt_17b_an_unexpected_exception_in_the_loop_fails_the_turn_and_the_event
     assert event["error_class"] == "RuntimeError" and "<redacted>" in event["traceback"]
     assert FINNHUB_KEY not in event["traceback"] and UA not in event["traceback"]
     assert run.loop.state is LoopState.IDLE
+    # H1: das tool_use hat trotz Ausnahme ein Ergebnis (TURN_ENDED); der Folgezug läuft
+    assert [codes_in(json.loads(b["content"])) for b in run.loop.pending.blocks] == ["TURN_ENDED"]
+    run.assert_invariants()
+    assert shown_texts(run.say("Und jetzt?")) == ["Weiter geht es."]
+    assert [codes_in(r) for r in run.tool_results(-1)] == ["TURN_ENDED"]
+    run.assert_invariants()

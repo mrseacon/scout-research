@@ -77,7 +77,7 @@ Value, concept and accession are in the golden set. Period start and filing date
 | Independent review | A read-only reviewer agent checks diffs against the plan; findings are tracked in the plan | plan sections 12.14, 12.16 |
 | Push gate | Full suite, clean tree, secret scan on added lines; a hook enforces it for the agent's own shell calls (not for pushes from a personal terminal) | `scripts/push_gate.py`, `.claude/hooks/` |
 
-The unit and integration suite has 1031 tests (`pytest --collect-only`, as of 2026-10-14), all passing in a fresh clone. No test is marked as live (the `live` marker selects none).
+The unit and integration suite has 1044 tests (`pytest --collect-only`, as of 2026-10-28), all passing. No test is marked as live (the `live` marker selects none).
 
 Honest limits: the golden set is five companies, a small sample. It shows the extraction path is sound on those filings, not that it is accurate in general. The agent loop has been tested only against a scripted model, not against a live one.
 
@@ -88,7 +88,7 @@ Honest limits: the golden set is five companies, a small sample. It shows the ex
 | 0 Setup | EDGAR client with rate limiting and retries | ✅ implemented |
 | 1 Data foundation | Metrics with provenance, Finnhub market data, SQLite cache | ✅ implemented |
 | 2 Comps engine | Peer candidates (SIC + size), EV/Revenue, EV/EBITDA, EV/EBIT, P/E, outlier and period checks | ✅ implemented |
-| 3 Agent layer | Tools, gate, slot renderer, number check, prompt, loop | 🔶 in development: tools, check and loop are committed and tested with a scripted model; trace (step 8), CLI and first live run (step 9) and live review (step 10) are not done; three high-severity review findings on the loop are open |
+| 3 Agent layer | Tools, gate, slot renderer, number check, prompt, loop | 🔶 in development: tools, check and loop are committed and tested with a scripted model; trace (step 8), CLI and first live run (step 9) and live review (step 10) are not done; the three high-severity review findings on the loop are fixed, medium and low findings are open |
 | 4 Interface and export | Streamlit chat, XLSX export with source sheet | ⏳ planned (`ui/` and `export/` are empty packages) |
 | 5 Evaluation | Larger golden set, automated metrics | ⏳ planned |
 | After | Precedent transactions, DCF and LBO support (assumptions always from the human) | ⏳ planned, order open |
@@ -107,7 +107,7 @@ cp .env.example .env
 Fill `EDGAR_CONTACT_EMAIL` in `.env` with a real contact address (SEC fair-access policy). The Finnhub and Anthropic keys are optional for the steps below.
 
 ```bash
-pytest                        # 1031 passed
+pytest                        # 1044 passed
 python -m eval.seed_compare   # offline: extractor vs. golden set, uses fixtures
 ```
 

@@ -30,7 +30,9 @@ from scout_research.agent.model_client import (
     ModelClient,
     ModelRequest,
     ModelResponse,
+    USABLE_STOP_REASONS,
     PlacementError,
+    is_usable,
 )
 from scout_research.tools.commentary import build_check_session, check_text
 from scout_research.tools.handlers import ToolOutcome, coded_outcome, dispatch as default_dispatch, tool_definitions
@@ -343,22 +345,28 @@ class AgentLoop:
         if self.session_cost >= self.config.cost_warning_usd and not self._cost_warned:
             self._cost_warned = True
             turn.notices.append(texts.user_text(lang, "cost_warning"))
-        usable = response.stop_reason in {"end_turn", "tool_use"}
-        return response, usable
+        return response, is_usable(response)
 
     def _commit(self, blocks, facts, response: ModelResponse) -> None:
         self.history.append({"role": "user", "content": copy.deepcopy(blocks)})
         if facts:
             self.history.append({"role": "system", "content": [{"type": "text", "text": "\n".join(facts)}]})
         self.history.append({"role": "assistant", "content": copy.deepcopy(response.content)})
-        self.pending = Pending()
+        # Ab hier hat jedes tool_use ein Ergebnis: vorbelegt mit TURN_ENDED, Block für Block ersetzt. Eine Ausnahme
+        # zwischen Commit und Ergebnis (Strg+C, Fehler im Loop) hinterlässt so keinen ungültigen Verlauf (H1, SG-13).
+        ended = coded_outcome("TURN_ENDED")
+        uses = [b for b in response.content if b.get("type") == "tool_use"]
+        self.pending = Pending(tuple(_result_block(b, ended) for b in uses), ())
 
     def _unusable(self, turn: _Turn, response: ModelResponse, committed: bool = False) -> TurnResult:
-        """`refusal`, `max_tokens` (V5), unerwartete Gründe: Antwort verworfen, nichts ausgeführt (Z16)."""
+        """`refusal`, `max_tokens` (V5), unerwartete Gründe, leere Antwort (H2): verworfen, nichts ausgeführt
+        (Z16)."""
         lang = self.config.language
         reasons = {"refusal": ("refusal", "refusal"), "max_tokens": ("max_tokens", "too_long")}
-        reason, key = reasons.get(response.stop_reason, ("unexpected_stop", "unexpected"))
-        self.events.append({"event": "unusable_response", "stop_reason": response.stop_reason})
+        empty = response.stop_reason in USABLE_STOP_REASONS and not committed  # Grund brauchbar, aber ohne Inhalt
+        reason, key = ("empty_response", "unexpected") if empty else \
+            reasons.get(response.stop_reason, ("unexpected_stop", "unexpected"))
+        self.events.append({"event": "unusable_response", "stop_reason": response.stop_reason, "empty": empty})
         return self._finish(turn, "failed", reason, [texts.user_text(lang, key)])
 
     # --- Tools ----------------------------------------------------------------------------------------------------
@@ -373,11 +381,11 @@ class AgentLoop:
             self.events.append({"event": "text_check", "where": "beside_tool_use",
                                 "problems": [p.code for p in check.problems], "shown": False})
 
-        results: list[dict[str, Any]] = []
+        results = list(self.pending.blocks)  # vorbelegt in _commit (TURN_ENDED)
         ended: str | None = None
         proposed = False
         commentary_id: str | None = None
-        for block in tool_uses:
+        for i, block in enumerate(tool_uses):
             name, args = block.get("name", ""), block.get("input", {})
             if self._closing or ended or self._interrupted:
                 outcome = coded_outcome("TURN_ENDED")
@@ -388,7 +396,7 @@ class AgentLoop:
                 ended = "turn_deadline"
                 outcome = coded_outcome("TURN_ENDED")
             else:
-                self._status(f"{name} …")
+                self._status(texts.tool_status(lang, name))  # nie der rohe Name aus der Antwort (H3, SG-14)
                 turn.tools += 1
                 try:
                     outcome = self._dispatch(self.ctx, name, args)
@@ -396,8 +404,8 @@ class AgentLoop:
                     self._interrupted = True
                     outcome = coded_outcome("TURN_ENDED")
                 code = outcome.content.get("error", {}).get("code") if outcome.is_error else None
-                self.events.append({"event": "tool", "name": name if name in _KNOWN(self) else "<unknown>",
-                                    "is_error": outcome.is_error, "code": code})
+                self.events.append({"event": "tool", "name": _event_name(self, name), "is_error": outcome.is_error,
+                                    "code": code})
                 if code == "LOOP_GUARD":
                     turn.loop_guards += 1
                     if turn.loop_guards >= 2:
@@ -408,8 +416,8 @@ class AgentLoop:
                     commentary_id = args.get("comps_table_id") if isinstance(args, dict) else None
                 if name == "propose_peer_set" and not outcome.is_error:
                     proposed = True
-            results.append({"type": "tool_result", "tool_use_id": block["id"], "content": outcome.to_json(),
-                            "is_error": outcome.is_error})
+            results[i] = _result_block(block, outcome)
+            self.pending = Pending(tuple(results), ())
 
         self.pending = Pending(tuple(results), ())
         if self._interrupted:
@@ -440,20 +448,21 @@ class AgentLoop:
             return self._finish(turn, "done", f"intro_{sent.reason}", [], [fixed])
         response, usable = sent
         if not usable:
-            self.events.append({"event": "unusable_response", "stop_reason": response.stop_reason})
+            self.events.append({"event": "unusable_response", "stop_reason": response.stop_reason,
+                                "empty": response.stop_reason in USABLE_STOP_REASONS})
             return self._finish(turn, "done", "intro_unusable", [], [fixed])
         self._commit(results, [], response)
         tool_uses = [b for b in response.content if b.get("type") == "tool_use"]
         if tool_uses:  # Z10: trotz tool_choice none — der Dispatcher antwortet AWAITING_PEER_CONFIRMATION
-            pending: list[dict[str, Any]] = []
-            for block in tool_uses:
+            pending = list(self.pending.blocks)  # vorbelegt in _commit (TURN_ENDED, H1)
+            for i, block in enumerate(tool_uses):
                 turn.tools += 1
                 outcome = self._dispatch(self.ctx, block.get("name", ""), block.get("input", {}))
-                self.events.append({"event": "tool", "name": block.get("name", ""), "is_error": outcome.is_error,
+                self.events.append({"event": "tool", "name": _event_name(self, block.get("name", "")),
+                                    "is_error": outcome.is_error,
                                     "code": outcome.content.get("error", {}).get("code") if outcome.is_error else None})
-                pending.append({"type": "tool_result", "tool_use_id": block["id"], "content": outcome.to_json(),
-                                "is_error": outcome.is_error})
-            self.pending = Pending(tuple(pending), ())
+                pending[i] = _result_block(block, outcome)
+                self.pending = Pending(tuple(pending), ())
             return self._finish(turn, "done", "intro_tool_use", [], [fixed])
         text = "".join(b.get("text", "") for b in response.content if b.get("type") == "text")
         check = check_text(build_check_session(self.ctx), text, "slot_text")
@@ -466,3 +475,13 @@ class AgentLoop:
 
 def _KNOWN(loop: AgentLoop) -> set[str]:
     return {t["name"] for t in loop.tools}
+
+
+def _event_name(loop: AgentLoop, name: Any) -> str:
+    """Tool-Name fürs Ereignis: nur bekannte Namen, sonst `<unknown>` (P3; kein Fremdtext im Trace)."""
+    return name if isinstance(name, str) and name in _KNOWN(loop) else "<unknown>"
+
+
+def _result_block(block: dict[str, Any], outcome: ToolOutcome) -> dict[str, Any]:
+    return {"type": "tool_result", "tool_use_id": block["id"], "content": outcome.to_json(),
+            "is_error": outcome.is_error}

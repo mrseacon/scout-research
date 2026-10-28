@@ -27,6 +27,7 @@ A = lambda *b: {"role": "assistant", "content": list(b)}  # noqa: E731
 S = lambda s: {"role": "system", "content": [T(s)]}  # noqa: E731
 USE = lambda i: {"type": "tool_use", "id": i, "name": "resolve_company", "input": {"query": "x"}}  # noqa: E731
 RES = lambda i: {"type": "tool_result", "tool_use_id": i, "content": "{}"}  # noqa: E731
+THINK = {"type": "thinking", "thinking": "überlege", "signature": "sig=="}
 
 
 # --- U-P1: je Regel ein abgewiesener und ein bestandener Fall --------------------------------------------------
@@ -48,6 +49,8 @@ RES = lambda i: {"type": "tool_result", "tool_use_id": i, "content": "{}"}  # no
         ("erster Eintrag assistant", [A(T("b")), U(T("a"))]),
         ("leerer Verlauf", []),
         ("tool_result nach text", [U(T("a")), A(USE("t1")), U(T("b"), RES("t1"))]),
+        ("assistant nur mit Leerraum", [U(T("a")), A(T(" \n")), U(T("b"))]),
+        ("assistant nur mit Thinking", [U(T("a")), A(THINK), U(T("b"))]),
     ],
 )
 def test_u_p1_placement_violations_are_rejected(name: str, messages: list) -> None:
@@ -64,6 +67,7 @@ def test_u_p1_placement_violations_are_rejected(name: str, messages: list) -> No
         [U(T("a")), A(USE("t1")), U(RES("t1"))],
         [U(T("a")), A(USE("t1"), USE("t2")), U(RES("t2"), RES("t1"), T("vorlage")), S("fakt")],
         [U(T("a")), A(USE("t1")), U(RES("t1"), T("vorlage")), S("fakt"), A(T("b")), U(T("c"))],
+        [U(T("a")), A(THINK, T("b")), U(T("c"))],
     ],
 )
 def test_u_p1_valid_histories_pass(messages: list) -> None:

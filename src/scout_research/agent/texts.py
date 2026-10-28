@@ -47,6 +47,29 @@ USER_TEXTS: dict[str, dict[str, str]] = {
     },
 }
 
+# Statuszeile je Tool (H3): der Host sieht nie den Tool-Namen aus der Modellantwort; unbekannte Namen bekommen
+# `status_working`. Die Schlüssel sind genau die Tools aus `tools.handlers.TOOLS` (Test).
+TOOL_STATUS: dict[str, dict[str, str]] = {
+    "de": {
+        "resolve_company": "Scout sucht das Unternehmen …",
+        "find_peer_candidates": "Scout sucht Vergleichsunternehmen …",
+        "propose_peer_set": "Scout stellt einen Peer-Vorschlag zusammen …",
+        "compute_comps_table": "Scout berechnet die Vergleichstabelle …",
+        "submit_commentary": "Scout prüft den Kommentar …",
+        "get_financials": "Scout lädt Finanzdaten …",
+        "get_market_data": "Scout lädt Marktdaten …",
+    },
+    "en": {
+        "resolve_company": "Scout is looking up the company …",
+        "find_peer_candidates": "Scout is searching for comparable companies …",
+        "propose_peer_set": "Scout is preparing a peer proposal …",
+        "compute_comps_table": "Scout is computing the comparison table …",
+        "submit_commentary": "Scout is checking the commentary …",
+        "get_financials": "Scout is loading financial data …",
+        "get_market_data": "Scout is loading market data …",
+    },
+}
+
 # --- Was das Modell sieht (Host-Züge, V1) -----------------------------------------------------------------------
 
 HOST_TEMPLATES: dict[str, dict[str, str]] = {
@@ -77,6 +100,12 @@ TICKER_LIST = re.compile(r"^[A-Z0-9.\-]{1,10}$")
 
 def user_text(language: str, key: str) -> str:
     return USER_TEXTS[language][key]
+
+
+def tool_status(language: str, name: object) -> str:
+    """Fester Statustext für ein Tool; der Name dient nur als Schlüssel und erscheint nie im Text (H3)."""
+    statuses = TOOL_STATUS[language]
+    return statuses[name] if isinstance(name, str) and name in statuses else USER_TEXTS[language]["status_working"]
 
 
 def snippet_for(kind: str, match: str) -> str | None:

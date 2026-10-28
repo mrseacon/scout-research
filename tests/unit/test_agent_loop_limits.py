@@ -1,9 +1,13 @@
-"""Schleifen-Szenarien zu Budgets, Abbrüchen und Fehlern: LT-14/15/18–24, LT-40, LT-43–46, LT-49, Z17, Z20."""
+"""Schleifen-Szenarien zu Budgets, Abbrüchen und Fehlern: LT-14/15/18–24, LT-40, LT-43–46, LT-49, LT-51, LT-53,
+Z17, Z20."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from scout_research.agent import texts
 from scout_research.agent.budgets import Usage
 from scout_research.agent.loop import LoopBusyError, LoopState, SessionClosedError
 from scout_research.agent.model_client import ModelCallError, Streamed
@@ -214,6 +218,42 @@ def test_lt_45_an_interrupt_during_tools_ends_the_remaining_blocks_with_turn_end
     assert len(pending) == 3 and "TURN_ENDED" not in pending[0]["content"]
     assert all("TURN_ENDED" in b["content"] for b in pending[1:])
     assert run.loop.state is LoopState.IDLE
+    run.assert_invariants()
+
+
+def test_lt_51_an_interrupt_between_commit_and_results_leaves_a_valid_history_and_the_next_turn_works() -> None:
+    def status(text: str) -> None:  # Strg+C in der Statuszeile des ersten Tools, nach dem Commit der Antwort (H1)
+        if text != texts.user_text("de", "status_working"):
+            raise KeyboardInterrupt
+
+    spy = _Spy()
+    run = _run([use(_q(1), _q(2)), say("Jetzt klappt es.")], spy)
+    run.loop._on_status = status
+    result = run.say("Suche")
+    assert result.outcome == "failed" and result.reason == "interrupted" and spy.calls == []
+    assert [codes_in(json.loads(b["content"])) for b in run.loop.pending.blocks] == ["TURN_ENDED", "TURN_ENDED"]
+    run.assert_invariants()
+    run.loop._on_status = None
+    assert shown_texts(run.say("Und jetzt?")) == ["Jetzt klappt es."]
+    assert [codes_in(r) for r in run.tool_results(-1)] == ["TURN_ENDED", "TURN_ENDED"]
+    run.assert_invariants()
+
+
+@pytest.mark.parametrize(
+    "empty",
+    [reply(), reply(stop="tool_use"), say(" \n "),
+     reply({"type": "thinking", "thinking": "…", "signature": "sig=="})],
+    ids=["no_blocks", "no_blocks_tool_use", "blank_text", "thinking_only"],
+)
+def test_lt_53_an_empty_answer_is_discarded_with_a_fixed_notice_and_the_next_turn_works(empty) -> None:
+    run = _run([empty, say("Jetzt klappt es.")])
+    result = run.say("Frage eins")
+    assert result.outcome == "failed" and result.reason == "empty_response"
+    assert shown_texts(result) == [texts.user_text("de", "unexpected")]
+    assert run.loop.history == [] and [b["text"] for b in run.loop.pending.blocks] == ["Frage eins"]
+    assert [e["empty"] for e in run.loop.events if e["event"] == "unusable_response"] == [True]
+    run.assert_invariants()
+    assert shown_texts(run.say("Frage zwei")) == ["Jetzt klappt es."]
     run.assert_invariants()
 
 

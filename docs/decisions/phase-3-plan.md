@@ -1821,20 +1821,20 @@ Testbeschreibungen sind hier festgelegt; der Code folgt in Phase B.
 
 ### 12.16 Review der Umsetzung Phase B (Subagent `reviewer`, Opus, 2026-10-11)
 
-Geprüft: Diff `origin/main..HEAD` (Commit bfd2cb3). Kein kritischer Befund. **Drei hohe Befunde (H1–H3) sind offen und
-nicht eingearbeitet; sie warten auf Entscheidung (Sean)** — alle drei wurden mit einem kurzen Skript gegen den Code
-reproduziert. Der Push ist bis dahin zurückgestellt. Die mittleren und niedrigen Befunde stehen hier zur Bearbeitung.
+Geprüft: Diff `origin/main..HEAD` (Commit bfd2cb3). Kein kritischer Befund. Drei hohe Befunde (H1–H3), alle mit
+einem kurzen Skript gegen den Code reproduziert; **umgesetzt nach Entscheidung (Sean, 2026-10-28), siehe 12.17**. Der
+Push war bis dahin zurückgestellt. Die mittleren und niedrigen Befunde stehen hier zur Bearbeitung.
 
 | # | Stufe | Befund | Vorschlag des Reviews | Status |
 |---|---|---|---|---|
-| H1 | hoch | Nach einer Ausnahme zwischen `_commit` und dem Setzen der Ergebnisse (dispatch wirft, Strg+C, Z10) bleibt ein `tool_use` ohne `tool_result` im Verlauf; jeder Folgezug endet mit `PlacementError` (reproduziert) | `pending` direkt nach `_commit` mit `TURN_ENDED` für alle `tool_use`-IDs vorbelegen, Block für Block ersetzen; LT-17b um Invarianten und Folgezug erweitern | **offen, Entscheidung** |
-| H2 | hoch | Leere Modellantwort (`content == []`) wird angehängt, der Nutzer sieht nichts, danach `PlacementError` bei jedem Zug (reproduziert) | wie `unexpected_stop` behandeln: nicht anhängen, `pending` behalten, fester Hinweis; LT-Fall und U-P1-Fall | **offen, Entscheidung** |
-| H3 | hoch | Roher Tool-Name aus der Modellantwort geht in die Statuszeile des Hosts (`f"{name} …"`); eine Zahl im Namen erreicht den Nutzer (reproduziert) | nur bekannte Tool-Namen, feste Statustexte je Tool in `texts.py`; Test mit erfundenem Namen | **offen, Entscheidung** |
+| H1 | hoch | Nach einer Ausnahme zwischen `_commit` und dem Setzen der Ergebnisse (dispatch wirft, Strg+C, Z10) bleibt ein `tool_use` ohne `tool_result` im Verlauf; jeder Folgezug endet mit `PlacementError` (reproduziert) | `pending` direkt nach `_commit` mit `TURN_ENDED` für alle `tool_use`-IDs vorbelegen, Block für Block ersetzen; LT-17b um Invarianten und Folgezug erweitern | umgesetzt (12.17) |
+| H2 | hoch | Leere Modellantwort (`content == []`) wird angehängt, der Nutzer sieht nichts, danach `PlacementError` bei jedem Zug (reproduziert) | wie `unexpected_stop` behandeln: nicht anhängen, `pending` behalten, fester Hinweis; LT-Fall und U-P1-Fall | umgesetzt (12.17) |
+| H3 | hoch | Roher Tool-Name aus der Modellantwort geht in die Statuszeile des Hosts (`f"{name} …"`); eine Zahl im Namen erreicht den Nutzer (reproduziert) | nur bekannte Tool-Namen, feste Statustexte je Tool in `texts.py`; Test mit erfundenem Namen | umgesetzt (12.17) |
 | M1 | mittel | Ein von der API abgelehnter Anfrageteil (`BadRequestError`, etwa leerer Text) bleibt ausstehend; jeder Folgezug scheitert | `run_turn` weist leeren Text ab (`ValueError`); nach `bad_request` `pending` verwerfen oder Sitzung schließen (Abweichung von Z16 im Plan festhalten) | offen |
 | M2 | mittel | Gescheiterte Aufrufe (Stillstand, Frist, Strg+C) sind teilweise bezahlt, werden aber nicht verbucht; die Hartgrenze kann unbemerkt überschritten werden | `usage` aus `message_start`/`message_delta` mitzählen und an `ModelCallError` hängen; sonst konservativ schätzen; als Festlegung eintragen | offen |
 | M3 | mittel | U-F1 prüft nur `USER_TEXTS` und `HOST_TEMPLATES`, nicht Statusmeldungen, `FACT_*`, AST-Test auf neue Konstanten und `free_text`-Profil (SM-05); Abweichung steht nicht in 12.15 | Test erweitern oder als P10 in 12.15 eintragen | offen |
 | M4 | mittel | Mutationen überleben: `if self._closing or turn.corrections >= 1:` ohne `_closing` (P4 ungetestet), `except KeyboardInterrupt` in `_run_tools`; LT-36 prüft `reject` nicht | LT-49 mit Zahl im Text am Limit (erwartet `withheld`, ein Aufruf); Test mit `KeyboardInterrupt` aus `dispatch`; `run.reject()` in LT-36 | offen |
-| N1 | niedrig | `_intro` (Z10) prüft Text neben `tool_use` nicht, schreibt den rohen Tool-Namen ins Event (P3), kein `TURN_ENDED` bei Schließen/Abbruch, kein Tool-Limit | denselben Codepfad wie `_run_tools` nutzen | offen |
+| N1 | niedrig | `_intro` (Z10) prüft Text neben `tool_use` nicht, schreibt den rohen Tool-Namen ins Event (P3), kein `TURN_ENDED` bei Schließen/Abbruch, kein Tool-Limit | denselben Codepfad wie `_run_tools` nutzen | teilweise (12.17: Ereignisname, Vorbelegung) |
 | N2 | niedrig | Strg+C während eines laufenden Tools meldet `TURN_ENDED` („nicht ausgeführt“), obwohl Nebenwirkungen eingetreten sein können (etwa `propose_peer_set`) | `TOOL_TIMEOUT`/eigener Hinweis oder das echte Ergebnis behalten, wenn der Dispatch zurückkam | offen |
 | N3 | niedrig | Zugfrist nur zwischen Aufrufen und Tools geprüft; ein Zug kann bis etwa 600 s + 300 s dauern | Restfrist als Aufruffrist übergeben oder Toleranz im Plan festhalten | offen |
 | N4 | niedrig | `LoopConfig.call_seconds` und `stall_seconds` werden nicht gelesen; Client und Adapter haben eigene Defaults (12.8 „an einer Stelle“) | Werte aus der Konfiguration an Client und Adapter geben | offen |
@@ -1847,7 +1847,37 @@ reproduziert. Der Push ist bis dahin zurückgestellt. Die mittleren und niedrige
 **Hinweise aus dem Mutationslauf (`mutation-prober`, 35 Mutationen, keine zahnlos):** SG-14 hängt bei der Mutation
 `Shown("text", text)` nur an LT-05, SG-06 schlägt bei LT-20 und dem Dispatch-Test nicht an; mehrere Maßnahmen hängen
 je Mutation an einem einzigen Test (SG-03b, SG-03c, SG-05 (2), SG-07, SG-09, SG-11b, SG-12, SG-13 (2), SG-17).
-Das Register ist an zwei Stellen berichtigt (SG-11a Fragment, SG-03b Kontext).
+Das Register ist an zwei Stellen berichtigt (SG-11a Fragment, SG-03b Kontext). Bericht archiviert:
+`docs/mutation-report-2026-10-11.md`.
+
+### 12.17 Umsetzung H1–H3 aus 12.16 (Opus, 2026-10-28)
+
+**Prüfung vor der Umsetzung (gegen den Code, reproduziert):**
+
+| # | Ergebnis der Prüfung |
+|---|---|
+| H1 | Zutreffend, im Auslöser abgeschwächt: Mit den echten Handlern wirft `dispatch` praktisch nie (`guarded` fängt jede `Exception`). Echt ist Strg+C an drei Stellen nach dem Commit: Statuszeile (Host), `check_text` neben `tool_use`, Z10-Dispatch in `_intro` (gar nicht abgefangen). Schwerer als beschrieben: `_run` gibt `PlacementError` weiter, die **Sitzung** ist danach unbrauchbar |
+| H2 | Zutreffend, breiter: jeder brauchbare `stop_reason` mit leerem Inhalt, auch in `_intro`; ebenso Antworten aus Leerraum oder nur Thinking |
+| H3 | Zutreffend, in der Wirkung heute latent: Die CLI fehlt noch (Schritt 9), die Statuszeile lesen nur Tests. Der Fehler liegt im Vertrag der Host-API und hätte SG-14 in Schritt 9 umgangen |
+
+**Umsetzung:**
+
+| # | Änderung | Tests |
+|---|---|---|
+| H1 | `_commit` belegt `pending` mit `TURN_ENDED` für jedes `tool_use` der Antwort vor; `_run_tools` und der Z10-Pfad in `_intro` ersetzen Block für Block und schreiben `pending` nach jedem Ergebnis. Eine Ausnahme nach dem Commit hinterlässt so immer einen gültigen Verlauf | LT-17b erweitert (Invarianten, Folgezug mit `TURN_ENDED`); LT-51 (Strg+C in der Statuszeile); LT-52 (Strg+C im Z10-Dispatch, Ergebnis je Block, Vorschlag bestätigbar) |
+| H2 | `model_client.has_content`/`is_usable`: brauchbar nur mit `end_turn`/`tool_use` **und** Inhalt (ein `tool_use` oder Text, der nicht nur Leerraum ist). Loop (`_send`) und `ScriptedModelClient` nutzen dieselbe Prüfung. Leere Antwort: nicht angehängt, `pending` bleibt, fester Hinweis `unexpected`, Grund `empty_response`, Ereignis `unusable_response` mit `empty: true`; in `_intro` die feste Einleitung. Platzierungsprüfer Regel 5: kein `assistant`-Turn ohne Inhalt | LT-53 (vier Varianten: keine Blöcke bei `end_turn` und `tool_use`, nur Leerraum, nur Thinking; Folgezug); LT-54 (leere Einleitung); U-P1 um zwei abgewiesene und einen bestandenen Fall |
+| H3 | `texts.TOOL_STATUS` (de/en, genau die sieben Tools) und `texts.tool_status`; unbekannte Namen bekommen `status_working`. Der Tool-Name dient nur als Schlüssel. Ereignisname in `_intro` wie in `_run_tools` nur für bekannte Tools (Teil von N1) | LT-55 (erfundener Name mit Zahl); U-F1 auf die Statustexte erweitert, Schlüssel gleich `TOOLS` |
+
+**Festlegungen (Sean bitte bestätigen oder ändern):**
+
+| # | Punkt | Festlegung | Grund |
+|---|---|---|---|
+| P10 | Grund einer leeren Antwort | Eigener Grund `empty_response` statt `unexpected_stop`; Hinweis für den Nutzer wie bei `unexpected_stop` | Im Trace (Schritt 8) unterscheidbar; kein neuer Text für den Nutzer |
+| P11 | Nur Thinking | Eine Antwort nur aus Thinking-Blöcken gilt als leer | Nichts zu zeigen und nichts auszuführen |
+| P12 | Strg+C im Z10-Dispatch | Zug endet `failed/interrupted`; der Vorschlag bleibt bestätigbar, die Ergebnisse bis dahin bleiben, der Rest ist `TURN_ENDED` | Wie Z18 in `_run_tools`; der Nutzer sieht „Abgebrochen.“ statt der festen Einleitung |
+
+**Offen:** Ein leerer Text-Block **neben** anderem Inhalt besteht `has_content`; ob die API ihn im Verlauf abweist, ist
+ungeprüft (Live-Lauf, Schritt 9). Leere Nutzereingabe bleibt M1. M1–M4, N1 (Rest), N2–N9 unverändert offen.
 
 ---
 

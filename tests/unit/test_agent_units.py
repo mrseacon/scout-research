@@ -1,4 +1,5 @@
-"""Unit-Tests der Schleifenbausteine: U-V1, U-M5, U-F1, Prompt-Lader, Budgets, Konfiguration (Plan 12.14.8)."""
+"""Unit-Tests der Schleifenbausteine: U-V1, U-M5, U-F1 (mit Statustexten, H3), Prompt-Lader, Budgets, Konfiguration
+(Plan 12.14.8)."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from scout_research.agent.budgets import PRICES, LoopConfig, Usage, cost_usd
 from scout_research.agent.loop import Pending, build_user_turn
 from scout_research.agent.prompt_loader import load_system_prompt, tools_hash
 from scout_research.config import Settings
-from scout_research.tools.handlers import tool_definitions
+from scout_research.tools.handlers import TOOLS, tool_definitions
 from scout_research.tools.numbercheck import normalize, scan_numbers
 from scout_research.tools.session import Confirmed, CorrectionRequest, HumanInput, Rejected
 
@@ -87,7 +88,7 @@ def test_u_m5_the_correction_fact_uses_the_code_template_hint_and_never_the_prob
 
 @pytest.mark.parametrize("language", ["de", "en"])
 def test_u_f1_every_fixed_user_text_and_host_template_is_free_of_numbers(language: str) -> None:
-    for mapping in (texts.USER_TEXTS[language], texts.HOST_TEMPLATES[language]):
+    for mapping in (texts.USER_TEXTS[language], texts.HOST_TEMPLATES[language], texts.TOOL_STATUS[language]):
         for key, value in mapping.items():
             assert not any(ch.isdigit() for ch in value), key
             assert scan_numbers(normalize(value).norm) == [], key
@@ -96,6 +97,15 @@ def test_u_f1_every_fixed_user_text_and_host_template_is_free_of_numbers(languag
 def test_u_f1_both_languages_define_the_same_keys() -> None:
     assert texts.USER_TEXTS["de"].keys() == texts.USER_TEXTS["en"].keys()
     assert texts.HOST_TEMPLATES["de"].keys() == texts.HOST_TEMPLATES["en"].keys()
+
+
+@pytest.mark.parametrize("language", ["de", "en"])
+def test_u_f1_every_tool_has_a_fixed_status_and_unknown_names_get_the_generic_one(language: str) -> None:
+    assert texts.TOOL_STATUS[language].keys() == set(TOOLS)
+    generic = texts.user_text(language, "status_working")
+    for name in ("EBITDA_marge_ist_42_Prozent", "", None, ["resolve_company"], "Resolve_Company"):
+        assert texts.tool_status(language, name) == generic
+    assert all(texts.tool_status(language, name) == text for name, text in texts.TOOL_STATUS[language].items())
 
 
 # --- Prompt-Lader (N1, 12.1) ----------------------------------------------------------------------------------------
