@@ -11,5 +11,5 @@ dist/
 *.sqlite
 *.sqlite3
 /eval/golden_set/*.xlsx
-/runs/
+runs/
 /.orchestrator/

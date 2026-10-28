@@ -16,6 +16,7 @@ from scout_research.agent.model_client import (
     Step,
     check_placement,
 )
+from scout_research.agent.trace import validate_loop_event
 from scout_research.tools.session import HumanInput
 from tests.unit.tool_world import AAPL_CIK, MSFT_CIK, NVDA_CIK, World
 
@@ -54,7 +55,8 @@ class Run:
     """Eine Sitzung gegen die Test-Welt mit skriptiertem Modell."""
 
     def __init__(self, world: World, steps: list[Step], config: LoopConfig | None = None,
-                 language: str = "de", dispatch: Callable | None = None, **ctx_kwargs: Any) -> None:
+                 language: str = "de", dispatch: Callable | None = None, system: str = SYSTEM,
+                 **ctx_kwargs: Any) -> None:
         self.clock = ManualClock()
         ctx_kwargs.setdefault("output_language", language)
         self.ctx = world.context(clock=self.clock, **ctx_kwargs)
@@ -63,7 +65,7 @@ class Run:
         kwargs: dict[str, Any] = {}
         if dispatch is not None:
             kwargs["dispatch"] = dispatch
-        self.loop = AgentLoop(self.ctx, self.client, SYSTEM, config or LoopConfig(language=language),
+        self.loop = AgentLoop(self.ctx, self.client, system, config or LoopConfig(language=language),
                               on_status=self.status.append, clock=self.clock, **kwargs)
 
     # --- Aktionen ----------------------------------------------------------------------------------------------
@@ -113,6 +115,8 @@ class Run:
         """Verlauf gültig, auch mit dem ausstehenden Teil; jede Anfrage erweitert die vorige (der Client prüft das
         bei jedem Aufruf); System und Tools sind in allen Anfragen identisch; jede Statuszeile ist ein fester Text."""
         history = self.loop.history
+        for event in self.loop.events:  # jedes rohe Ereignis besteht das Schema des Trace (Schritt 8, M3)
+            validate_loop_event(event)
         probe = list(history) + [{"role": "user", "content": [*map(dict, self.loop.pending.blocks), text_block("x")]}]
         check_placement(probe)
         assert len({(r.system, str(r.tools)) for r in self.client.requests}) <= 1

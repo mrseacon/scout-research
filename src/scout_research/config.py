@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Literal
 
 from pydantic import field_validator
@@ -21,6 +22,8 @@ class Settings(BaseSettings):
     """`max_tokens` je Modellaufruf inkl. adaptivem Thinking (Plan 12.8; Sean, 2026-10-11). Wer die Grenze erreicht,
     wird verworfen (V5); es gibt keinen Retry."""
     output_language: Literal["de", "en"] = "de"
+    runs_dir: Path = Path("runs")
+    """Ordner der Trace-Dateien (Plan 6, 12.10). Der Desktop liegt in iCloud: für Live-Läufe ein lokaler Pfad außerhalb."""
 
     edgar_requests_per_second: int = 10
     finnhub_requests_per_minute: int = 55
@@ -47,7 +50,7 @@ class Settings(BaseSettings):
             raise ValueError("ANTHROPIC_MAX_TOKENS muss mindestens 256 sein.")
         return value
 
-    @field_validator("anthropic_model", "anthropic_effort", "output_language", mode="before")
+    @field_validator("anthropic_model", "anthropic_effort", "output_language", "runs_dir", mode="before")
     @classmethod
     def _blank_means_default(cls, value: object, info) -> object:
         # `FOO=` in der .env liefert "" — das soll den Default bedeuten, nicht einen leeren Wert.

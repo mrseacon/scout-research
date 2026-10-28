@@ -10,8 +10,9 @@ durch `check_text` und wird als `CheckResult.body` gezeigt, nie als Rohtext (SM-
 gezeigt (L3); Host-Züge tragen einen festen Vorlagentext, der nie `HumanInput` ist (V1, SM-02); der Verlauf besteht
 nur aus vollständigen Paaren, ein gescheiterter Aufruf lässt den Anfrageteil ausstehend (Z16).
 
-`events` sind rohe Ereignisse für den Trace-Schreiber (Schritt 8): Schlüssel und Werte ohne Text und ohne Secrets,
-kein Schema, kein Schreiben.
+`events` sind rohe Ereignisse für den Trace-Schreiber (`agent/trace.py`, Schritt 8): kein Schema, kein Schreiben.
+Seit Schritt 8 tragen sie auch Argumente und Modell-Ergebnisse der Tools sowie die Fundstellen der Textprüfung (bewusste
+Änderung von P3). Sie gehen nie an Host oder Nutzer und nie ungeschwärzt in eine Datei: der Schreiber schwärzt jede Zeile.
 """
 
 from __future__ import annotations
@@ -183,7 +184,8 @@ class AgentLoop:
         removed = tuple(tickers.get(c, "") for c in peer_set.removed)
         added = tuple(tickers.get(c, "") for c in peer_set.added)
         self.events.append({"event": "gate", "decision": "confirmed", "proposal_id": proposal_id,
-                            "peer_set_id": peer_set.id, "channel": channel, "confirmed_by": confirmed_by})
+                            "peer_set_id": peer_set.id, "channel": channel, "confirmed_by": confirmed_by,
+                            "log_pos": self._log_pos()})
         return self._run(build_user_turn(self.pending, Confirmed(peer_set.id, removed, added), self.config.language))
 
     def reject(self, proposal_id: str, channel: str = "cli", rejected_by: str = "human") -> TurnResult:
@@ -191,7 +193,7 @@ class AgentLoop:
         self._require_ready()
         self.ctx.reject_proposal(proposal_id, channel, rejected_by)
         self.events.append({"event": "gate", "decision": "rejected", "proposal_id": proposal_id,
-                            "channel": channel, "rejected_by": rejected_by})
+                            "channel": channel, "rejected_by": rejected_by, "log_pos": self._log_pos()})
         return self._run(build_user_turn(self.pending, Rejected(proposal_id), self.config.language))
 
     def interrupt(self) -> None:
@@ -293,12 +295,14 @@ class AgentLoop:
 
             text = "".join(b.get("text", "") for b in response.content if b.get("type") == "text")
             check = check_text(build_check_session(self.ctx), text, "slot_text")
+            action = "shown" if check.ok else \
+                "withheld" if (self._closing or turn.corrections >= 1) else "correction"
             self.events.append({"event": "text_check", "where": "end_turn", "problems": [p.code for p in check.problems],
-                                "shown": check.ok})
-            if check.ok:
+                                "shown": check.ok, "findings": _findings(check.problems), "action": action})
+            if action == "shown":
                 shown = [Shown("text", check.body)] if check.body else []
                 return self._finish(turn, "done", None, [], shown)
-            if self._closing or turn.corrections >= 1:
+            if action == "withheld":
                 return self._finish(turn, "done", "withheld", [texts.user_text(lang, "withheld")])
             turn.corrections += 1
             problems = tuple({"code": p.code, "kind": p.kind, "start": p.start, "end": p.end, "match": p.match}
@@ -322,8 +326,10 @@ class AgentLoop:
         lang = self.config.language
         self._status(texts.user_text(lang, "status_working"))
         turn.calls += 1
+        request = self._request(blocks, facts, tool_choice)
+        started = self._clock()
         try:
-            response = self.client.create(self._request(blocks, facts, tool_choice), lambda kind: None)
+            response = self.client.create(request, lambda kind: None)
         except ModelCallError as exc:
             # Ein gescheiterter Aufruf ist teilweise bezahlt: die bekannte Nutzung wird verbucht und die Grenzen werden
             # wie nach einem Erfolg geprüft (M2, 12.8)
@@ -355,7 +361,8 @@ class AgentLoop:
                             "input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens,
                             "cache_read_input_tokens": response.usage.cache_read_input_tokens,
                             "cache_creation_input_tokens": response.usage.cache_creation_input_tokens,
-                            "cost_usd": call_cost, "session_cost_usd": self.session_cost, "tool_choice": tool_choice["type"]})
+                            "cost_usd": call_cost, "session_cost_usd": self.session_cost, "tool_choice": tool_choice["type"],
+                            "messages": len(request.messages), "latency_s": self._clock() - started})
         self._check_limits(turn, response.usage)
         return response, is_usable(response)
 
@@ -405,7 +412,8 @@ class AgentLoop:
         if beside.strip():
             check = check_text(build_check_session(self.ctx), beside, "slot_text")
             self.events.append({"event": "text_check", "where": "beside_tool_use",
-                                "problems": [p.code for p in check.problems], "shown": False})
+                                "problems": [p.code for p in check.problems], "shown": False,
+                                "findings": _findings(check.problems), "action": "not_shown"})
 
         results = list(self.pending.blocks)  # vorbelegt in _commit (TURN_ENDED)
         ended: str | None = None
@@ -424,14 +432,14 @@ class AgentLoop:
             else:
                 self._status(texts.tool_status(lang, name))  # nie der rohe Name aus der Antwort (H3, SG-14)
                 turn.tools += 1
+                started = self._clock()
                 try:
                     outcome = self._dispatch(self.ctx, name, args)
                 except KeyboardInterrupt:
                     self._interrupted = True
                     outcome = coded_outcome("TURN_ENDED")
                 code = outcome.content.get("error", {}).get("code") if outcome.is_error else None
-                self.events.append({"event": "tool", "name": _event_name(self, name), "is_error": outcome.is_error,
-                                    "code": code})
+                self.events.append(self._tool_event(name, block, args, outcome, code, self._clock() - started))
                 if code == "LOOP_GUARD":
                     turn.loop_guards += 1
                     if turn.loop_guards >= 2:
@@ -459,6 +467,19 @@ class AgentLoop:
             return self._intro(turn, results)
         return results
 
+    def _log_pos(self) -> dict[str, int]:
+        """Länge von `gate_log` und `commentary_log` in diesem Augenblick: Der Trace-Schreiber ordnet ihre Einträge damit
+        an die richtige Stelle zwischen den Ereignissen (Schritt 8, M1). Nur Positionen, kein Inhalt; er schreibt sie nicht."""
+        return {"gate": len(self.ctx.gate_log), "commentary": len(self.ctx.commentary_log)}
+
+    def _tool_event(self, name: Any, block: dict[str, Any], args: Any, outcome: ToolOutcome, code: str | None,
+                    duration: float) -> dict[str, Any]:
+        """Ereignis eines ausgeführten Tools: Argumente, Ergebnis für das Modell und Detail nur für den Trace (P3 geändert;
+        der Schreiber schwärzt)."""
+        return {"event": "tool", "name": _event_name(self, name), "is_error": outcome.is_error, "code": code,
+                "tool_use_id": block.get("id"), "input": copy.deepcopy(args), "result": copy.deepcopy(outcome.content),
+                "detail": copy.deepcopy(outcome.trace), "duration_s": duration, "log_pos": self._log_pos()}
+
     def _intro(self, turn: _Turn, results: list[dict[str, Any]]) -> TurnResult:
         """Z7–Z10: **ein** Aufruf mit `tool_choice: none`; keine Korrekturrunde (V2); bei Problemen oder Fehlern
         zeigt der Host die feste Einleitung, der Vorschlag gilt weiter."""
@@ -482,10 +503,11 @@ class AgentLoop:
             pending = list(self.pending.blocks)  # vorbelegt in _commit (TURN_ENDED, H1)
             for i, block in enumerate(tool_uses):
                 turn.tools += 1
+                started = self._clock()
                 outcome = self._dispatch(self.ctx, block.get("name", ""), block.get("input", {}))
-                self.events.append({"event": "tool", "name": _event_name(self, block.get("name", "")),
-                                    "is_error": outcome.is_error,
-                                    "code": outcome.content.get("error", {}).get("code") if outcome.is_error else None})
+                code = outcome.content.get("error", {}).get("code") if outcome.is_error else None
+                self.events.append(self._tool_event(block.get("name", ""), block, block.get("input", {}), outcome, code,
+                                                    self._clock() - started))
                 pending[i] = _result_block(block, outcome)
                 self.pending = Pending(tuple(pending), ())
             return self._finish(turn, "done", "intro_tool_use", [], [fixed])
@@ -494,10 +516,16 @@ class AgentLoop:
         check = check_text(build_check_session(self.ctx), text, "slot_text")
         shown = check.body if check.ok else None
         self.events.append({"event": "text_check", "where": "intro", "problems": [p.code for p in check.problems],
-                            "shown": bool(shown)})
+                            "shown": bool(shown), "findings": _findings(check.problems),
+                            "action": "shown" if shown else "intro_fixed"})
         if shown:
             return self._finish(turn, "done", None, [], [Shown("intro", shown)])
         return self._finish(turn, "done", "intro_fixed", [], [fixed])
+
+
+def _findings(problems: Sequence[Any]) -> list[dict[str, Any]]:
+    """Fundstellen der Textprüfung fürs Ereignis: Code, Art, Bereich im Rohtext und der gefundene Ausschnitt."""
+    return [{"code": p.code, "kind": p.kind, "start": p.start, "end": p.end, "match": p.match} for p in problems]
 
 
 def _KNOWN(loop: AgentLoop) -> set[str]:

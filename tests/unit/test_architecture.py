@@ -131,3 +131,33 @@ def test_a_e1_the_literal_eval_channel_appears_nowhere_in_the_package() -> None:
 def test_a_e1_the_detector_finds_the_literal() -> None:
     assert eval_channel_literals(ast.parse("loop.confirm(p, channel='eval')")) == [1]
     assert eval_channel_literals(ast.parse("loop.confirm(p, channel='cli')")) == []
+
+
+# --- Trace: wer die Loop-Ereignisse liest (Schritt 8, M2) ------------------------------------------------------------
+
+EVENT_READERS = {Path("agent") / "loop.py", Path("agent") / "trace.py"}
+
+
+def events_accesses(tree: ast.AST) -> list[tuple[int, ast.expr]]:
+    """(Zeile, Objekt) für jeden Zugriff auf ein Attribut `events`."""
+    return [(n.lineno, n.value) for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr == "events"]
+
+
+def test_only_loop_and_trace_writer_touch_the_loop_events() -> None:
+    """Die rohen Ereignisse tragen Argumente und Modell-Ergebnisse (P3 geändert): Außer dem Loop (schreibt) und dem
+    Trace-Schreiber (liest, schwärzt) greift kein Modul unter `src/scout_research` darauf zu. Einzige bekannte
+    Ausnahme: `Streamed.events` des Test-Doubles in `agent/model_client.py` (`step.events`, ein anderes Objekt)."""
+    offenders = []
+    for path, tree in _sources().items():
+        if path in EVENT_READERS:
+            continue
+        for line, owner in events_accesses(tree):
+            if path == Path("agent") / "model_client.py" and isinstance(owner, ast.Name) and owner.id == "step":
+                continue
+            offenders.append(f"{path}:{line}")
+    assert offenders == []
+
+
+def test_the_events_detector_itself_finds_violations() -> None:
+    tree = ast.parse("def f(loop):\n    return loop.events\n\ndef g(ctx):\n    ctx.loop.events.append(1)\n")
+    assert [line for line, _ in events_accesses(tree)] == [2, 5]
