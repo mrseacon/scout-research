@@ -8,7 +8,8 @@ aus `data/` (T8).
 Was die Schleife durchsetzt, auch wenn das Modell die Regeln bricht (12.11): jede Antwort, die der Nutzer sieht, läuft
 durch `check_text` und wird als `CheckResult.body` gezeigt, nie als Rohtext (SM-05); Text neben `tool_use` wird nie
 gezeigt (L3); Host-Züge tragen einen festen Vorlagentext, der nie `HumanInput` ist (V1, SM-02); der Verlauf besteht
-nur aus vollständigen Paaren, ein gescheiterter Aufruf lässt den Anfrageteil ausstehend (Z16).
+nur aus vollständigen Paaren, ein gescheiterter Aufruf lässt den Anfrageteil ausstehend (Z16), außer bei `bad_request`:
+dann fällt der Text des Menschen weg (O-12).
 
 `events` sind rohe Ereignisse für den Trace-Schreiber (`agent/trace.py`, Schritt 8): kein Schema, kein Schreiben.
 Seit Schritt 8 tragen sie auch Argumente und Modell-Ergebnisse der Tools sowie die Fundstellen der Textprüfung (bewusste
@@ -61,7 +62,7 @@ class LoopBusyError(Exception):
 
 
 class SessionClosedError(Exception):
-    """Die Sitzung ist geschlossen (Kosten- oder Kontextgrenze, ungültiger Schlüssel)."""
+    """Die Sitzung ist geschlossen (Kosten- oder Kontextgrenze, ungültiger Schlüssel, zwei abgelehnte Anfragen in Folge)."""
 
 
 @dataclass(frozen=True)
@@ -87,16 +88,20 @@ class TurnResult:
 
 @dataclass(frozen=True)
 class Pending:
-    """Ausstehender Anfrageteil: Blöcke und Betreiber-Fakten, die noch nicht erfolgreich gesendet wurden (Z16)."""
+    """Ausstehender Anfrageteil: Blöcke und Betreiber-Fakten, die noch nicht erfolgreich gesendet wurden (Z16).
+    `human` sind die Stellen in `blocks`, an denen ein Text des Menschen steht; nach `bad_request` fallen genau diese
+    weg (O-12)."""
 
     blocks: tuple[dict[str, Any], ...] = ()
     facts: tuple[str, ...] = ()
+    human: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
 class UserTurn:
     blocks: list[dict[str, Any]]
     facts: list[str]
+    human: tuple[int, ...] = ()
 
 
 def build_user_turn(pending: Pending, lead: HumanInput | HostEvent, language: str = "de") -> UserTurn:
@@ -105,7 +110,9 @@ def build_user_turn(pending: Pending, lead: HumanInput | HostEvent, language: st
     templates = texts.HOST_TEMPLATES[language]
     blocks = [copy.deepcopy(b) for b in pending.blocks]
     facts = list(pending.facts)
+    human = pending.human
     if isinstance(lead, HumanInput):
+        human = (*human, len(blocks))
         blocks.append({"type": "text", "text": lead.text})
     elif isinstance(lead, Confirmed):
         blocks.append({"type": "text", "text": templates["confirmed"]})
@@ -120,7 +127,7 @@ def build_user_turn(pending: Pending, lead: HumanInput | HostEvent, language: st
         facts.append(texts.correction_fact(lead.problems))
     else:
         raise TypeError(f"unbekannter Auslöser eines Zugs: {type(lead).__name__}")
-    return UserTurn(blocks, facts)
+    return UserTurn(blocks, facts, human)
 
 
 @dataclass
@@ -161,6 +168,7 @@ class AgentLoop:
         self._cost_warned = False
         self._closing: str | None = None
         self._interrupted = False
+        self._bad_requests = 0  # abgelehnte Anfragen in Folge, ohne erfolgreichen Aufruf dazwischen (M1)
 
     # --- Host-API ---------------------------------------------------------------------------------------------
 
@@ -168,6 +176,11 @@ class AgentLoop:
         self._require_ready()
         if type(msg) is not HumanInput:
             raise TypeError("run_turn verlangt HumanInput")
+        if not isinstance(msg.text, str):
+            raise TypeError("run_turn verlangt Text als str")
+        if not msg.text.strip():
+            # Die API lehnt einen leeren Text-Block ab (400). Hier, vor Protokoll und Senden, bleibt alles unverändert (M1).
+            raise ValueError("run_turn verlangt einen nichtleeren Text")
         self.ctx.record_user_message(msg)
         return self._run(build_user_turn(self.pending, msg, self.config.language))
 
@@ -264,7 +277,7 @@ class AgentLoop:
         lang = self.config.language
         cfg = self.config
         blocks, facts = list(user_turn.blocks), list(user_turn.facts)
-        self.pending = Pending(tuple(blocks), tuple(facts))  # bis zum ersten erfolgreichen Senden ausstehend
+        self.pending = Pending(tuple(blocks), tuple(facts), user_turn.human)  # bis zum ersten erfolgreichen Senden ausstehend
         tool_choice = {"type": "auto"}
         while True:
             if self._interrupted:
@@ -290,6 +303,9 @@ class AgentLoop:
                 blocks, facts = outcome, []
                 self.pending = Pending(tuple(blocks), ())
                 continue
+            # `tool_use` ohne Block heißt hier: Eine angekündigte Aktion fehlt. Den Text als Antwort zu zeigen, stellte eine
+            # nicht erfolgte Aktion als erledigt dar, darum `unexpected_stop`. In `_intro` ist der Vorschlag schon
+            # deterministisch gezeigt und die Einleitung nur Beiwerk, dort zeigt der Host den geprüften Text.
             if response.stop_reason != "end_turn":
                 return self._unusable(turn, response, committed=True)
 
@@ -352,8 +368,16 @@ class AgentLoop:
             if exc.kind == "interrupted":
                 self._interrupted = True
                 return self._finish(turn, "failed", "interrupted", [texts.user_text(lang, "interrupted")])
+            if exc.kind == "bad_request":
+                # Vermutlich ist der Text des Menschen die Ursache; ihn erneut zu senden, scheitert erneut (M1, O-12,
+                # Abweichung von Z16). Eine zweite Ablehnung in Folge liegt am festen Verlauf: Die Sitzung schließt.
+                self._discard_human_text()
+                self._bad_requests += 1
+                if self._bad_requests >= 2 and not self._closing:
+                    self._closing = "bad_request"
             key = "unavailable" if exc.kind in {"unavailable", "stalled", "deadline"} else "internal"
             return self._finish(turn, "failed", exc.kind, [texts.user_text(lang, key)])
+        self._bad_requests = 0  # ein erfolgreicher Aufruf setzt den Zähler zurück (M1)
         # Kosten und Kontext **nach jedem Aufruf** aus der gemeldeten Nutzung (V3, L1, L7)
         call_cost = cost_usd(response.usage, self.config.price)
         self.session_cost += call_cost
@@ -365,6 +389,12 @@ class AgentLoop:
                             "messages": len(request.messages), "latency_s": self._clock() - started})
         self._check_limits(turn, response.usage)
         return response, is_usable(response)
+
+    def _discard_human_text(self) -> None:
+        """Nach `bad_request` (M1, O-12): Es fällt nur der Text des Menschen weg. `tool_result`-Blöcke, Vorlagentext und
+        Fakten eines Host-Zugs bleiben unverändert; war der Zug ein Host-Zug, bleibt `pending` ganz erhalten."""
+        blocks = tuple(b for i, b in enumerate(self.pending.blocks) if i not in self.pending.human)
+        self.pending = Pending(blocks, self.pending.facts)
 
     def _check_limits(self, turn: _Turn, usage: Usage) -> None:
         """Sitzungsgrenzen nach einem Aufruf, gelungen oder gescheitert (V3, L1, L7, M2): Kostengrenze, Kontextgrenze,

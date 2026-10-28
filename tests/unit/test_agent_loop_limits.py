@@ -483,3 +483,185 @@ def test_m2_the_turn_end_event_names_the_closing_reason_even_when_the_failure_ki
     run = _run([ModelCallError("stalled")])
     run.say("Frage")
     assert run.loop.events[-1]["closing"] is None
+
+
+# --- M1 (12.16): leere Eingabe und abgelehnte Anfrage vergiften den Verlauf nicht -----------------------------------
+
+
+def _snapshot(run: Run) -> tuple:
+    loop = run.loop
+    return (loop.pending, json.dumps(loop.history, sort_keys=True), run.ctx.user_messages, list(loop.events), loop.state)
+
+
+def _has_empty_text(request) -> bool:
+    return any(b.get("type") == "text" and not b.get("text", "").strip()
+               for m in request.messages for b in m["content"])
+
+
+@pytest.mark.parametrize("blank", ["", " ", "\n\t  \n"])
+def test_m1_empty_or_whitespace_input_is_rejected_before_anything_is_recorded_or_sent(blank: str) -> None:
+    run = _run([say("Gerne."), say("Verstanden.")])
+    run.say("Frage eins")
+    before = _snapshot(run)
+    with pytest.raises(ValueError):
+        run.say(blank)
+    assert _snapshot(run) == before and len(run.client.requests) == 1
+    assert shown_texts(run.say("Frage zwei")) == ["Verstanden."]
+    assert not any(_has_empty_text(r) for r in run.client.requests)
+    run.assert_invariants()
+
+
+@pytest.mark.parametrize("not_text", [None, b""])
+def test_m1_input_that_is_not_text_raises_type_error_and_changes_nothing(not_text) -> None:
+    run = _run([say("Gerne.")])
+    before = _snapshot(run)
+    with pytest.raises(TypeError):
+        run.say(not_text)
+    assert _snapshot(run) == before and run.client.requests == []
+    assert shown_texts(run.say("Frage")) == ["Gerne."]
+    run.assert_invariants()
+
+
+def test_m1_empty_input_on_a_fresh_session_leaves_it_untouched_and_the_first_real_turn_works() -> None:
+    run = _run([say("Gerne.")])
+    before = _snapshot(run)
+    with pytest.raises(ValueError):
+        run.say("")
+    assert _snapshot(run) == before and run.client.requests == []
+    assert shown_texts(run.say("Frage")) == ["Gerne."]
+    run.assert_invariants()
+
+
+def test_m1_a_rejected_request_with_plain_user_text_is_discarded_and_the_next_turn_sends_only_the_new_text() -> None:
+    run = _run([ModelCallError("bad_request", "BadRequestError", 400, "req_x"), say("Jetzt klappt es.")])
+    first = run.say("Frage eins")
+    assert first.outcome == "failed" and first.reason == "bad_request" and first.state is LoopState.IDLE
+    assert run.loop.pending == Pending() and run.loop.history == []
+    run.assert_invariants()
+    second = run.say("Frage zwei")
+    assert [b["text"] for b in run.client.requests[1].messages[-1]["content"]] == ["Frage zwei"]
+    assert shown_texts(second) == ["Jetzt klappt es."]
+    run.assert_invariants()
+
+
+def test_m1_a_rejected_request_keeps_the_tool_results_unchanged() -> None:
+    spy = _Spy()
+    run = _run([use(_q(1), _q(2)), ModelCallError("bad_request", "BadRequestError", 400, "req_x"),
+                say("Jetzt klappt es.")], spy)
+    first = run.say("Suche")
+    assert first.outcome == "failed" and first.reason == "bad_request" and spy.calls == ["resolve_company"] * 2
+    uses = [b["id"] for b in run.loop.history[-1]["content"] if b["type"] == "tool_use"]
+    kept = run.loop.pending.blocks
+    assert [b["tool_use_id"] for b in kept] == uses and len(uses) == 2 and run.loop.pending.facts == ()
+    assert all("TURN_ENDED" not in b["content"] for b in kept)  # die echten Ergebnisse, nicht TURN_ENDED (O-12)
+    run.assert_invariants()
+    second = run.say("Neue Frage")
+    sent = run.client.requests[-1].messages[-1]["content"]
+    assert [b for b in sent if b["type"] == "tool_result"] == list(kept)
+    assert [b["text"] for b in sent if b["type"] == "text"] == ["Neue Frage"]
+    assert shown_texts(second) == ["Jetzt klappt es."]
+    run.assert_invariants()
+
+
+def test_m1_after_a_failed_tool_turn_a_rejected_user_turn_drops_only_the_user_text() -> None:
+    run = _run([use(_q(1)), ModelCallError("unavailable"), ModelCallError("bad_request", "BadRequestError", 400),
+                say("Jetzt klappt es.")])
+    run.say("Suche")
+    results = run.loop.pending.blocks
+    assert len(results) == 1 and "TURN_ENDED" not in results[0]["content"]
+    assert run.say("Frage zwei").reason == "bad_request"
+    assert run.loop.pending.blocks == results and run.loop.pending.facts == ()  # nur der Text des Menschen fällt weg
+    run.assert_invariants()
+    assert shown_texts(run.say("Frage drei")) == ["Jetzt klappt es."]
+    sent = run.client.requests[-1].messages[-1]["content"]
+    assert [b for b in sent if b["type"] == "tool_result"] == list(results)
+    assert [b["text"] for b in sent if b["type"] == "text"] == ["Frage drei"]
+    run.assert_invariants()
+
+
+def test_m1_a_rejected_request_drops_every_earlier_user_text_still_pending_too() -> None:
+    run = _run([ModelCallError("stalled"), ModelCallError("bad_request", "BadRequestError", 400), say("Jetzt klappt es.")])
+    run.say("Frage null")
+    assert run.say("Frage eins").reason == "bad_request"
+    assert run.loop.pending == Pending()
+    assert shown_texts(run.say("Frage zwei")) == ["Jetzt klappt es."]
+    assert [b["text"] for b in run.client.requests[-1].messages[-1]["content"]] == ["Frage zwei"]
+    run.assert_invariants()
+
+
+def test_m1_a_rejected_host_turn_keeps_template_and_fact_and_the_next_turn_sends_them_again() -> None:
+    run = _flow_to_proposal(tail=[ModelCallError("bad_request", "BadRequestError", 400), say("Jetzt klappt es.")])
+    run.say("Mach Comps für NVDA")
+    result = run.confirm()
+    assert result.outcome == "failed" and result.reason == "bad_request" and result.state is LoopState.IDLE
+    assert run.ctx.peer_sets and any(e["event"] == "confirmed" for e in run.ctx.gate_log)  # das Gate gilt weiter
+    template = texts.HOST_TEMPLATES["de"]["confirmed"]
+    assert [b["text"] for b in run.loop.pending.blocks] == [template] and len(run.loop.pending.facts) == 1
+    run.assert_invariants()
+    assert shown_texts(run.say("Weiter bitte")) == ["Jetzt klappt es."]
+    messages = run.client.requests[-1].messages
+    assert [b["text"] for b in messages[-2]["content"]] == [template, "Weiter bitte"]
+    assert messages[-1]["role"] == "system" and "Peer-Set bestätigt" in messages[-1]["content"][0]["text"]
+    run.assert_invariants()
+
+
+def test_m1_a_rejected_introduction_keeps_the_proposal_result_and_the_proposal_confirmable() -> None:
+    run = _flow_to_proposal(tail=[say("Bestätigt, ich rechne.")])
+    run.client._steps[3] = ModelCallError("bad_request", "BadRequestError", 400)
+    result = run.say("Mach Comps für NVDA")
+    assert result.outcome == "done" and result.reason == "intro_bad_request"
+    assert result.state is LoopState.AWAITING_PEER_CONFIRMATION and run.ctx.open_proposal is not None
+    uses = [b["id"] for b in run.loop.history[-1]["content"] if b["type"] == "tool_use"]
+    kept = run.loop.pending.blocks
+    assert [b["tool_use_id"] for b in kept] == uses and len(uses) == 1 and "TURN_ENDED" not in kept[0]["content"]
+    run.assert_invariants()
+    assert run.confirm().outcome == "done"
+    run.assert_invariants()
+
+
+def test_m1_two_rejected_requests_in_a_row_close_the_session() -> None:
+    run = _run([ModelCallError("bad_request", "BadRequestError", 400), ModelCallError("bad_request", "BadRequestError", 400),
+                say("nie gesendet")])
+    first = run.say("Frage eins")
+    assert first.outcome == "failed" and first.state is LoopState.IDLE
+    second = run.say("Frage zwei")
+    assert second.outcome == "closed" and second.reason == "bad_request" and second.state is LoopState.CLOSED
+    assert shown_texts(second) == [texts.user_text("de", "internal")]
+    assert run.loop.events[-1]["event"] == "turn_end" and run.loop.events[-1]["closing"] == "bad_request"
+    with pytest.raises(SessionClosedError):
+        run.say("Frage drei")
+    assert len(run.client.requests) == 2
+    run.assert_invariants()
+
+
+def test_m1_a_cost_limit_already_set_stays_the_closing_reason_on_the_second_rejection() -> None:
+    run = _run([ModelCallError("bad_request", "BadRequestError", 400),
+                ModelCallError("bad_request", "BadRequestError", 400, usage=Usage(1000, 200_000), usage_estimated=True)])
+    run.say("Frage eins")
+    result = run.say("Frage zwei")
+    assert result.outcome == "closed" and result.state is LoopState.CLOSED
+    assert run.loop.events[-1]["event"] == "turn_end" and run.loop.events[-1]["closing"] == "cost"
+    assert any("Kostenlimit" in t for t in shown_texts(result))
+    run.assert_invariants()
+
+
+def test_m1_a_successful_call_between_two_rejected_requests_resets_the_counter() -> None:
+    run = _run([ModelCallError("bad_request", "BadRequestError", 400), say("Gerne."),
+                ModelCallError("bad_request", "BadRequestError", 400), say("Wieder da.")])
+    run.say("Frage eins")
+    assert shown_texts(run.say("Frage zwei")) == ["Gerne."]
+    third = run.say("Frage drei")
+    assert third.outcome == "failed" and third.state is LoopState.IDLE
+    assert shown_texts(run.say("Frage vier")) == ["Wieder da."]
+    run.assert_invariants()
+
+
+@pytest.mark.parametrize("kind", ["unavailable", "stalled"])
+def test_m1_other_failure_kinds_keep_the_pending_part_and_never_count_towards_closing(kind: str) -> None:
+    run = _run([ModelCallError(kind), ModelCallError(kind), ModelCallError(kind),  # type: ignore[arg-type]
+                say("Jetzt klappt es.")])
+    for i in range(3):
+        assert run.say(f"Frage {i}").state is LoopState.IDLE
+    assert [b["text"] for b in run.loop.pending.blocks] == ["Frage 0", "Frage 1", "Frage 2"]
+    assert shown_texts(run.say("Frage 3")) == ["Jetzt klappt es."]
+    run.assert_invariants()
