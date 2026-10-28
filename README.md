@@ -131,7 +131,7 @@ src/scout_research/
   agent/     L4  model client, loop, budgets, fixed texts, versioned prompt
   export/    L5  placeholder (planned)
   ui/        L6  placeholder (planned)
-docs/        foundation, phase 3 plan, guard register, mutation report
+docs/        foundation, phase 3 plan, guard register, mutation report, operating charter
 eval/        golden-set seed and the extractor comparison
 tests/       unit, integration, fixtures, number-check corpus
 scripts/     push gate
@@ -144,7 +144,8 @@ scripts/     push gate
 | [`docs/foundation.md`](docs/foundation.md) | Vision, scope, architecture, data sources, roadmap, decision log |
 | [`docs/decisions/phase-3-plan.md`](docs/decisions/phase-3-plan.md) | Agent layer design, number-check policy, loop, reviews |
 | [`docs/security-guards.md`](docs/security-guards.md) | Register of guards with tests and mutations |
-| [`docs/mutation-report-2026-10-11.md`](docs/mutation-report-2026-10-11.md) | Archived report of the last mutation run (step 7, phase B) |
+| [`docs/mutation-report-2026-10-11.md`](docs/mutation-report-2026-10-11.md) | Archived report of the full mutation run of 2026-10-11 (step 7, phase B) |
+| [`docs/operating-charter.md`](docs/operating-charter.md) | Roles and decision levels for agent-driven work (what the orchestrating session may decide, what goes to the human) |
 
 The documents are written in German.
 

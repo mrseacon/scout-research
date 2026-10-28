@@ -1919,7 +1919,10 @@ eindeutig als Ja/Nein berechnen lässt (Suite, Arbeitsstand, Geheimnisse im Diff
 Ein Agent kommt dort ins Spiel, wo ein Urteil nötig ist (Review, Angriffsideen, Einordnung von Fehlern) oder wo
 Mutationen und Testläufe in einer isolierten Kopie nötig sind.
 
-Vier Subagent-Typen liegen als Dateien unter `.claude/agents/`; die deterministischen Mittel sind
+**Seit 2026-10-28 gilt zusätzlich die Betriebsordnung `docs/operating-charter.md`** (Rollen, Entscheidungsstufen A/B/C,
+Status- und Eskalationsdateien); wo sie den Regeln unten widerspricht (Regeln 3 und 7), geht sie vor.
+
+Fünf Subagent-Typen liegen als Dateien unter `.claude/agents/`; die deterministischen Mittel sind
 `scripts/push_gate.py` und der Hook `.claude/hooks/require_push_gate.py` (Konfiguration `.claude/settings.json`).
 Der frühere Agent `push-check` entfällt (v1.6.16); seine Prüfungen sind jetzt `push_gate.py`.
 
@@ -1931,12 +1934,14 @@ Der frühere Agent `push-check` entfällt (v1.6.16); seine Prüfungen sind jetzt
 | `mutation-prober` | Nach **jedem** Schritt, der Schutzmaßnahmen ändert | Sonnet | `docs/security-guards.md`, isolierter Worktree | Tabelle je Maßnahme: `angeschlagen` / `zahnlos` / `nicht anwendbar`; Testvorschläge für zahnlose |
 | `trace-triager` | Ab Schritt 9, nach jedem Lauf mit Fehlern | Sonnet | Pfade unter `runs/` (Trace-JSONL, Abschnitt 6) | Einordnung je Fehler: Prompt-Problem / Code-Fehler / Modell-Zufall / Artefakt der Testwelt, minimaler Korrekturvorschlag |
 | `corpus-adversary` | Nach Änderungen an Check oder Prompt, und in Schritt 10 | Sonnet | Policy (Abschnitt 11), Check, Korpus | Angriffsfälle samt Erwartung nach Policy in einer Datei im Scratchpad |
+| `implementer` | Je Teilaufgabe, vom Orchestrator beauftragt (Betriebsordnung) | Sonnet | Teilaufgabe mit Abnahmekriterium, Dateien, Plan-Abschnitte | Code und Tests im Arbeitsverzeichnis (ohne Commit); Bericht: Änderungen, Tests vorher/nachher, Suite |
 
 | Typ | Werkzeuge | Schreibschutz |
 |---|---|---|
 | `reviewer` | `Read`, `Grep`, `Glob` | durch Werkzeugbeschränkung |
 | `trace-triager` | `Read`, `Grep`, `Glob` | durch Werkzeugbeschränkung; Geheimnisse nur per Anweisung |
 | `corpus-adversary` | `Read`, `Bash`, `Write` | nur per Anweisung |
+| `implementer` | `Read`, `Write`, `Edit`, `Grep`, `Glob`, `Bash` | keiner; Grenzen (keine Commits, Pushes, Gate-Dateien, `.claude/`) nur per Anweisung; der Orchestrator prüft den Diff |
 | `mutation-prober` | `Read`, `Grep`, `Glob`, `Edit`, `Bash`, `isolation: worktree` | Arbeitsverzeichnis isoliert; Hauptverzeichnis nur per Anweisung und Selbstprüfung (`git-dir` enthält `/worktrees/`) |
 
 **Regeln**
@@ -1950,8 +1955,9 @@ Der frühere Agent `push-check` entfällt (v1.6.16); seine Prüfungen sind jetzt
    `git push` in der Form `git [Optionen] push` (auch hinter `&&`, `;`, `bash -c`, `env`); Aliasse oder Skripte, die
    intern pushen, erkennt er nicht. Der Hook ist ein Schutz gegen Versehen, keine Sicherheitsgrenze.
 3. **Reviewer:** Der Hauptagent schreibt den Diff in eine Datei und übergibt deren Pfad; der Reviewer hat kein `Bash`
-   und holt sich den Diff nicht selbst. Seine Befunde sind Vorschläge. Was daraus folgt, entscheidet Sean, und
-   Festlegungen kommen mit Eintrag in den Plan.
+   und holt sich den Diff nicht selbst. Seine Befunde sind Vorschläge. Was daraus folgt, regelt die Betriebsordnung:
+   mittel und niedrig behebt der Orchestrator (Stufe A), kritisch und hoch, die nicht in einer Runde behoben sind,
+   gehen an Sean (Stufe C); Festlegungen kommen mit Eintrag in den Plan.
 4. **Register.** `docs/security-guards.md` führt jede Schutzmaßnahme mit Modul, Tests und Mutation. Ein Schritt, der
    Schutzmaßnahmen ändert oder hinzufügt, ändert das Register im selben Commit und lässt danach den
    `mutation-prober` laufen; `zahnlos` ist ein Befund, der vor dem Push zu bearbeiten ist.
@@ -1960,12 +1966,25 @@ Der frühere Agent `push-check` entfällt (v1.6.16); seine Prüfungen sind jetzt
 6. **Trace-Triager** ändert nichts und gibt keine tokenähnlichen Zeichenketten aus; ungeschwärzte Werte im Trace
    meldet er nur als Fundstelle (SG-09). Seine Einordnung ist ein Vorschlag; bei n = 1 ist „Modell-Zufall“
    vorläufig.
-7. **Keine Umsetzung durch Subagents.** Die Schritte 7 bis 10 setzt der Hauptagent um. Subagents werden nicht für
-   Code, Tests, Plan oder Doku eingesetzt, die in ein Commit gehen; der `mutation-prober` schlägt Tests nur vor.
+7. **Umsetzung durch den Implementierer (ersetzt, 2026-10-28).** Code und Tests schreibt der Subagent `implementer`,
+   je eine Teilaufgabe und nie parallel; der Orchestrator prüft, committet und pflegt Plan und Doku
+   (Betriebsordnung, Abschnitte 1 und 3). Die Urteils-Agenten schreiben nichts, was in einen Commit geht; der
+   `mutation-prober` schlägt Tests nur vor. Bis 2026-10-28 galt: Die Schritte 7 bis 10 setzt der Hauptagent um.
 8. **Berichte sind Modellausgabe, keine Freigabe.** Ein bestandenes Gate ersetzt nicht die Entscheidung des
    Menschen, und ein Review ohne Befund ist kein Beweis, dass es keine gibt.
 9. **Laden der Definitionen.** Agent-Definitionen werden beim Sitzungsstart gelesen und bei Änderungen in
    bestehenden Verzeichnissen beobachtet; ein neues Verzeichnis oder ein Hook in `.claude/settings.json` wirkt unter
    Umständen erst in einer neuen Sitzung. Der Hook war in der Sitzung, in der er angelegt wurde, sofort wirksam
-   (Probe: `git push --dry-run` ohne Marker wurde blockiert).
+   (Probe: `git push --dry-run` ohne Marker wurde blockiert). **Beobachtung 2026-10-28:** `.claude/agents/implementer.md` wurde
+   in das schon bestehende Verzeichnis gelegt; die laufende Sitzung (Desktop-App) meldete beim Aufruf zweimal
+   „Agent type 'implementer' not found“, obwohl die Doku eine Erkennung ohne Neustart beschreibt. Neue
+   Agent-Definitionen deshalb erst in einer neuen Sitzung als verfügbar ansehen und dort mit einer Ladeprobe prüfen.
 10. **README.** Nach jedem Meilenstein (Schritt 9, Phase 4, Phase 5) wird die Status-Tabelle im README aktualisiert; Zahlen darin tragen ein Datum und werden neu gezählt.
+
+## 14. Entscheidungen des Orchestrators (Stufe B)
+
+Reversible Wahl innerhalb des Plans (Betriebsordnung, Abschnitt 2). Jede Zeile nennt, wie die Entscheidung rückgängig
+zu machen ist; im Bericht an Sean stehen sie gesondert.
+
+| ID | Datum | Schritt | Punkt | Entscheidung | Grund | Alternative | Rückgängig durch |
+|---|---|---|---|---|---|---|---|
