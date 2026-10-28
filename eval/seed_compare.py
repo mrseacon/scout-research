@@ -1,6 +1,6 @@
 """Vergleich Extraktor ↔ Golden-Set-Seed (Messlineal), gepinnt an period_end und Accession des Seeds.
 
-    python eval/seed_compare.py [aapl msft ...]
+    python -m eval.seed_compare [aapl msft ...]
 
 Zeigt je Firma und Feld Seed-Wert, Extraktor-Wert, Abweichung und Quellfiling. Die Klassifikation einer
 Abweichung (a Definitionsunterschied / b Extraktor-Bug / c möglicher Seed-Fehler) macht ein Mensch.

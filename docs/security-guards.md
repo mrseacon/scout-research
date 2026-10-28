@@ -73,7 +73,8 @@ Testpfade sind relativ zu `tests/unit/`.
    (12.4: „Blöcke dieser Antwort werden nicht ausgeführt“); die Festlegung steht im Bericht von Schritt 7, Phase B.
 
 Die Mutationen SG-01 bis SG-11a wurden beim Anlegen von Hand im Wegwerf-Worktree geprüft, die Mutationen von
-SG-04c bis SG-17 nach Schritt 7, Phase B durch den Agenten `mutation-prober` (Bericht in der Sitzung).
+SG-04c bis SG-17 nach Schritt 7, Phase B durch den Agenten `mutation-prober` (Bericht archiviert:
+[`mutation-report-2026-10-11.md`](mutation-report-2026-10-11.md)).
 
 ## Hinweise zur Mutation
 

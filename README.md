@@ -72,7 +72,7 @@ Value, concept and accession are in the golden set. Period start and filing date
 | Golden set | 5 companies (AAPL, MSFT, NVDA, ADSK; CDNS only `total_debt`), values checked by hand against the 10-K statements, pinned to period end and accession | `eval/golden_set/` |
 | Extractor vs. golden set | Offline comparison; two deviations are known and pinned with a reason (ADSK `total_debt`, CDNS lower-bound flag), the rest match, some within a stated rounding tolerance | `python -m eval.seed_compare`, `tests/unit/test_golden_reproduction.py` |
 | Number-check corpus | 239 cases (accepted texts, bare numbers, slot errors, attacks) as a parametrised test | `tests/data/number_check_corpus.yaml` |
-| Mutation probes | Removing a guard must turn tests red; 35 mutations in the last agent run (2026-10-11), none toothless; the run report is not archived and several guards rest on a single test | `docs/security-guards.md`, plan section 12.16 |
+| Mutation probes | Removing a guard must turn tests red; 35 mutations in the last agent run (2026-10-11), none toothless (34 caught, one not applicable); several guards rest on a single test | [`docs/mutation-report-2026-10-11.md`](docs/mutation-report-2026-10-11.md), `docs/security-guards.md`, plan section 12.16 |
 | Guard register | 23 register rows, each with module, tests and a mutation (two only partly implemented until trace and harness exist) | `docs/security-guards.md` |
 | Independent review | A read-only reviewer agent checks diffs against the plan; findings are tracked in the plan | plan sections 12.14, 12.16 |
 | Push gate | Full suite, clean tree, secret scan on added lines; a hook enforces it for the agent's own shell calls (not for pushes from a personal terminal) | `scripts/push_gate.py`, `.claude/hooks/` |
@@ -144,6 +144,7 @@ scripts/     push gate
 | [`docs/foundation.md`](docs/foundation.md) | Vision, scope, architecture, data sources, roadmap, decision log |
 | [`docs/decisions/phase-3-plan.md`](docs/decisions/phase-3-plan.md) | Agent layer design, number-check policy, loop, reviews |
 | [`docs/security-guards.md`](docs/security-guards.md) | Register of guards with tests and mutations |
+| [`docs/mutation-report-2026-10-11.md`](docs/mutation-report-2026-10-11.md) | Archived report of the last mutation run (step 7, phase B) |
 
 The documents are written in German.
 
