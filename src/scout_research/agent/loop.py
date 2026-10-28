@@ -33,6 +33,7 @@ from scout_research.agent.model_client import (
     USABLE_STOP_REASONS,
     PlacementError,
     has_content,
+    history_content,
     is_usable,
 )
 from scout_research.tools.commentary import build_check_session, check_text
@@ -355,7 +356,7 @@ class AgentLoop:
         entries = [{"role": "user", "content": copy.deepcopy(blocks)}]
         if facts:
             entries.append({"role": "system", "content": [{"type": "text", "text": "\n".join(facts)}]})
-        entries.append({"role": "assistant", "content": copy.deepcopy(response.content)})
+        entries.append({"role": "assistant", "content": history_content(response.content)})
         ended = coded_outcome("TURN_ENDED")
         uses = [b for b in response.content if b.get("type") == "tool_use"]
         prefilled = Pending(tuple(_result_block(b, ended) for b in uses), ())
@@ -467,12 +468,14 @@ class AgentLoop:
                 pending[i] = _result_block(block, outcome)
                 self.pending = Pending(tuple(pending), ())
             return self._finish(turn, "done", "intro_tool_use", [], [fixed])
+        # Jeder Text, der hier ankommt, läuft durch check_text — auch bei `stop_reason` `tool_use` ohne Block (SM-05)
         text = "".join(b.get("text", "") for b in response.content if b.get("type") == "text")
         check = check_text(build_check_session(self.ctx), text, "slot_text")
+        shown = check.body if check.ok else None
         self.events.append({"event": "text_check", "where": "intro", "problems": [p.code for p in check.problems],
-                            "shown": check.ok})
-        if check.ok and check.body:
-            return self._finish(turn, "done", None, [], [Shown("intro", check.body)])
+                            "shown": bool(shown)})
+        if shown:
+            return self._finish(turn, "done", None, [], [Shown("intro", shown)])
         return self._finish(turn, "done", "intro_fixed", [], [fixed])
 
 

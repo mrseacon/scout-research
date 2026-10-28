@@ -1,4 +1,4 @@
-"""Schleifen-Szenarien zu Budgets, Abbrüchen und Fehlern: LT-14/15/18–24, LT-40, LT-43–46, LT-49, LT-51/51b, LT-53/53b,
+"""Schleifen-Szenarien zu Budgets, Abbrüchen und Fehlern: LT-14/15/18–24, LT-40, LT-43–46, LT-49, LT-51/51b, LT-53/53b/53c,
 Z17, Z20."""
 
 from __future__ import annotations
@@ -266,6 +266,20 @@ def test_lt_53b_tool_use_stop_with_text_but_without_a_block_is_appended_and_repo
     assert run.loop.history[-1]["role"] == "assistant" and run.loop.pending == Pending()
     run.assert_invariants()
     assert shown_texts(run.say("Frage zwei")) == ["Jetzt klappt es."]
+    run.assert_invariants()
+
+
+def test_lt_53c_whitespace_text_blocks_never_reach_the_history_beside_tools_or_otherwise() -> None:
+    resolve = ("resolve_company", {"query": "NVDA"})
+    run = _run([use(resolve, text="\n\n"), reply(text_block("Fertig."), text_block("  \n")), say("Weiter.")])
+    result = run.say("Mach Comps für NVDA")
+    assert [t.strip() for t in shown_texts(result)] == ["Fertig."]  # gezeigt wird der geprüfte Text
+    assistant = [m["content"] for m in run.loop.history if m["role"] == "assistant"]
+    assert [[b["type"] for b in c] for c in assistant] == [["tool_use"], ["text"]]
+    assert all(b.get("text", "x").strip() for request in run.client.requests for m in request.messages
+               if m["role"] == "assistant" for b in m["content"])
+    run.assert_invariants()
+    assert shown_texts(run.say("Und jetzt?")) == ["Weiter."]
     run.assert_invariants()
 
 

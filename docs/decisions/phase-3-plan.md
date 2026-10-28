@@ -1528,6 +1528,13 @@ mit präparierten Firmennamen für B10 und Testfragen für B9/B11 — so sind In
 SEC-Daten zu manipulieren. Jedes Szenario läuft mindestens dreimal (Schwellen oben). Ergebnisse je Prompt-Version im
 Trace und in einer Tabelle im Plan.
 
+**Für den halb-live-Satz vorgemerkte Prompt-Änderungen (L8, nicht vorher umsetzen):**
+- Paar „Vorlagentext des Hosts + Systemnachricht“ erklären oder nicht (12.15 P8).
+- Hinweis zu `TURN_ENDED` allgemeiner fassen: Der Code gilt seit 12.17 auch für Blöcke, deren Ergebnis eine Ausnahme im
+  Loop verhindert hat. Der heutige Hinweis („Rufe das Tool nicht erneut auf …“) könnte das Modell davon abhalten, einer
+  neuen Bitte des Nutzers nachzukommen; Vorschlag: „in diesem Zug nicht mehr ausgeführt; auf neue Bitte erneut
+  möglich“ (Review 12.17). Wirkung im halb-live-Satz messen (B4).
+
 ### 12.13 Entscheidungen L1–L9 (Sean, 2026-10-09; alle entschieden)
 
 | # | Frage | Optionen | Empfehlung | Status |
@@ -1872,7 +1879,7 @@ Das Register ist an zwei Stellen berichtigt (SG-11a Fragment, SG-03b Kontext). B
 | H2 | `model_client.has_content`/`is_usable`: brauchbar nur mit `end_turn`/`tool_use` **und** Inhalt (ein `tool_use` oder Text, der nicht nur Leerraum ist). Loop (`_send`) und `ScriptedModelClient` nutzen dieselbe Prüfung. Leere Antwort: nicht angehängt, `pending` bleibt, fester Hinweis `unexpected`, Grund `empty_response`, Ereignis `unusable_response` mit `empty: true`; in `_intro` die feste Einleitung. Platzierungsprüfer Regel 5: kein `assistant`-Turn ohne Inhalt | LT-53 (vier Varianten: keine Blöcke bei `end_turn` und `tool_use`, nur Leerraum, nur Thinking; Folgezug); LT-54 (leere Einleitung); U-P1 um zwei abgewiesene und einen bestandenen Fall |
 | H3 | `texts.TOOL_STATUS` (de/en, genau die sieben Tools) und `texts.tool_status`; unbekannte Namen bekommen `status_working`. Der Tool-Name dient nur als Schlüssel. Ereignisname in `_intro` wie in `_run_tools` nur für bekannte Tools (Teil von N1) | LT-55 (erfundener Name mit Zahl); U-F1 auf die Statustexte erweitert, Schlüssel gleich `TOOLS` |
 
-**Festlegungen (Sean bitte bestätigen oder ändern):**
+**Festlegungen (bestätigt, Sean, 2026-10-28):**
 
 | # | Punkt | Festlegung | Grund |
 |---|---|---|---|
@@ -1887,16 +1894,16 @@ SG-09, SG-13, SG-14: 10 Mutationen, alle angeschlagen):** kein kritischer, kein 
 |---|---|---|
 | mittel | Schreiben von `pending` nach jedem Block in `_run_tools` ungetestet (Mutation blieb grün) | erledigt: LT-51b (erstes Ergebnis echt, Rest `TURN_ENDED`); doppelte Zeile nach der Schleife entfernt; SG-13, fünfte Mutation |
 | mittel | SG-11b-Mutation veraltet (`usable = …` gibt es nicht mehr) | erledigt: Register auf `return response, is_usable(response)` |
-| mittel (Vermutung zur API) | Leerer Text-Block neben `tool_use` kommt in den Verlauf; die API weist ihn vermutlich ab (400, dann M1) | **offen, Live-Lauf Schritt 9**; Optionen: leere Text-Blöcke in `_commit` entfernen oder Platzierungsregel verschärfen |
+| mittel (Vermutung zur API) | Leerer Text-Block neben `tool_use` kommt in den Verlauf; die API weist ihn vermutlich ab (400, dann M1) | **geschlossen, im Live-Lauf bestätigen** (Sean, 2026-10-28): `history_content` entfernt Text-Blöcke aus Leerraum vor dem Commit (Loop und `ScriptedModelClient`); Platzierungsregel 5 weist sie im `assistant`-Turn ab; LT-53c, U-P1; SG-13, sechste Mutation |
 | niedrig | Zweig `committed=True`/`unexpected_stop` ohne Test; `empty` hing indirekt am Parameter | erledigt: `empty` direkt aus `has_content`; LT-53b |
 | niedrig | `_commit` nicht atomar (Strg+C während `deepcopy`) | erledigt: alles vorher gebaut, Verlauf und `pending` wechseln direkt nacheinander; ein Fenster von zwei Anweisungen bleibt |
 | niedrig | Zweites Strg+C während `_finish` lässt `state == RUNNING` (vorbestehend) | offen, Schritt 9 (CLI) |
 | niedrig | `_run_tools`/`_intro` setzen die Vorbelegung aus `_commit` stillschweigend voraus | offen (Zuordnung heute geprüft, LT-51b/LT-52) |
-| niedrig | `TURN_ENDED` nach `loop_error` von Definition und Prompt-Hinweis nicht gedeckt | Definition (Abschnitt 2) ergänzt; Prompt-Hinweis offen (L8, halb-live-Satz) |
+| niedrig | `TURN_ENDED` nach `loop_error` von Definition und Prompt-Hinweis nicht gedeckt | Definition (Abschnitt 2) ergänzt; Prompt-Hinweis bewusst nicht jetzt (Sean, 2026-10-28), vorgemerkt für den halb-live-Satz in Schritt 10 (12.12) |
 | niedrig | 12.14.4 nannte Regel 5 nicht | erledigt |
 | niedrig | M3 stand auf offen | erledigt: teilweise |
 | niedrig | Keine Mutation für `_event_name` | erledigt: SG-09, dritte Mutation |
-| niedrig | `_intro` zeigt Text einer `tool_use`-Antwort ohne Block als Einleitung (vorbestehend) | offen |
+| niedrig | `_intro` zeigt Text einer `tool_use`-Antwort ohne Block als Einleitung (vorbestehend) | geklärt: kein Pfad für B1, der Text läuft wie jede Einleitung durch `check_text` (`slot_text`) und wird nur als `body` gezeigt, sonst die feste Einleitung; LT-41b schreibt das fest, SG-14 dritte Mutation (`shown = text`) macht LT-41 und LT-41b rot. Die Abweichung zu `_drive` (dort `unexpected_stop`) bleibt, niedrig |
 
 Eigene Ergänzung nach dem Mutationslauf: SG-14 (2) hing nur an LT-55; `Run.assert_invariants` prüft jetzt jede
 Statuszeile, die Mutation schlägt in 35 Tests an.

@@ -1,4 +1,4 @@
-"""Schleifen-Szenarien zu Modelltext: LT-03/04/05, LT-16/17, LT-31, LT-39/41, LT-42, LT-47, LT-48,
+"""Schleifen-Szenarien zu Modelltext: LT-03/04/05, LT-16/17, LT-31, LT-39/41/41b, LT-42, LT-47, LT-48,
 LT-52, LT-54, LT-55 (Plan 12.11, 12.17)."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from scout_research.agent import texts
 from scout_research.agent.loop import LoopState
 from scout_research.agent.model_client import ModelCallError, Streamed
 from scout_research.tools.handlers import dispatch as real_dispatch
-from tests.unit.loop_harness import Run, codes_in, say, shown_texts, use, reply
+from tests.unit.loop_harness import Run, codes_in, say, shown_texts, text_block, use, reply
 from tests.unit.tool_world import AAPL_CIK, FINNHUB_KEY, NVDA_CIK, SECRETS, UA, standard_world
 
 from tests.unit.test_agent_loop_core import _flow_to_proposal
@@ -103,6 +103,20 @@ def test_lt_54_an_empty_introduction_is_replaced_by_the_fixed_one_and_never_appe
     run.assert_invariants()
     assert run.confirm().outcome == "done"
     run.assert_invariants()
+
+
+def test_lt_41b_an_introduction_with_tool_use_stop_but_no_block_is_checked_like_any_other_text() -> None:
+    # Randfall in _intro: stop_reason tool_use, nur Text. Der Text läuft durch check_text (B1, SM-05)
+    for text, expected in (("Ich schlage 7 Peers mit 12,5 % Marge vor.", texts.user_text("de", "intro")),
+                           ("Hier ist mein Vorschlag.", "Hier ist mein Vorschlag.")):
+        run = _flow_to_proposal()
+        run.client._steps[-1] = reply(text_block(text), stop="tool_use")
+        result = run.say("Mach Comps für NVDA")
+        assert result.state is LoopState.AWAITING_PEER_CONFIRMATION and result.outcome == "done"
+        assert [(s.kind, s.text) for s in result.shown] == [("intro", expected)]
+        assert len(run.client.requests) == 4  # keine Korrekturrunde (V2)
+        assert [e["shown"] for e in run.loop.events if e["event"] == "text_check"] == [expected == text]
+        run.assert_invariants()
 
 
 def test_lt_39_an_introduction_that_ends_in_refusal_or_an_api_error_keeps_the_proposal_confirmable() -> None:

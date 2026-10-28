@@ -51,6 +51,7 @@ THINK = {"type": "thinking", "thinking": "überlege", "signature": "sig=="}
         ("tool_result nach text", [U(T("a")), A(USE("t1")), U(T("b"), RES("t1"))]),
         ("assistant nur mit Leerraum", [U(T("a")), A(T(" \n")), U(T("b"))]),
         ("assistant nur mit Thinking", [U(T("a")), A(THINK), U(T("b"))]),
+        ("Leerraum-Block neben tool_use", [U(T("a")), A(T("\n\n"), USE("t1")), U(RES("t1"))]),
     ],
 )
 def test_u_p1_placement_violations_are_rejected(name: str, messages: list) -> None:

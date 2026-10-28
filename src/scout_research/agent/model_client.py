@@ -86,6 +86,12 @@ def has_content(content: list[dict[str, Any]]) -> bool:
                for b in content)
 
 
+def history_content(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Assistant-Inhalt für den festen Verlauf: Text-Blöcke aus reinem Leerraum entfernt, alles andere unverändert
+    (Thinking, `tool_use`). Die API weist leere Text-Blöcke im Verlauf vermutlich ab (12.17; im Live-Lauf bestätigen)."""
+    return [copy.deepcopy(b) for b in content if not (b.get("type") == "text" and not str(b.get("text", "")).strip())]
+
+
 def is_usable(response: ModelResponse) -> bool:
     """Nur brauchbare Antworten kommen in den festen Verlauf (Z16): `end_turn`/`tool_use` **und** Inhalt (H2)."""
     return response.stop_reason in USABLE_STOP_REASONS and has_content(response.content)
@@ -100,7 +106,7 @@ def check_placement(messages: list[Message]) -> None:
     3. Jedes `tool_use` hat genau ein `tool_result` im unmittelbar folgenden `user`-Turn, und dort steht kein
        `tool_result` ohne `tool_use` des vorangehenden `assistant`-Turns.
     4. Keine zwei aufeinanderfolgenden Turns derselben Rolle.
-    5. Jeder `assistant`-Turn hat Inhalt (`has_content`): ein leerer gelangt nie in den Verlauf (H2)."""
+    5. Jeder `assistant`-Turn hat Inhalt (`has_content`) und keinen Text-Block aus reinem Leerraum (H2, 12.17)."""
     if not messages:
         raise PlacementError("leerer Verlauf")
     if messages[0]["role"] != "user":
@@ -127,6 +133,8 @@ def check_placement(messages: list[Message]) -> None:
         if role == "assistant":
             if not has_content(message["content"]):
                 raise PlacementError(f"Eintrag {i}: assistant-Turn ohne Inhalt")
+            if any(b.get("type") == "text" and not str(b.get("text", "")).strip() for b in message["content"]):
+                raise PlacementError(f"Eintrag {i}: Text-Block aus Leerraum im assistant-Turn")
             uses = [b["id"] for b in message["content"] if b.get("type") == "tool_use"]
             if uses:
                 nxt = messages[i + 1] if i < last else None
@@ -241,7 +249,7 @@ class ScriptedModelClient:
             raise step
         self.responses.append(step)
         if is_usable(step):  # nur brauchbare Antworten kommen in den festen Verlauf (Z16, H2)
-            self._base = copy.deepcopy(request.messages) + [{"role": "assistant", "content": copy.deepcopy(step.content)}]
+            self._base = copy.deepcopy(request.messages) + [{"role": "assistant", "content": history_content(step.content)}]
         return step
 
 

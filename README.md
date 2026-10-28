@@ -40,12 +40,12 @@ flowchart LR
     G --> H[Render with sources]
 ```
 
-| Layer | Role | State (as of 2026-10-14) |
+| Layer | Role | State (as of 2026-10-28) |
 |---|---|---|
 | L1 Data access | EDGAR client, market data (Finnhub), SQLite cache, rate limiting | ✅ implemented |
 | L2 Domain logic | Metrics, periods, peers (SIC + size), multiples, quality checks | ✅ implemented |
 | L3 Tools | Seven model tools, peer-confirmation gate, allowlist, slot renderer, number check | ✅ implemented |
-| L4 Agent | System prompt, loop, state machine, budgets | 🔶 in development |
+| L4 Agent | System prompt, loop, state machine, budgets | 🔶 loop implemented and tested against a scripted model; never run against a live model |
 | L5 Export | XLSX with separate source sheet | ⏳ planned |
 | L6 Presentation | Streamlit chat with confirmation step | ⏳ planned |
 
@@ -72,12 +72,12 @@ Value, concept and accession are in the golden set. Period start and filing date
 | Golden set | 5 companies (AAPL, MSFT, NVDA, ADSK; CDNS only `total_debt`), values checked by hand against the 10-K statements, pinned to period end and accession | `eval/golden_set/` |
 | Extractor vs. golden set | Offline comparison; two deviations are known and pinned with a reason (ADSK `total_debt`, CDNS lower-bound flag), the rest match, some within a stated rounding tolerance | `python -m eval.seed_compare`, `tests/unit/test_golden_reproduction.py` |
 | Number-check corpus | 239 cases (accepted texts, bare numbers, slot errors, attacks) as a parametrised test | `tests/data/number_check_corpus.yaml` |
-| Mutation probes | Removing a guard must turn tests red; 35 mutations in the last agent run (2026-10-11), none toothless (34 caught, one not applicable); several guards rest on a single test | [`docs/mutation-report-2026-10-11.md`](docs/mutation-report-2026-10-11.md), `docs/security-guards.md`, plan section 12.16 |
+| Mutation probes | Removing a guard must turn tests red. Full agent run (2026-10-11): 35 mutations, none toothless (34 caught, one not applicable). Targeted agent run after the loop fixes (2026-10-28): 10 mutations on four guards, all caught. Some guards still rest on a single test | [`docs/mutation-report-2026-10-11.md`](docs/mutation-report-2026-10-11.md), `docs/security-guards.md`, plan sections 12.16, 12.17 |
 | Guard register | 23 register rows, each with module, tests and a mutation (two only partly implemented until trace and harness exist) | `docs/security-guards.md` |
-| Independent review | A read-only reviewer agent checks diffs against the plan; findings are tracked in the plan | plan sections 12.14, 12.16 |
+| Independent review | A read-only reviewer agent checks diffs against the plan; findings are tracked in the plan | plan sections 12.14, 12.16, 12.17 |
 | Push gate | Full suite, clean tree, secret scan on added lines; a hook enforces it for the agent's own shell calls (not for pushes from a personal terminal) | `scripts/push_gate.py`, `.claude/hooks/` |
 
-The unit and integration suite has 1046 tests (`pytest --collect-only`, as of 2026-10-28), all passing. No test is marked as live (the `live` marker selects none).
+The unit and integration suite has 1049 tests (`pytest --collect-only`, as of 2026-10-28), all passing in a fresh clone. No test is marked as live (the `live` marker selects none).
 
 Honest limits: the golden set is five companies, a small sample. It shows the extraction path is sound on those filings, not that it is accurate in general. The agent loop has been tested only against a scripted model, not against a live one.
 
@@ -88,14 +88,14 @@ Honest limits: the golden set is five companies, a small sample. It shows the ex
 | 0 Setup | EDGAR client with rate limiting and retries | ✅ implemented |
 | 1 Data foundation | Metrics with provenance, Finnhub market data, SQLite cache | ✅ implemented |
 | 2 Comps engine | Peer candidates (SIC + size), EV/Revenue, EV/EBITDA, EV/EBIT, P/E, outlier and period checks | ✅ implemented |
-| 3 Agent layer | Tools, gate, slot renderer, number check, prompt, loop | 🔶 in development: tools, check and loop are committed and tested with a scripted model; trace (step 8), CLI and first live run (step 9) and live review (step 10) are not done; the three high-severity review findings on the loop are fixed, medium and low findings are open |
+| 3 Agent layer | Tools, gate, slot renderer, number check, prompt, loop | 🔶 in development: tools, number check and the agent loop (step 7) are implemented and tested against a scripted model; the loop has never run against a live model. Open: trace (step 8), CLI and first live run (step 9), live runs and half-live evaluation (step 10). The high-severity findings from the loop review are fixed; medium and low findings are tracked in the plan |
 | 4 Interface and export | Streamlit chat, XLSX export with source sheet | ⏳ planned (`ui/` and `export/` are empty packages) |
 | 5 Evaluation | Larger golden set, automated metrics | ⏳ planned |
 | After | Precedent transactions, DCF and LBO support (assumptions always from the human) | ⏳ planned, order open |
 
 ## Quick start
 
-Run by the author in a fresh clone and a new virtual environment (Python 3.13.9, 2026-10-14).
+Run by the author in a fresh clone and a new virtual environment (Python 3.13.9, 2026-10-28).
 
 ```bash
 python3 -m venv .venv
@@ -107,7 +107,7 @@ cp .env.example .env
 Fill `EDGAR_CONTACT_EMAIL` in `.env` with a real contact address (SEC fair-access policy). The Finnhub and Anthropic keys are optional for the steps below.
 
 ```bash
-pytest                        # 1046 passed
+pytest                        # 1049 passed
 python -m eval.seed_compare   # offline: extractor vs. golden set, uses fixtures
 ```
 
@@ -131,7 +131,7 @@ src/scout_research/
   agent/     L4  model client, loop, budgets, fixed texts, versioned prompt
   export/    L5  placeholder (planned)
   ui/        L6  placeholder (planned)
-docs/        foundation, phase 3 plan, guard register
+docs/        foundation, phase 3 plan, guard register, mutation report
 eval/        golden-set seed and the extractor comparison
 tests/       unit, integration, fixtures, number-check corpus
 scripts/     push gate
