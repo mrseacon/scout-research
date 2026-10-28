@@ -8,12 +8,13 @@ import json
 import pytest
 
 from scout_research.agent import texts
-from scout_research.agent.budgets import Usage
+from scout_research.agent.budgets import LoopConfig, Usage, cost_usd
 from scout_research.agent.loop import LoopBusyError, LoopState, Pending, SessionClosedError
 from scout_research.agent.model_client import ModelCallError, Streamed
 from scout_research.tools.handlers import dispatch as real_dispatch
 from scout_research.tools.session import HumanInput
 from tests.unit.loop_harness import Run, codes_in, reply, say, shown_texts, text_block, use
+from tests.unit.test_agent_loop_core import _flow_to_proposal
 from tests.unit.tool_world import NVDA_CIK, standard_world
 
 
@@ -195,7 +196,9 @@ def test_lt_44_every_failure_kind_gives_a_fixed_notice_and_exposes_only_class_st
     assert result.state is state and needle in shown_texts(result)[0]
     event = [e for e in run.loop.events if e["event"] == "model_error"][0]
     assert event == {"event": "model_error", "kind": kind, "error_class": "RateLimitError", "status_code": 429,
-                     "request_id": "req_abc"}
+                     "request_id": "req_abc", "input_tokens": None, "output_tokens": None,
+                     "cache_read_input_tokens": None, "cache_creation_input_tokens": None, "cost_usd": 0.0,
+                     "usage_estimated": False, "session_cost_usd": 0.0}
     assert "Traceback" not in " ".join(shown_texts(result))
 
 
@@ -302,6 +305,9 @@ def test_lt_53_an_empty_answer_is_discarded_with_a_fixed_notice_and_the_next_tur
 
 
 def test_z17_an_interrupt_during_a_model_call_discards_the_call_and_keeps_the_request_part() -> None:
+    """Das rohe `KeyboardInterrupt` aus `client.create` kommt nur noch außerhalb des Streams vor; im Stream macht der
+    Adapter daraus `ModelCallError("interrupted")` (M2, siehe `test_m2_an_interrupted_model_call_...`)."""
+
     def boom(request):
         raise KeyboardInterrupt
 
@@ -345,3 +351,135 @@ def test_lt_40_and_z20_input_during_a_turn_is_rejected_and_changes_nothing() -> 
     assert run.ctx.user_messages == ("Suche",)
     assert "dazwischen" not in str(run.loop.history) and "dazwischen" not in str(run.client.requests)
     run.assert_invariants()
+
+
+# --- M2: gescheiterte Aufrufe sind teilweise bezahlt und werden verbucht --------------------------------------------
+
+
+def _price():
+    return LoopConfig().price
+
+
+def test_m2_a_failed_call_with_usage_raises_the_session_cost_and_the_turn_cost_by_exactly_its_cost() -> None:
+    usage = Usage(2000, 8000, 500, 100)
+    run = _run([ModelCallError("stalled", usage=usage, usage_estimated=True), say("Jetzt klappt es.")])
+    result = run.say("Frage eins")
+    expected = cost_usd(usage, _price())
+    assert result.outcome == "failed" and result.reason == "stalled"
+    assert run.loop.session_cost == expected and result.cost_usd == expected and expected > 0
+    second = run.say("Frage zwei")
+    assert second.cost_usd == pytest.approx(cost_usd(Usage(1000, 200), _price()))
+    assert run.loop.session_cost == pytest.approx(expected + cost_usd(Usage(1000, 200), _price()))
+    run.assert_invariants()
+
+
+def test_m2_a_failed_call_without_usage_costs_nothing() -> None:
+    run = _run([ModelCallError("unavailable")])
+    result = run.say("Frage")
+    assert run.loop.session_cost == 0.0 and result.cost_usd == 0.0 and result.outcome == "failed"
+
+
+def test_m2_a_failed_call_that_crosses_the_hard_limit_closes_the_session() -> None:
+    usage = Usage(1000, 195_000)  # 1,952 $; mit dem ersten Zug (0,082 $) über 2 $
+    run = _run([say("Antwort", usage=Usage(1000, 8000)), ModelCallError("deadline", usage=usage, usage_estimated=True),
+                say("nie gesendet")])
+    first = run.say("Frage eins")
+    assert first.outcome == "done" and run.loop.state is LoopState.IDLE
+    assert run.loop.session_cost + cost_usd(usage, _price()) >= 2.0
+    result = run.say("Frage zwei")
+    assert result.outcome == "closed" and result.reason == "deadline" and result.state is LoopState.CLOSED
+    assert run.loop.state is LoopState.CLOSED and len(run.client.requests) == 2
+    assert any("Kostenlimit" in t for t in shown_texts(result))
+    with pytest.raises(SessionClosedError):
+        run.say("Frage drei")
+    assert len(run.client.requests) == 2
+    assert run.loop.events[-1]["session_cost_usd"] >= 2.0
+
+
+def test_m2_a_failed_call_that_exceeds_the_context_limit_closes_the_session() -> None:
+    run = _run([ModelCallError("stalled", usage=Usage(151_000, 8000), usage_estimated=True), say("nie gesendet")])
+    result = run.say("Frage")
+    assert result.outcome == "closed" and result.state is LoopState.CLOSED
+    assert "neue Sitzung" in " ".join(shown_texts(result)) and len(run.client.requests) == 1
+
+
+def test_m2_the_cost_warning_is_issued_once_after_a_failed_call_too() -> None:
+    usage = Usage(1000, 55_000)  # 0,55 $
+    run = _run([ModelCallError("stalled", usage=usage), ModelCallError("stalled", usage=usage),
+                ModelCallError("stalled", usage=usage)])
+    warned = [sum("nähern sich dem Limit" in t for t in shown_texts(run.say(f"Frage {i}"))) for i in range(3)]
+    assert warned == [0, 1, 0]
+
+
+def test_m2_the_model_error_event_carries_cost_and_the_estimate_flag() -> None:
+    usage = Usage(2000, 8000, 500, 100)
+    run = _run([ModelCallError("stalled", usage=usage, usage_estimated=True)])
+    run.say("Frage")
+    event = [e for e in run.loop.events if e["event"] == "model_error"][0]
+    assert event["input_tokens"] == 2000 and event["output_tokens"] == 8000
+    assert event["cache_read_input_tokens"] == 500 and event["cache_creation_input_tokens"] == 100
+    assert event["cost_usd"] == cost_usd(usage, _price()) and event["usage_estimated"] is True
+    assert event["session_cost_usd"] == run.loop.session_cost == event["cost_usd"]
+
+
+def test_m2_an_interrupted_call_is_billed_ends_failed_and_the_next_turn_works() -> None:
+    usage = Usage(1500, 8000)
+    run = _run([ModelCallError("interrupted", usage=usage, usage_estimated=True), say("Jetzt klappt es.")])
+    result = run.say("Frage eins")
+    assert result.outcome == "failed" and result.reason == "interrupted" and run.loop.history == []
+    assert shown_texts(result) == [texts.user_text("de", "interrupted")]
+    assert result.cost_usd == cost_usd(usage, _price()) == run.loop.session_cost
+    assert shown_texts(run.say("Frage zwei")) == ["Jetzt klappt es."]
+    run.assert_invariants()
+
+
+def test_m2_an_interrupted_model_call_discards_the_call_and_keeps_the_request_part() -> None:
+    # wie Z17, aber so, wie der Adapter einen Strg+C im Stream meldet
+    run = _run([ModelCallError("interrupted"), say("Jetzt klappt es.")])
+    result = run.say("Frage eins")
+    assert result.outcome == "failed" and result.reason == "interrupted" and run.loop.history == []
+    assert shown_texts(result) == [texts.user_text("de", "interrupted")]
+    second = run.say("Frage zwei")
+    assert [b["text"] for b in run.client.requests[1].messages[-1]["content"]] == ["Frage eins", "Frage zwei"]
+    assert shown_texts(second) == ["Jetzt klappt es."]
+    run.assert_invariants()
+
+
+def test_m2_an_interrupt_during_the_introduction_fails_the_turn_but_keeps_the_proposal_confirmable() -> None:
+    usage = Usage(1500, 8000)
+    run = _flow_to_proposal(tail=[say("Bestätigt, ich rechne.")])
+    run.client._steps[3] = ModelCallError("interrupted", usage=usage, usage_estimated=True)
+    result = run.say("Mach Comps für NVDA")
+    assert result.outcome == "failed" and result.reason == "interrupted"
+    assert shown_texts(result) == [texts.user_text("de", "interrupted")]  # nicht die feste Einleitung (P12, Z17)
+    assert result.state is LoopState.AWAITING_PEER_CONFIRMATION and run.ctx.open_proposal is not None
+    assert [e for e in run.loop.events if e["event"] == "model_error"][0]["cost_usd"] == cost_usd(usage, _price())
+    assert run.loop.session_cost > cost_usd(usage, _price())  # die Aufrufe davor zählen auch
+    run.assert_invariants()
+    assert run.confirm().outcome == "done"
+    run.assert_invariants()
+
+
+def test_m2_a_stalled_introduction_keeps_the_fixed_introduction() -> None:
+    run = _flow_to_proposal(tail=[say("Bestätigt, ich rechne.")])
+    run.client._steps[3] = ModelCallError("stalled")
+    result = run.say("Mach Comps für NVDA")
+    assert result.outcome == "done" and result.reason == "intro_stalled"
+    assert [(s.kind, s.text) for s in result.shown] == [("intro", texts.user_text("de", "intro"))]
+    assert result.state is LoopState.AWAITING_PEER_CONFIRMATION
+    run.assert_invariants()
+
+
+def test_m2_the_turn_end_event_names_the_closing_reason_even_when_the_failure_kind_is_the_reason() -> None:
+    run = _run([ModelCallError("deadline", usage=Usage(1000, 200_000), usage_estimated=True)])  # 2,002 $
+    run.say("Frage")
+    assert run.loop.events[-1]["event"] == "turn_end" and run.loop.events[-1]["closing"] == "cost"
+    assert run.loop.events[-1]["reason"] == "deadline"
+
+    run = _run([ModelCallError("stalled", usage=Usage(151_000, 8000), usage_estimated=True)])
+    run.say("Frage")
+    assert run.loop.events[-1]["closing"] == "context"
+
+    run = _run([ModelCallError("stalled")])
+    run.say("Frage")
+    assert run.loop.events[-1]["closing"] is None

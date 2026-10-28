@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -79,8 +80,12 @@ def test_u_p1_valid_histories_pass(messages: list) -> None:
 
 
 class _Event:
-    def __init__(self, kind: str) -> None:
+    def __init__(self, kind: str, message_usage: Any = None, usage: Any = None) -> None:
         self.type = kind
+        if message_usage is not None:  # `message_start`: die Nutzung steht in `event.message.usage`
+            self.message = SimpleNamespace(usage=message_usage)
+        if usage is not None:  # `message_delta`: kumulative Nutzung in `event.usage`
+            self.usage = usage
 
 
 class _Block:
@@ -111,10 +116,10 @@ class _Stream:
         return False
 
     def __iter__(self):
-        for kind, dt in self._events:
+        for kind, dt, *extra in self._events:  # optional ein dritter Eintrag: Argumente für `_Event`
             if self._clock is not None:
                 self._clock.advance(dt)
-            yield _Event(kind)
+            yield _Event(kind, **(extra[0] if extra else {}))
         if self._raises is not None:
             raise self._raises
 
@@ -215,3 +220,72 @@ def test_the_api_kwargs_carry_effort_and_adaptive_thinking_and_are_flagged_unver
     kwargs = build_api_kwargs(_request(effort="high"))
     assert kwargs["output_config"] == {"effort": "high"} and kwargs["thinking"] == {"type": "adaptive"}
     assert "ungeprüft" in build_api_kwargs.__doc__.lower()
+
+
+# --- Nutzung gescheiterter Aufrufe (M2) ----------------------------------------------------------------------------
+
+_START = {"input_tokens": 1200, "output_tokens": 1, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 50}
+
+
+def _fails(sdk: _Sdk, clock: ManualClock, **kw: Any) -> ModelCallError:
+    with pytest.raises(ModelCallError) as exc:
+        AnthropicAdapter(sdk, clock=clock).create(_request(**kw), lambda k: None)
+    error = exc.value
+    assert error.__cause__ is None and error.__context__ is None
+    return error
+
+
+def test_m2_a_stall_after_message_start_is_billed_with_max_tokens_as_an_upper_bound() -> None:
+    clock = ManualClock()
+    stream = _Stream([("message_start", 1.0, {"message_usage": _START}), ("content_block_delta", 61.0)], _Final([]), clock)
+    error = _fails(_Sdk(stream), clock, max_tokens=4000)
+    assert error.kind == "stalled"
+    assert error.usage == Usage(1200, 4000, 300, 50) and error.usage_estimated is True
+
+
+def test_m2_an_sdk_error_after_message_start_and_delta_carries_the_exact_usage() -> None:
+    clock = ManualClock()
+    events = [("message_start", 0.0, {"message_usage": _START}), ("content_block_delta", 1.0),
+              ("message_delta", 1.0, {"usage": {"output_tokens": 77}}),
+              ("message_delta", 1.0, {"usage": SimpleNamespace(output_tokens=412)})]  # kumulativ, ersetzt
+    error = _fails(_Sdk(_Stream(events, _Final([]), clock, raises=_named("APIConnectionError"))), clock)
+    assert error.kind == "unavailable"
+    assert error.usage == Usage(1200, 412, 300, 50) and error.usage_estimated is False
+
+
+def test_m2_a_message_delta_without_output_tokens_keeps_the_known_value() -> None:
+    clock = ManualClock()
+    events = [("message_start", 0.0, {"message_usage": SimpleNamespace(**_START)}),
+              ("message_delta", 0.0, {"usage": {"output_tokens": 90}}), ("message_delta", 0.0, {"usage": {}})]
+    error = _fails(_Sdk(_Stream(events, _Final([]), clock, raises=_named("SomethingElse"))), clock)
+    assert error.usage == Usage(1200, 90, 300, 50) and error.usage_estimated is False
+
+
+def test_m2_an_error_before_any_event_carries_no_usage() -> None:
+    clock = ManualClock()
+    error = _fails(_Sdk(_Stream([], _Final([]), clock, raises=_named("APITimeoutError"))), clock)
+    assert error.kind == "unavailable" and error.usage is None and error.usage_estimated is False
+
+    stream = _Stream([("ping", 1.0), ("ping", 61.0)], _Final([]), clock)  # Stillstand ohne message_start
+    error = _fails(_Sdk(stream), clock)
+    assert error.kind == "stalled" and error.usage is None and error.usage_estimated is False
+
+
+def test_m2_a_keyboard_interrupt_in_the_stream_becomes_interrupted_with_usage_and_no_context() -> None:
+    clock = ManualClock()
+    events = [("message_start", 0.0, {"message_usage": _START})]
+    error = _fails(_Sdk(_Stream(events, _Final([]), clock, raises=KeyboardInterrupt())), clock, max_tokens=5000)
+    assert error.kind == "interrupted"
+    assert error.usage == Usage(1200, 5000, 300, 50) and error.usage_estimated is True
+
+    error = _fails(_Sdk(_Stream([], _Final([]), clock, raises=KeyboardInterrupt())), clock)
+    assert error.kind == "interrupted" and error.usage is None
+
+
+def test_m2_a_successful_call_still_reports_the_final_usage_and_the_error_defaults_are_empty() -> None:
+    assert ModelCallError("stalled").usage is None and ModelCallError("stalled").usage_estimated is False
+    clock = ManualClock()
+    events = [("message_start", 0.0, {"message_usage": _START}), ("message_delta", 0.0, {"usage": {"output_tokens": 9}})]
+    response = AnthropicAdapter(_Sdk(_Stream(events, _Final([_Block({"type": "text", "text": "x"})]), clock)),
+                                clock=clock).create(_request(), lambda k: None)
+    assert response.usage == Usage(10, 5, 3, 0)  # maßgeblich bleibt die Nutzung der fertigen Nachricht

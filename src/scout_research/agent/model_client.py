@@ -19,7 +19,7 @@ import copy
 import json
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 
 from scout_research.agent.budgets import Usage
@@ -32,20 +32,27 @@ class PlacementError(Exception):
 
 
 class ModelCallError(Exception):
-    """Ein Modellaufruf ist gescheitert. Nur `kind`, Klasse, Status und `request_id` — nie der Text der Ausnahme."""
+    """Ein Modellaufruf ist gescheitert. Nur `kind`, Klasse, Status und `request_id` — nie der Text der Ausnahme.
+
+    `usage` ist die bis zum Abbruch bekannte (teilweise bezahlte) Nutzung, `None` wenn nichts bekannt ist;
+    `usage_estimated` ist `True`, wenn der Output als obere Schranke (`max_tokens`) geschätzt wurde (M2, 12.16)."""
 
     def __init__(
         self,
-        kind: Literal["unavailable", "auth", "bad_request", "stalled", "deadline", "unexpected"],
+        kind: Literal["unavailable", "auth", "bad_request", "stalled", "deadline", "unexpected", "interrupted"],
         error_class: str | None = None,
         status_code: int | None = None,
         request_id: str | None = None,
+        usage: Usage | None = None,
+        usage_estimated: bool = False,
     ) -> None:
         super().__init__(kind)
         self.kind = kind
         self.error_class = error_class
         self.status_code = status_code
         self.request_id = request_id
+        self.usage = usage
+        self.usage_estimated = usage_estimated
 
 
 @dataclass(frozen=True)
@@ -311,6 +318,39 @@ def _usage_of(raw: Any) -> Usage:
                  count("cache_read_input_tokens"), count("cache_creation_input_tokens"))
 
 
+def _field(raw: Any, name: str) -> Any:
+    return raw.get(name) if isinstance(raw, dict) else getattr(raw, name, None)
+
+
+class _UsageTally:
+    """Zählt die Nutzung während des Streams mit (M2): `message_start` liefert Input und Cache, `message_delta` den
+    kumulativen Output. Fehlende Felder lassen die bisherigen Werte stehen."""
+
+    def __init__(self) -> None:
+        self._usage: Usage | None = None  # None = `message_start` nie gesehen: nichts bekannt, nichts verbucht
+        self._output_seen = False
+
+    def feed(self, event: Any) -> None:
+        kind = getattr(event, "type", None)
+        if kind == "message_start":
+            raw = getattr(getattr(event, "message", None), "usage", None)
+            self._usage = _usage_of(raw) if raw is not None else Usage()
+            self._output_seen = False
+        elif kind == "message_delta" and self._usage is not None:
+            output = _field(getattr(event, "usage", None), "output_tokens")
+            if output is not None:
+                self._usage = replace(self._usage, output_tokens=int(output))
+                self._output_seen = True
+
+    def known(self, max_tokens: int) -> tuple[Usage | None, bool]:
+        """Bekannte Nutzung und ob sie geschätzt ist. Ohne `message_delta` gilt `max_tokens` als obere Schranke."""
+        if self._usage is None:
+            return None, False
+        if self._output_seen:
+            return self._usage, False
+        return replace(self._usage, output_tokens=max_tokens), True
+
+
 class AnthropicAdapter:
     """Streamt intern, puffert vollständig, gibt nur die fertige Nachricht zurück. Das SDK-Objekt wird übergeben."""
 
@@ -324,20 +364,25 @@ class AnthropicAdapter:
     def create(self, request: ModelRequest, on_event: OnEvent) -> ModelResponse:
         check_placement(request.messages)
         watch = StreamWatch(self._clock, self._stall, self._total)
+        tally = _UsageTally()
         failure: ModelCallError | None = None
         final: Any = None
         try:
             with self._sdk.messages.stream(**build_api_kwargs(request)) as stream:
                 for event in stream:
                     watch.tick()
+                    tally.feed(event)
                     on_event(str(getattr(event, "type", "event")))
                 final = stream.get_final_message()
                 watch.tick()
         except ModelCallError as exc:
             failure = exc
+        except KeyboardInterrupt:  # Strg+C mitten im Stream: der Aufruf ist teilweise bezahlt (M2)
+            failure = ModelCallError("interrupted")
         except Exception as exc:  # noqa: BLE001 — jede SDK-Ausnahme wird auf Klasse/Status/request_id reduziert
             failure = map_sdk_exception(exc)
         if failure is not None:
+            failure.usage, failure.usage_estimated = tally.known(request.max_tokens)
             raise failure  # außerhalb des except-Blocks: weder __cause__ noch __context__ (SM-09)
 
         request_id = getattr(final, "_request_id", None) or getattr(final, "request_id", None)

@@ -1344,7 +1344,7 @@ Je Modellantwort nach `stop_reason`:
 | 10 Modellaufrufe, 12 Tool-Ausführungen, 10 Minuten (Zugfrist, V3) | Blöcke über dem Limit werden nicht ausgeführt (L6) | `FAILED`, fester Hinweis „Scout ist in diesem Schritt nicht weitergekommen“ |
 | zweites `LOOP_GUARD` im selben Zug | — | `FAILED` (Schleife erkannt) |
 | Kosten- oder Kontextgrenze der Sitzung erreicht (12.8; geprüft nach **jedem** Aufruf aus der gemeldeten Nutzung, V3) | laufender Aufruf wird zu Ende gebracht, kein neuer Modellaufruf; Blöcke dieser Antwort werden nicht ausgeführt (`TURN_ENDED`), weil die Sitzung schließt | `CLOSED` |
-| Nutzer bricht ab (Strg+C) | laufender Aufruf wird verworfen | `FAILED` |
+| Nutzer bricht ab (Strg+C) | laufender Aufruf wird verworfen, die bekannte Nutzung verbucht (M2, O-04); auch im Einleitungsaufruf | `FAILED` |
 
 **Offene `tool_result` am Zugende:** Endet ein Zug nach Tool-Ergebnissen ohne weiteren Modellaufruf (Kommentar angenommen,
 zurückgehalten, Limit), bleiben die Ergebnisse als ausstehender Inhalt stehen und bilden den **Anfang** der nächsten
@@ -1402,7 +1402,9 @@ Nutzernachricht (erst die `tool_result`-Blöcke, dann der Text des Menschen bzw.
 
 Kosten werden aus `usage` jedes Aufrufs berechnet (Input, Output, Cache-Read, Cache-Write getrennt) und im Trace je
 Aufruf und als Summe geführt. Die Preistabelle steht in der Konfiguration, nicht im Code verteilt. Die Grenzen der Sitzung werden **nach jedem
-Aufruf** aus der gemeldeten `usage` geprüft, nicht erst am Zugende (V3).
+Aufruf** aus der gemeldeten `usage` geprüft, nicht erst am Zugende (V3). Das gilt auch für **gescheiterte** Aufrufe (M2, 2026-10-28): Der
+Adapter zählt `usage` aus `message_start`/`message_delta` mit und hängt sie an `ModelCallError`; der Loop verbucht sie
+und prüft die Grenzen genauso. Schätzregel und Strg+C im Stream: O-03, O-04 (Abschnitt 14).
 
 ### 12.9 Streaming
 
@@ -1842,7 +1844,7 @@ Push war bis dahin zurückgestellt. Die mittleren und niedrigen Befunde stehen h
 | H2 | hoch | Leere Modellantwort (`content == []`) wird angehängt, der Nutzer sieht nichts, danach `PlacementError` bei jedem Zug (reproduziert) | wie `unexpected_stop` behandeln: nicht anhängen, `pending` behalten, fester Hinweis; LT-Fall und U-P1-Fall | umgesetzt (12.17) |
 | H3 | hoch | Roher Tool-Name aus der Modellantwort geht in die Statuszeile des Hosts (`f"{name} …"`); eine Zahl im Namen erreicht den Nutzer (reproduziert) | nur bekannte Tool-Namen, feste Statustexte je Tool in `texts.py`; Test mit erfundenem Namen | umgesetzt (12.17) |
 | M1 | mittel | Ein von der API abgelehnter Anfrageteil (`BadRequestError`, etwa leerer Text) bleibt ausstehend; jeder Folgezug scheitert | `run_turn` weist leeren Text ab (`ValueError`); nach `bad_request` `pending` verwerfen oder Sitzung schließen (Abweichung von Z16 im Plan festhalten) | offen |
-| M2 | mittel | Gescheiterte Aufrufe (Stillstand, Frist, Strg+C) sind teilweise bezahlt, werden aber nicht verbucht; die Hartgrenze kann unbemerkt überschritten werden | `usage` aus `message_start`/`message_delta` mitzählen und an `ModelCallError` hängen; sonst konservativ schätzen; als Festlegung eintragen | offen |
+| M2 | mittel | Gescheiterte Aufrufe (Stillstand, Frist, Strg+C) sind teilweise bezahlt, werden aber nicht verbucht; die Hartgrenze kann unbemerkt überschritten werden | `usage` aus `message_start`/`message_delta` mitzählen und an `ModelCallError` hängen; sonst konservativ schätzen; als Festlegung eintragen | umgesetzt (2026-10-28, Pilot, O-03/O-04 in Abschnitt 14) |
 | M3 | mittel | U-F1 prüft nur `USER_TEXTS` und `HOST_TEMPLATES`, nicht Statusmeldungen, `FACT_*`, AST-Test auf neue Konstanten und `free_text`-Profil (SM-05); Abweichung steht nicht in 12.15 | Test erweitern oder als P10 in 12.15 eintragen | teilweise (12.17: Statustexte) |
 | M4 | mittel | Mutationen überleben: `if self._closing or turn.corrections >= 1:` ohne `_closing` (P4 ungetestet), `except KeyboardInterrupt` in `_run_tools`; LT-36 prüft `reject` nicht | LT-49 mit Zahl im Text am Limit (erwartet `withheld`, ein Aufruf); Test mit `KeyboardInterrupt` aus `dispatch`; `run.reject()` in LT-36 | offen |
 | N1 | niedrig | `_intro` (Z10) prüft Text neben `tool_use` nicht, schreibt den rohen Tool-Namen ins Event (P3), kein `TURN_ENDED` bei Schließen/Abbruch, kein Tool-Limit | denselben Codepfad wie `_run_tools` nutzen | teilweise (12.17: Ereignisname, Vorbelegung) |
@@ -1988,3 +1990,7 @@ zu machen ist; im Bericht an Sean stehen sie gesondert.
 
 | ID | Datum | Schritt | Punkt | Entscheidung | Grund | Alternative | Rückgängig durch |
 |---|---|---|---|---|---|---|---|
+| O-01 | 2026-10-28 | 8 | Reihenfolge der Teilaufgaben | M2 (Kosten gescheiterter Aufrufe) vor dem Trace-Schreiber, danach Upstream/Logs, Eval-Harness, M1, M4 | Das Trace-Schema kennt die Kosten gescheiterter Aufrufe von Anfang an | M2 nach Schritt 8 | keine Folgen; Reihenfolge |
+| O-02 | 2026-10-28 | 8 (M2) | LT-44 prüft `model_error` auf exakte Gleichheit | Erwartung auf das erweiterte Ereignis umgestellt (Tokenfelder `None`, `cost_usd` 0.0, `usage_estimated` False, `session_cost_usd`), weiter exakte Gleichheit | Verschärfung, keine Lockerung: neue Felder sind mitgeprüft | neue Felder nur bei bekannter Nutzung (Test unverändert) | Felder im Ereignis optional machen, alte Erwartung zurück |
+| O-03 | 2026-10-28 | 8 (M2) | Schätzung bei Abbruch | `message_start` gesehen, kein `message_delta` → Output = `max_tokens` (obere Schranke), `usage_estimated: true`; kein `message_start` → `usage: null`, nichts verbucht; gezählt nach `watch.tick()` | Konservativ und deterministisch; mehr als `max_tokens` kann nicht berechnet werden; ohne `message_start` ist nichts belegt | Schätzung aus gestreamten Zeichen; Schätzung aus dem Vorzug | `_UsageTally.known` ändern |
+| O-04 | 2026-10-28 | 8 (M2) | Strg+C mitten im Stream | Der Adapter wirft `ModelCallError("interrupted")` mit der bekannten Nutzung; der Loop endet `failed/interrupted` wie bei Z18 und verbucht die Kosten, auch im Einleitungsaufruf (`_intro`, Review TA-1). Restfenster: Strg+C nach `get_final_message()` und vor der Buchung lässt einen bezahlten Aufruf unverbucht (wie das Fenster in 12.17). Schließt ein gescheiterter Aufruf die Sitzung, ist der Grund die Fehlerart; welche Grenze schloss, steht in `turn_end.closing` | Nur so erreicht die Teilnutzung den Loop; für den Nutzer gleich („Abgebrochen.“) | `KeyboardInterrupt` durchreichen (keine Buchung) | `except KeyboardInterrupt` im Adapter entfernen |

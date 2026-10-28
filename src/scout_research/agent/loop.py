@@ -24,7 +24,7 @@ from enum import Enum
 from typing import Any, Literal
 
 from scout_research.agent import texts
-from scout_research.agent.budgets import LoopConfig, cost_usd
+from scout_research.agent.budgets import LoopConfig, Usage, cost_usd
 from scout_research.agent.model_client import (
     ModelCallError,
     ModelClient,
@@ -239,7 +239,7 @@ class AgentLoop:
         result.calls = turn.calls
         self.events.append({"event": "turn_end", "outcome": result.outcome, "reason": result.reason,
                             "state": self.state.value, "calls": turn.calls, "tools": turn.tools,
-                            "session_cost_usd": self.session_cost})
+                            "closing": self._closing, "session_cost_usd": self.session_cost})
         return result
 
     def _finish(self, turn: _Turn, outcome: str, reason: str | None, notices: list[str],
@@ -325,11 +325,27 @@ class AgentLoop:
         try:
             response = self.client.create(self._request(blocks, facts, tool_choice), lambda kind: None)
         except ModelCallError as exc:
+            # Ein gescheiterter Aufruf ist teilweise bezahlt: die bekannte Nutzung wird verbucht und die Grenzen werden
+            # wie nach einem Erfolg geprüft (M2, 12.8)
+            usage = exc.usage
+            call_cost = cost_usd(usage, self.config.price) if usage is not None else 0.0
+            self.session_cost += call_cost
             self.events.append({"event": "model_error", "kind": exc.kind, "error_class": exc.error_class,
-                                "status_code": exc.status_code, "request_id": exc.request_id})
+                                "status_code": exc.status_code, "request_id": exc.request_id,
+                                "input_tokens": usage.input_tokens if usage else None,
+                                "output_tokens": usage.output_tokens if usage else None,
+                                "cache_read_input_tokens": usage.cache_read_input_tokens if usage else None,
+                                "cache_creation_input_tokens": usage.cache_creation_input_tokens if usage else None,
+                                "cost_usd": call_cost, "usage_estimated": exc.usage_estimated,
+                                "session_cost_usd": self.session_cost})
+            if usage is not None:
+                self._check_limits(turn, usage)
             if exc.kind == "auth":
                 self._closing = "auth"
                 return self._finish(turn, "closed", "auth", [texts.user_text(lang, "auth")])
+            if exc.kind == "interrupted":
+                self._interrupted = True
+                return self._finish(turn, "failed", "interrupted", [texts.user_text(lang, "interrupted")])
             key = "unavailable" if exc.kind in {"unavailable", "stalled", "deadline"} else "internal"
             return self._finish(turn, "failed", exc.kind, [texts.user_text(lang, key)])
         # Kosten und Kontext **nach jedem Aufruf** aus der gemeldeten Nutzung (V3, L1, L7)
@@ -340,14 +356,19 @@ class AgentLoop:
                             "cache_read_input_tokens": response.usage.cache_read_input_tokens,
                             "cache_creation_input_tokens": response.usage.cache_creation_input_tokens,
                             "cost_usd": call_cost, "session_cost_usd": self.session_cost, "tool_choice": tool_choice["type"]})
+        self._check_limits(turn, response.usage)
+        return response, is_usable(response)
+
+    def _check_limits(self, turn: _Turn, usage: Usage) -> None:
+        """Sitzungsgrenzen nach einem Aufruf, gelungen oder gescheitert (V3, L1, L7, M2): Kostengrenze, Kontextgrenze,
+        Kostenwarnung einmal."""
         if self.session_cost >= self.config.cost_limit_usd:
             self._closing = "cost"
-        elif response.usage.context_tokens > self.config.context_limit_tokens:
+        elif usage.context_tokens > self.config.context_limit_tokens:
             self._closing = "context"
         if self.session_cost >= self.config.cost_warning_usd and not self._cost_warned:
             self._cost_warned = True
-            turn.notices.append(texts.user_text(lang, "cost_warning"))
-        return response, is_usable(response)
+            turn.notices.append(texts.user_text(self.config.language, "cost_warning"))
 
     def _commit(self, blocks, facts, response: ModelResponse) -> None:
         # Ab hier hat jedes tool_use ein Ergebnis: vorbelegt mit TURN_ENDED, Block für Block ersetzt. Eine Ausnahme
@@ -447,7 +468,7 @@ class AgentLoop:
             return self._finish(turn, "done", "intro_skipped", [], [fixed])
         sent = self._send(turn, results, [], {"type": "none"})
         if isinstance(sent, TurnResult):
-            if sent.outcome == "closed":
+            if sent.outcome == "closed" or sent.reason == "interrupted":  # Strg+C bricht den Zug ab (P12, Z17, O-04)
                 return sent
             return self._finish(turn, "done", f"intro_{sent.reason}", [], [fixed])
         response, usable = sent
