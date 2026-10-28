@@ -22,6 +22,7 @@ import httpx
 from pydantic import BaseModel
 
 from scout_research.data.cache import SqliteCache
+from scout_research.data.http_util import RequestLog
 from scout_research.data.http_util import parse_retry_after as _parse_retry_after
 from scout_research.data.rate_limiter import RateLimiter
 
@@ -143,9 +144,12 @@ class FinnhubProvider:
         rate_limiter: RateLimiter | None = None,
         requests_per_minute: int = FINNHUB_DEFAULT_REQUESTS_PER_MINUTE,
         sleep: Callable[[float], None] = time.sleep,
+        request_log: RequestLog | None = None,
     ) -> None:
         self._api_key = api_key
         self._client = client or httpx.Client(timeout=10.0)
+        if request_log is not None:
+            request_log.attach(self._client)
         self._rate_limiter = rate_limiter or RateLimiter(requests_per_minute, period_seconds=60.0)
         self._sleep = sleep
 
@@ -197,8 +201,10 @@ class StooqProvider:
 
     BASE_URL = "https://stooq.com/q/l/"
 
-    def __init__(self, client: httpx.Client | None = None) -> None:
+    def __init__(self, client: httpx.Client | None = None, request_log: RequestLog | None = None) -> None:
         self._client = client or httpx.Client(timeout=10.0)
+        if request_log is not None:
+            request_log.attach(self._client)
 
     def get_price(self, ticker: str) -> PriceQuote | None:
         response = _get_with_retry(
@@ -228,16 +234,20 @@ class CachedProvider:
         primary: MarketDataProvider,
         fallback: MarketDataProvider | None,
         cache: SqliteCache,
+        request_log: RequestLog | None = None,
     ) -> None:
         self._primary = primary
         self._fallback = fallback
         self._cache = cache
+        self._request_log = request_log
 
     def get_price(self, ticker: str) -> PriceQuote | None:
         today = datetime.now(timezone.utc).date().isoformat()
         cache_key = f"{ticker.upper()}:{today}"
 
         cached = self._cache.get("market_price", cache_key)
+        if self._request_log is not None:
+            self._request_log.record_cache("market_price", cached is not None)
         if cached is not None:
             return PriceQuote.model_validate(cached)
 

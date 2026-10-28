@@ -18,7 +18,7 @@ import httpx
 from pydantic import BaseModel
 
 from scout_research.data.cache import SqliteCache
-from scout_research.data.http_util import parse_retry_after
+from scout_research.data.http_util import RequestLog, parse_retry_after
 from scout_research.data.rate_limiter import RateLimiter
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -136,9 +136,11 @@ class EdgarClient:
         timeout: float = 20.0,
         cache: SqliteCache | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        request_log: RequestLog | None = None,
     ) -> None:
         self._rate_limiter = rate_limiter or RateLimiter(max_requests=10, period_seconds=1.0)
         self._cache = cache
+        self._request_log = request_log
         self._sleep = sleep
         self._frame_memo: dict[str, dict[str, FrameEntry]] = {}
         self._client = httpx.Client(
@@ -146,6 +148,8 @@ class EdgarClient:
             transport=transport,
             timeout=timeout,
         )
+        if request_log is not None:
+            request_log.attach(self._client)
         self._ticker_map_cache: dict[str, dict] | None = None
 
     def close(self) -> None:
@@ -337,6 +341,8 @@ class EdgarClient:
             return self._frame_memo[key]
 
         compact = self._cache.get(FRAME_CACHE_NAMESPACE, key, max_age_seconds=FRAME_CACHE_TTL_SECONDS) if self._cache else None
+        if self._cache and self._request_log is not None:
+            self._request_log.record_cache(FRAME_CACHE_NAMESPACE, compact is not None)
         if compact is None:
             data = self._get_json(FRAMES_URL.format(taxonomy=taxonomy, concept=concept, unit=unit, year=calendar_year))
             compact = [

@@ -432,6 +432,7 @@ class AgentLoop:
             else:
                 self._status(texts.tool_status(lang, name))  # nie der rohe Name aus der Antwort (H3, SG-14)
                 turn.tools += 1
+                mark = self.ctx.request_log.mark()
                 started = self._clock()
                 try:
                     outcome = self._dispatch(self.ctx, name, args)
@@ -439,7 +440,7 @@ class AgentLoop:
                     self._interrupted = True
                     outcome = coded_outcome("TURN_ENDED")
                 code = outcome.content.get("error", {}).get("code") if outcome.is_error else None
-                self.events.append(self._tool_event(name, block, args, outcome, code, self._clock() - started))
+                self.events.append(self._tool_event(name, block, args, outcome, code, self._clock() - started, mark))
                 if code == "LOOP_GUARD":
                     turn.loop_guards += 1
                     if turn.loop_guards >= 2:
@@ -473,12 +474,17 @@ class AgentLoop:
         return {"gate": len(self.ctx.gate_log), "commentary": len(self.ctx.commentary_log)}
 
     def _tool_event(self, name: Any, block: dict[str, Any], args: Any, outcome: ToolOutcome, code: str | None,
-                    duration: float) -> dict[str, Any]:
+                    duration: float, mark: int) -> dict[str, Any]:
         """Ereignis eines ausgeführten Tools: Argumente, Ergebnis für das Modell und Detail nur für den Trace (P3 geändert;
-        der Schreiber schwärzt)."""
+        der Schreiber schwärzt). `upstream` und `cache` sind die Einträge des Request-Logs seit `mark` (nur Host, Pfad,
+        Status bzw. Namespace und Treffer)."""
+        entries = self.ctx.request_log.since(mark)
+        upstream = [{k: v for k, v in e.items() if k != "kind"} for e in entries if e.get("kind") == "http"]
+        cache = [{k: v for k, v in e.items() if k != "kind"} for e in entries if e.get("kind") == "cache"]
         return {"event": "tool", "name": _event_name(self, name), "is_error": outcome.is_error, "code": code,
                 "tool_use_id": block.get("id"), "input": copy.deepcopy(args), "result": copy.deepcopy(outcome.content),
-                "detail": copy.deepcopy(outcome.trace), "duration_s": duration, "log_pos": self._log_pos()}
+                "detail": copy.deepcopy(outcome.trace), "duration_s": duration, "upstream": upstream, "cache": cache,
+                "log_pos": self._log_pos()}
 
     def _intro(self, turn: _Turn, results: list[dict[str, Any]]) -> TurnResult:
         """Z7–Z10: **ein** Aufruf mit `tool_choice: none`; keine Korrekturrunde (V2); bei Problemen oder Fehlern
@@ -503,11 +509,12 @@ class AgentLoop:
             pending = list(self.pending.blocks)  # vorbelegt in _commit (TURN_ENDED, H1)
             for i, block in enumerate(tool_uses):
                 turn.tools += 1
+                mark = self.ctx.request_log.mark()
                 started = self._clock()
                 outcome = self._dispatch(self.ctx, block.get("name", ""), block.get("input", {}))
                 code = outcome.content.get("error", {}).get("code") if outcome.is_error else None
                 self.events.append(self._tool_event(block.get("name", ""), block, block.get("input", {}), outcome, code,
-                                                    self._clock() - started))
+                                                    self._clock() - started, mark))
                 pending[i] = _result_block(block, outcome)
                 self.pending = Pending(tuple(pending), ())
             return self._finish(turn, "done", "intro_tool_use", [], [fixed])

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from scout_research.agent import trace
@@ -30,6 +31,9 @@ from scout_research.agent.trace import (
     validate_trace_line,
 )
 from scout_research.config import Settings
+from scout_research.data.cache import SqliteCache
+from scout_research.data.http_util import RequestLog
+from scout_research.data.market_provider import CachedProvider, FinnhubProvider
 from scout_research.tools.handlers import tool_definitions
 from tests.unit.loop_harness import COMMENTARY, SYSTEM, Run, say, use
 from tests.unit.test_agent_loop_core import _flow_to_proposal
@@ -774,3 +778,130 @@ def test_r3_an_invalid_git_commit_is_refused_before_any_file_or_directory_is_cre
         with pytest.raises(ValueError):
             TraceWriter(run.loop, _prompt(run.loop.system_prompt), base_dir=target, git_commit=bad)
     assert not target.exists()
+
+
+# --- Upstream-Requests und Cache-Treffer im Ereignis `tool` (Plan 6, TA-3) -------------------------------------------------
+
+
+def _upstream_world() -> Any:
+    """Test-Welt, deren EDGAR-Client und deren Kursanbieter (Finnhub über MockTransport, mit SQLite-Cache) ein gemeinsames
+    `RequestLog` füttern. Der Finnhub-Key steht im Query-String jeder Kursanfrage."""
+    w = standard_world()
+    w.request_log = RequestLog()
+    prices = {"NVDA": 180.0, "AAPL": 250.0, "MSFT": 500.0}
+
+    def finnhub(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["token"] == FINNHUB_KEY  # der Key geht tatsächlich im Query mit
+        return httpx.Response(200, json={"c": prices[request.url.params["symbol"]], "t": 1760000000})
+
+    primary = FinnhubProvider(FINNHUB_KEY, client=httpx.Client(transport=httpx.MockTransport(finnhub)), sleep=lambda _: None,
+                              request_log=w.request_log)
+    w.market = CachedProvider(primary, None, SqliteCache(":memory:"), request_log=w.request_log)
+    return w
+
+
+def test_tool_events_carry_upstream_requests_and_cache_hits_and_the_trace_file_has_no_query_or_key(tmp_path: Path) -> None:
+    run = Run(_upstream_world(), [], now=lambda: FIXED_NOW)
+    run.client._steps = [
+        use(("resolve_company", {"query": "NVDA"})),
+        use(("find_peer_candidates", {"target_cik": NVDA_CIK})),
+        run.propose(),
+        say("Hier ist mein Vorschlag."),
+        run.compute(),
+        use(("get_market_data", {"ticker": "NVDA"})),  # zweiter Abruf desselben Kurses: Treffer im Kurs-Cache
+        use(("get_financials", {"cik": NVDA_CIK})),  # companyfacts: Treffer im Speicher
+        say("Fertig."),
+    ]
+    with _writer(run, tmp_path) as tw:
+        run.say("Mach Comps für NVDA")
+        tw.flush()
+        run.confirm()
+    run.assert_invariants()  # inkl. validate_loop_event für jedes Ereignis
+    lines = _lines(tw.path)
+    validate_trace_file(tw.path)
+    tools = {x["name"]: x for x in _of(lines, "tool")}
+
+    resolve = tools["resolve_company"]
+    assert {"host": "www.sec.gov", "path": "/files/company_tickers.json", "status": 200} in resolve["upstream"]
+    find = tools["find_peer_candidates"]
+    assert any(u["path"] == "/cgi-bin/browse-edgar" and u["host"] == "www.sec.gov" and u["status"] == 200 for u in find["upstream"])
+    assert any(u["path"].startswith("/api/xbrl/frames/") for u in find["upstream"])
+
+    table = tools["compute_comps_table"]
+    quotes = [u for u in table["upstream"] if u["host"] == "finnhub.io"]
+    assert quotes and all(u == {"host": "finnhub.io", "path": "/api/v1/quote", "status": 200} for u in quotes)
+    assert {"namespace": "market_price", "hit": False} in table["cache"]
+    assert any(c["namespace"] == "companyfacts_memory" and c["hit"] is False for c in table["cache"])
+
+    market = _of(lines, "tool")[-2]
+    assert market["name"] == "get_market_data" and market["upstream"] == []
+    assert {"namespace": "market_price", "hit": True} in market["cache"]  # dazu die Anteile aus dem Speicher der companyfacts
+    financials = _of(lines, "tool")[-1]
+    assert financials["name"] == "get_financials" and financials["upstream"] == []
+    assert financials["cache"] == [{"namespace": "companyfacts_memory", "hit": True}]
+
+    for event in _of(lines, "tool"):
+        for entry in event["upstream"]:
+            assert set(entry) == {"host", "path", "status"} and "?" not in entry["path"]
+    text = tw.path.read_text(encoding="utf-8")
+    assert FINNHUB_KEY not in text and "token=" not in text and "symbol=" not in text
+    for secret in ALL_SECRETS:
+        assert secret not in text, secret
+
+
+def test_a_tool_that_touches_no_upstream_has_empty_upstream_and_cache() -> None:
+    run = Run(_upstream_world(), [use(("resolve_company", {"query": "NVDA"})), use(("resolve_company", {"query": "NVDA"})),
+                                  say("Fertig.")], now=lambda: FIXED_NOW)
+    run.say("Mach Comps für NVDA")
+    first, second = [e for e in run.loop.events if e["event"] == "tool"]
+    assert first["upstream"] and second["upstream"] == [] and second["cache"] == []
+
+
+def test_the_schema_has_no_query_url_or_headers_field_and_rejects_a_tool_event_with_one() -> None:
+    from scout_research.agent.trace import CacheHit, ToolEvent, UpstreamRequest
+
+    assert set(UpstreamRequest.model_fields) == {"host", "path", "status"} and set(CacheHit.model_fields) == {"namespace", "hit"}
+    forbidden = {"query", "url", "headers"}
+    assert not forbidden & (set(ToolEvent.model_fields) | set(UpstreamRequest.model_fields) | set(CacheHit.model_fields))
+
+    run = _run([use(("resolve_company", {"query": "NVDA"})), say("Fertig.")])
+    run.say("Mach Comps für NVDA")
+    good = next(e for e in run.loop.events if e["event"] == "tool")
+    entry = {"host": "finnhub.io", "path": "/api/v1/quote", "status": 200}
+    validate_loop_event({**good, "upstream": [entry]})
+    for extra in ({"query": "token=x"}, {"url": "https://finnhub.io/?token=x"}, {"headers": {"User-Agent": "x"}}):
+        with pytest.raises(TraceSchemaError):
+            validate_loop_event({**good, "upstream": [{**entry, **extra}]})
+        with pytest.raises(TraceSchemaError):
+            validate_loop_event({**good, **extra})
+    with pytest.raises(TraceSchemaError):
+        validate_loop_event({**good, "cache": [{"namespace": "x", "hit": True, "key": "NVDA:2026-10-28"}]})
+
+
+def test_upstream_path_refuses_a_query_string_or_a_fragment() -> None:
+    from pydantic import ValidationError
+
+    from scout_research.agent.trace import UpstreamRequest
+
+    assert UpstreamRequest(host="finnhub.io", path="/api/v1/quote", status=200).path == "/api/v1/quote"
+    for path in ("/api/v1/quote?token=x", "/pfad#frag", "?"):
+        with pytest.raises(ValidationError):
+            UpstreamRequest(host="finnhub.io", path=path, status=200)
+    run = _run([use(("resolve_company", {"query": "NVDA"})), say("Fertig.")])
+    run.say("Mach Comps für NVDA")
+    good = next(e for e in run.loop.events if e["event"] == "tool")
+    with pytest.raises(TraceSchemaError):
+        validate_loop_event({**good, "upstream": [{"host": "finnhub.io", "path": "/q?token=x", "status": 200}]})
+
+
+def test_the_z10_tool_event_carries_only_its_own_upstream_and_cache_entries() -> None:
+    """Die Einleitung liefert trotz `tool_choice: none` einen `tool_use` (Z10); davor gab es Upstream-Zugriffe."""
+    run = _flow_to_proposal(_upstream_world())
+    run.client._steps[3] = use(("resolve_company", {"query": "NVDA"}))
+    run.say("Mach Comps für NVDA")
+    tools = [e for e in run.loop.events if e["event"] == "tool"]
+    earlier, z10 = tools[:-1], tools[-1]
+    assert z10["name"] == "resolve_company" and z10["code"] == "AWAITING_PEER_CONFIRMATION"
+    assert any(e["upstream"] for e in earlier) and any(e["cache"] for e in earlier)
+    assert z10["upstream"] == [] and z10["cache"] == []
+    run.assert_invariants()

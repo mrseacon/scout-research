@@ -73,6 +73,8 @@ class World:
         self.garbage: set[str] = set()  # URL-Teilstrings, die mit 200 und Nicht-JSON antworten
         self.requests: list[httpx.Request] = []
         self.market = FakeMarket()
+        self.request_log: Any = None
+        """Optional: ein `RequestLog` (TA-3); `edgar()` und `context()` reichen es weiter. Ohne bleibt alles wie bisher."""
 
     # --- Aufbau --------------------------------------------------------------------------------------------
 
@@ -160,10 +162,12 @@ class World:
 
     def edgar(self) -> EdgarClient:
         return EdgarClient(user_agent=UA, rate_limiter=_NoLimit(), transport=httpx.MockTransport(self._handler),  # type: ignore[arg-type]
-                           sleep=lambda _: None)
+                           sleep=lambda _: None, request_log=self.request_log)
 
     def context(self, **kwargs: Any) -> ToolContext:
         kwargs.setdefault("secrets_to_redact", SECRETS)
+        if self.request_log is not None:
+            kwargs.setdefault("request_log", self.request_log)
         counter = iter(range(1, 10_000))
         kwargs.setdefault("token_factory", lambda: f"{next(counter):04d}")
         return ToolContext(self.edgar(), self.market, **kwargs)

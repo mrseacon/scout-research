@@ -156,6 +156,29 @@ class ModelErrorEvent(_Line):
     """Der Loop liefert sie für gescheiterte Aufrufe bisher nicht (Befund im Bericht zu TA-2)."""
 
 
+class UpstreamRequest(_Model):
+    """Eine HTTP-Antwort, die ein Tool ausgelöst hat: nur Host, Pfad und Status. Es gibt bewusst kein Feld für Query-String
+    (Finnhub-Key), Header (User-Agent) oder Body (12.10, T12)."""
+
+    host: str
+    path: str
+    status: int
+
+    @field_validator("path")
+    @classmethod
+    def _no_query_or_fragment(cls, value: str) -> str:
+        if "?" in value or "#" in value:
+            raise ValueError("path trägt Query-String oder Fragment")
+        return value
+
+
+class CacheHit(_Model):
+    """Ein Cache-Zugriff während eines Tools: Namespace und Treffer, nie der Schlüssel."""
+
+    namespace: str
+    hit: bool
+
+
 class ToolEvent(_Line):
     event: Literal["tool"]
     name: str
@@ -168,6 +191,10 @@ class ToolEvent(_Line):
     detail: dict[str, Any] | None
     """`outcome.trace` (Fehlerklasse, Endpunkt, Status, geschwärzter Stacktrace)."""
     duration_s: float
+    upstream: list[UpstreamRequest] = Field(default_factory=list)
+    """HTTP-Antworten, die dieses Tool ausgelöst hat (ohne Query-String und Header)."""
+    cache: list[CacheHit] = Field(default_factory=list)
+    """Cache-Zugriffe dieses Tools (Treffer und Fehlgriffe)."""
     full_result: dict[str, Any] | None
     """Gespeichertes Objekt mit Provenance (Comps-Tabelle bzw. Finanzdaten); vom Schreiber ergänzt."""
 

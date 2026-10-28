@@ -1,8 +1,10 @@
 """T12 — Secrets (Review 10, F5): weder API-Key noch Kontaktadresse noch User-Agent in Tool-Ergebnissen, Modell-Payloads,
 Trace-Ereignissen, Gate-Log oder Logs — auch nicht bei Upstream-Fehlern und unerwarteten Ausnahmen."""
 
+import io
 import json
 import logging
+import traceback
 
 import httpx
 import pytest
@@ -10,6 +12,7 @@ import pytest
 from scout_research.tools.session import HumanInput
 from scout_research.data.market_provider import FinnhubProvider
 from scout_research.tools.handlers import dispatch
+from scout_research.tools.sanitize import Redactor, RedactingFilter
 from tests.unit.tool_world import (
     AAPL_CIK, FINNHUB_KEY, MSFT_CIK, NVDA_CIK, SECRETS, UA, World, standard_world,
 )
@@ -133,3 +136,134 @@ def test_the_redactor_catches_secrets_it_was_not_told_about_by_pattern() -> None
     ctx = standard_world().context(secrets_to_redact=[])
     assert "KEY123" not in ctx.redact("GET https://x/quote?symbol=A&token=KEY123&y=1")
     assert "abc.def" not in ctx.redact("Authorization: Bearer abc.def")
+
+
+# --- T12 für Logs: der Filter hängt am Handler, nicht am Logger (Plan 12.10, N2) -------------------------------------------
+
+FAKE_ANTHROPIC_KEY = "sk-ant-FAKE-0123456789abcdefghij"
+LOG_SECRETS = [FAKE_ANTHROPIC_KEY, FINNHUB_KEY, "welt.tester@example.invalid"]
+LOGGER_NAMES = ["httpx2", "anthropic._base_client", "beliebig.name"]
+
+
+def _log_everything(with_filter: bool) -> str:
+    """Schreibt Einträge mit allen drei Secrets über drei Logger in einen Handler und gibt dessen Ausgabe zurück."""
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(name)s %(levelname)s %(message)s"))
+    if with_filter:
+        handler.addFilter(RedactingFilter(Redactor([*SECRETS, FAKE_ANTHROPIC_KEY])))
+    loggers = [logging.getLogger(name) for name in LOGGER_NAMES]
+    saved = [(lg, lg.level, lg.propagate) for lg in loggers]
+    try:
+        for lg in loggers:
+            lg.setLevel(logging.DEBUG)
+            lg.propagate = False
+            lg.addHandler(handler)
+        for lg in loggers:
+            for secret in LOG_SECRETS:
+                lg.info("als Argument: %s", secret)
+                lg.warning(f"im Text: {secret} Ende")
+                lg.info("Prozent 100%% und %s", {"k": secret})
+                try:
+                    raise RuntimeError(f"Upstream kaputt, Kopf {secret}")
+                except RuntimeError:
+                    lg.exception("Ausnahme beim Abruf")
+            lg.info("Anfrage: GET https://finnhub.io/api/v1/quote?symbol=NVDA&token=%s", "OHNE-BEKANNTES-GEHEIMNIS")
+    finally:
+        for lg, level, propagate in saved:
+            lg.removeHandler(handler)
+            lg.setLevel(level)
+            lg.propagate = propagate
+    return stream.getvalue()
+
+
+def test_t12_logs_a_handler_with_the_redacting_filter_never_emits_a_secret() -> None:
+    out = _log_everything(with_filter=True)
+    assert "Ausnahme beim Abruf" in out and "RuntimeError" in out and "Traceback" in out  # die Einträge sind brauchbar
+    assert "100% und" in out
+    for secret in [*LOG_SECRETS, "welt.tester", "OHNE-BEKANNTES-GEHEIMNIS"]:
+        assert secret not in out, secret
+    assert "<redacted>" in out
+
+
+def test_t12_logs_control_the_same_entries_without_the_filter_do_contain_the_secrets() -> None:
+    out = _log_everything(with_filter=False)  # Gegenprobe: sonst prüft der Test oben nichts
+    for secret in [*LOG_SECRETS, "OHNE-BEKANNTES-GEHEIMNIS"]:
+        assert secret in out, secret
+
+
+def test_t12_logs_the_filter_survives_a_broken_format_call_and_keeps_the_record() -> None:
+    filt = RedactingFilter(Redactor(LOG_SECRETS))
+    record = logging.LogRecord("x", logging.INFO, __file__, 1, "zwei %s %s " + FINNHUB_KEY, ("nur eins",), None)
+    assert filt.filter(record) is True
+    message = record.getMessage()
+    assert FINNHUB_KEY not in message and record.args == ()
+    assert "zwei %s %s" in message and "nur eins" in message and "<redacted>" in message  # die Meldung bleibt brauchbar
+
+
+class _OwnTracebackHandler(logging.Handler):
+    """Baut den Traceback selbst aus `record.exc_info`, statt `exc_text` zu nehmen (wie manche Fremd-Handler)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.output: list[str] = []
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        text = record.getMessage()
+        if record.exc_info:
+            text += "".join(traceback.format_exception(*record.exc_info))
+        self.output.append(text)
+        self.records.append(record)
+
+
+def _own_traceback_run(with_filter: bool) -> _OwnTracebackHandler:
+    handler = _OwnTracebackHandler()
+    if with_filter:
+        handler.addFilter(RedactingFilter(Redactor(LOG_SECRETS)))
+    logger = logging.getLogger("beliebig.eigener_traceback")
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    try:
+        try:
+            raise RuntimeError(f"Upstream kaputt, Kopf {FINNHUB_KEY} und {FAKE_ANTHROPIC_KEY}")
+        except RuntimeError:
+            logger.exception("Ausnahme beim Abruf")
+    finally:
+        logger.removeHandler(handler)
+        logger.propagate = True
+    return handler
+
+
+def test_t12_logs_a_handler_that_builds_the_traceback_itself_from_exc_info_sees_nothing_and_no_exc_info() -> None:
+    handler = _own_traceback_run(with_filter=True)
+    (record,) = handler.records
+    assert record.exc_info is None
+    text = "\n".join(handler.output)
+    assert "Ausnahme beim Abruf" in text
+    assert FINNHUB_KEY not in text and FAKE_ANTHROPIC_KEY not in text
+    assert "RuntimeError" in record.exc_text and "<redacted>" in record.exc_text  # der Traceback steckt geschwärzt in exc_text
+    assert FINNHUB_KEY not in record.exc_text and FAKE_ANTHROPIC_KEY not in record.exc_text
+
+
+def test_t12_logs_control_the_own_traceback_handler_without_the_filter_does_see_the_secrets() -> None:
+    handler = _own_traceback_run(with_filter=False)
+    assert FINNHUB_KEY in "\n".join(handler.output)
+
+
+def test_t12_logs_stack_info_is_redacted() -> None:
+    def emit_with(with_filter: bool) -> str:
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        if with_filter:
+            handler.addFilter(RedactingFilter(Redactor(LOG_SECRETS)))
+        record = logging.LogRecord("beliebig.name", logging.WARNING, __file__, 1, "mit Stapel", (), None,
+                                   sinfo=f"Stack (most recent call last):\n  File x, in f(key={FINNHUB_KEY})")
+        handler.handle(record)
+        return stream.getvalue()
+
+    assert FINNHUB_KEY in emit_with(with_filter=False)  # Gegenprobe
+    out = emit_with(with_filter=True)
+    assert "mit Stapel" in out and "Stack (most recent call last)" in out and "<redacted>" in out
+    assert FINNHUB_KEY not in out

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from scout_research.data.edgar_client import CompanyMetadata, EdgarClient, pad_cik
+from scout_research.data.http_util import RequestLog
 from scout_research.data.market_provider import MarketDataProvider
 from scout_research.domain.models import CompsTable
 from scout_research.tools.errors import fail
@@ -206,6 +207,7 @@ class ToolContext:
         secrets_to_redact: list[str] | tuple[str, ...] = (),
         token_factory: Callable[[], str] = lambda: secrets.token_hex(6),
         eval_session: object | None = None,
+        request_log: RequestLog | None = None,
     ) -> None:
         self.edgar = edgar
         self.market = market
@@ -217,6 +219,9 @@ class ToolContext:
         self.eval_session = eval_session
         """Wird erst mit Schritt 8 (`EvalSessionConfig`, nur in `eval/` konstruierbar) belegt; ohne sie lehnt
         `confirm_peer_set` den Kanal `eval` ab."""
+        self.request_log = request_log if request_log is not None else RequestLog()
+        """Upstream-Zugriffe und Cache-Treffer für den Trace (TA-3). Die Clients tragen nur dann etwas ein, wenn sie
+        dasselbe Objekt bekommen haben; der Loop liest es über `mark()`/`since()`."""
         self.deadline = Deadline(10**9, clock)
 
         self._user_messages: list[str] = []
@@ -336,7 +341,9 @@ class ToolContext:
 
     def facts(self, cik: str) -> dict:
         cik = pad_cik(cik)
-        if cik in self._facts:
+        hit = cik in self._facts
+        self.request_log.record_cache("companyfacts_memory", hit)
+        if hit:
             self._facts.move_to_end(cik)
             return self._facts[cik]
         data = self.edgar.get_company_facts(cik)

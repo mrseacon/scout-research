@@ -651,8 +651,13 @@ verworfener Ereignisse; ein Ereignis, das Schema oder Gegenprobe nicht besteht, 
 `trace_error` ersetzt (O-08). Query-Strings in URLs mit Schema (`http(s)://…?…`) werden im Trace entfernt (12.10); das trifft
 auch Modelltext (`raw_text`, `input`, `findings.match`), der dort dann nicht mehr wortgetreu ist (Fundstellen `start`/`end`
 beziehen sich auf den Originaltext). URLs ohne Schema bleiben stehen; ihre `token=`/`apikey=`-Werte schwärzt der
-`Redactor`. `text_check.action == "correction"` heißt „Korrektur vorgesehen“; ob sie lief, zeigt `turn_end.reason`. Upstream-Requests und Cache-Treffer
-kommen mit der Teilaufgabe TA-3 ins Tool-Ereignis.
+`Redactor`. `text_check.action == "correction"` heißt „Korrektur vorgesehen“; ob sie lief, zeigt `turn_end.reason`.
+**Upstream und Cache (TA-3):** `upstream: [{host, path, status}]` — nur Antworten, jeder Versuch, keine Transportfehler
+ohne Antwort (die stehen in `detail`); `cache: [{namespace, hit}]` mit `companyfacts_memory`, `market_price` und dem
+Frame-Cache; Speicher-Memos für Frames und die Ticker-Map werden nicht gemeldet. Quelle ist
+`data/http_util.py::RequestLog`; **ein** Objekt je Sitzung geht an `EdgarClient`, `FinnhubProvider`, `StooqProvider`,
+`CachedProvider` und `ToolContext` (Verdrahtung in Schritt 9, mit Test der Fabrik: nach `resolve_company` ist `upstream`
+nicht leer — sonst stünde still `upstream: []` im Trace).
 
 **Messbarkeit in Phase 5:**
 - **Peer Overlap:** gegen den **Modellvorschlag vor menschlichen Änderungen**.
@@ -1435,6 +1440,10 @@ bei großem `max_tokens` Streaming (12.14.1); der interne Stream erfüllt das.
   dokumentiert, und ein Filter am Logger `httpx` wie in 1.6.5 erfasst Einträge anderer Logger nicht). `ANTHROPIC_LOG` ist
   in Live-Läufen nicht gesetzt, sonst warnt die CLI (N2). Keine Request-Header, keine
   Query-Strings im Trace; `request_id` ja.
+  **Gebaut in Schritt 8 (TA-3):** `tools/sanitize.py::RedactingFilter` — verändert den Eintrag (`msg` geschwärzt,
+  `args = ()`, `exc_text` geschwärzt, `exc_info = None`, `stack_info` geschwärzt), schwärzt **keine** `extra`-Felder: deshalb
+  nur Formatter mit `%(message)s` (kein JSON-Formatter über `record.__dict__`). Er hängt an jedem Handler; Handler an
+  Kindloggern gibt es nicht (ein Handler, der vor dem Filter läuft, sähe die Rohfassung). Einrichten: Schritt 9.
 - Jede Trace-Zeile läuft durch den `Redactor` (API-Keys, User-Agent, Kontaktadresse). Nach dem Lauf scannt die CLI den
   Trace und das Log auf die Werte aus der Umgebung und bricht mit Fehlermeldung ab, wenn sie etwas findet (wie Prüfung c
   vor dem Push).
@@ -1828,7 +1837,7 @@ Testbeschreibungen sind hier festgelegt; der Code folgt in Phase B.
 | `TURN_ENDED` in `errors.py` und Abschnitt 2, Prompt v1.1.0, `anthropic_max_tokens`, `runs/` in `.gitignore`, Package-Data | 7 | umgesetzt |
 | LT-01 bis LT-50 (LT-33 und LT-44 nur der Teil, der die Schleife betrifft), U-V1, U-M5, U-F1, U-P1, U-H1, U-M2, A-H1, A-E1 | 7 | umgesetzt |
 | Trace-Schreiber, Schema, Schlussereignis in der Datei, T9, T12 für Trace und Logs, LT-33 vollständig, `EvalSessionConfig`, Harness in `eval/` mit E-01, E-02, E-04 | 8 | **nicht gebaut** |
-| CLI (`cli/`, Konstruktion von `HumanInput` im Host-Eingang, Handler-Filter mit `Redactor`, Scan nach dem Lauf, `make_sdk_client` live) | 9 | **nicht gebaut** |
+| CLI (`cli/`, Konstruktion von `HumanInput` im Host-Eingang, Handler-Filter mit `Redactor` einrichten (Filter gebaut: TA-3, Schritt 8), gemeinsames `RequestLog` verdrahten, Scan nach dem Lauf, `make_sdk_client` live) | 9 | **nicht gebaut** |
 
 **Festlegungen, die der Plan nicht ausdrücklich trifft (Sean bitte bestätigen oder ändern):**
 

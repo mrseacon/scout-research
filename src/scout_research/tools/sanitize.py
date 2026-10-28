@@ -7,6 +7,7 @@ Firmenname einen Slot einschleusen.
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 
@@ -65,3 +66,32 @@ class Redactor:
             text = text.replace(secret, "<redacted>")
         text = _SECRET_QUERY.sub(r"\1=<redacted>", text)
         return _BEARER.sub("Bearer <redacted>", text)
+
+
+class RedactingFilter(logging.Filter):
+    """Schwärzt Log-Einträge, bevor ein **Handler** sie ausgibt (T12 für Logs, Plan 12.10, N2).
+
+    Der Filter gehört an jeden Handler, nicht an einen Logger: Ein Logger-Filter gilt nicht für Einträge, die Kindlogger
+    (`httpx`, `anthropic._base_client`, beliebige Module) erzeugen. Er ersetzt die fertige Meldung durch die geschwärzte
+    (`msg`, `args = ()`), schwärzt `exc_text` und `stack_info` und gibt eine Ausnahme nur geschwärzt weiter: `exc_info`
+    wird vorher formatiert, geschwärzt in `exc_text` gelegt und auf `None` gesetzt. Der Eintrag wird dabei verändert; ein
+    Handler, der danach kommt, sieht nur die geschwärzte Fassung."""
+
+    def __init__(self, redactor: Redactor) -> None:
+        super().__init__()
+        self._redactor = redactor
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:  # falsche Format-Argumente: die Rohfassung schwärzen statt den Aufrufer zu stören
+            message = f"{record.msg} {record.args!r}"
+        record.msg, record.args = self._redactor(message), ()
+        if record.exc_info and not record.exc_text:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+        record.exc_info = None
+        if record.exc_text:
+            record.exc_text = self._redactor(record.exc_text)
+        if record.stack_info:
+            record.stack_info = self._redactor(record.stack_info)
+        return True
