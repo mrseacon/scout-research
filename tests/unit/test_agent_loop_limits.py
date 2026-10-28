@@ -665,3 +665,82 @@ def test_m1_other_failure_kinds_keep_the_pending_part_and_never_count_towards_cl
     assert [b["text"] for b in run.loop.pending.blocks] == ["Frage 0", "Frage 1", "Frage 2"]
     assert shown_texts(run.say("Frage 3")) == ["Jetzt klappt es."]
     run.assert_invariants()
+
+
+# --- M4 (12.16): Mutationen, die die Suite überlebt hatten -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("usage", "closing"),
+    [(Usage(input_tokens=151_000, output_tokens=10), "context"), (Usage(input_tokens=1000, output_tokens=200_000), "cost")],
+    ids=["context", "cost"],  # Kostengrenze: 2,002 $
+)
+def test_m4_a_problem_text_at_the_limit_is_withheld_without_a_further_call(usage: Usage, closing: str) -> None:
+    """Trifft der Aufruf, der die Sitzungsgrenze überschreitet, einen Text mit Problem, startet keine Korrekturrunde: Ein
+    weiterer Aufruf in einer schließenden Sitzung wäre ein Aufruf zu viel (am Kopf von `_drive` gibt es keinen Schutz)."""
+    run = _run([say("Antwort 42", usage=usage), say("nie gesendet")])
+    result = run.say("Frage")
+    assert result.outcome == "closed" and result.state is LoopState.CLOSED and result.reason == "withheld"
+    assert run.loop.events[-1]["event"] == "turn_end" and run.loop.events[-1]["closing"] == closing
+    notices = shown_texts(result)
+    assert texts.user_text("de", "withheld") in notices and not any("42" in t for t in notices)
+    assert len(run.client.requests) == 1 and result.calls == 1
+    check = [e for e in run.loop.events if e["event"] == "text_check"]
+    assert [(e["shown"], e["action"]) for e in check] == [(False, "withheld")]
+    with pytest.raises(SessionClosedError):
+        run.say("noch eine")
+
+
+def _dispatch_interrupted_at(position: int):
+    """`dispatch`, bei dem das Tool mit der laufenden Nummer `position` (1-basiert) Strg+C erhält, direkt im Aufruf."""
+    calls: list[str] = []
+
+    def dispatch(ctx, name, args):
+        calls.append(name)
+        if len(calls) == position:
+            raise KeyboardInterrupt
+        return real_dispatch(ctx, name, args)
+
+    dispatch.calls = calls  # type: ignore[attr-defined]
+    return dispatch
+
+
+def _interrupted_run(position: int = 2) -> tuple[Run, object, object]:
+    dispatch = _dispatch_interrupted_at(position)
+    resolve = ("resolve_company", {"query": "NVDA"})
+    run = Run(standard_world(), [use(resolve, _q(1), _q(2)), say("Jetzt klappt es.")], dispatch=dispatch)
+    return run, dispatch, run.say("Mach Comps für NVDA")
+
+
+def test_m4_an_interrupt_raised_by_a_tool_leaves_the_user_view_and_the_history_as_after_a_cooperative_interrupt() -> None:
+    """Für Nutzer und Verlauf ist der Zweig `except KeyboardInterrupt` in `_run_tools` seit H1 nicht nötig: `_run` fängt
+    Strg+C ebenfalls, und der Block steht in `_commit` schon als `TURN_ENDED` im Verlauf. Dieser Test muss auch ohne den
+    Zweig grün bleiben; den Unterschied im Trace prüft der nächste."""
+    run, dispatch, result = _interrupted_run()
+    assert result.outcome == "failed" and result.reason == "interrupted" and result.state is LoopState.IDLE
+    assert shown_texts(result) == [texts.user_text("de", "interrupted")] and result.calls == 1
+    assert dispatch.calls == ["resolve_company", "resolve_company"]  # das dritte Tool läuft nicht mehr
+    first, second, third = (json.loads(b["content"]) for b in run.loop.pending.blocks)
+    assert first["status"] == "resolved" and first["company"]["cik"] == NVDA_CIK
+    assert codes_in(second) == "TURN_ENDED" and codes_in(third) == "TURN_ENDED"
+    end = run.loop.events[-1]
+    assert end["event"] == "turn_end" and end["outcome"] == "failed" and end["reason"] == "interrupted" and end["tools"] == 2
+    run.assert_invariants()
+    assert shown_texts(run.say("Und jetzt?")) == ["Jetzt klappt es."]
+    assert [codes_in(r) if "error" in r else r["status"] for r in run.tool_results(-1)] == ["resolved", "TURN_ENDED", "TURN_ENDED"]
+    run.assert_invariants()
+
+
+def test_m4_an_interrupt_raised_by_a_tool_is_recorded_as_a_started_tool_and_the_rest_is_turn_ended() -> None:
+    """Das Ereignis `tool` ist im Trace die einzige Spur, dass das Tool gestartet wurde (es kann Nebenwirkungen gehabt
+    haben): Es steht für den unterbrochenen Aufruf mit `TURN_ENDED`, für die übrigen Blöcke nicht."""
+    run, dispatch, result = _interrupted_run()
+    assert result.outcome == "failed" and result.reason == "interrupted"
+    tools = [e for e in run.loop.events if e["event"] == "tool"]
+    assert len(tools) == 2
+    assert tools[0]["is_error"] is False and tools[0]["code"] is None
+    assert tools[1]["is_error"] is True and tools[1]["code"] == "TURN_ENDED" and tools[1]["name"] == "resolve_company"
+    assert [e["event"] for e in run.loop.events].index("turn_end") > run.loop.events.index(tools[1])
+    run.assert_invariants()
+    assert shown_texts(run.say("Und jetzt?")) == ["Jetzt klappt es."]
+    run.assert_invariants()

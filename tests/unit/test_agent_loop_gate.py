@@ -159,6 +159,28 @@ def test_lt_36_only_run_turn_records_user_messages() -> None:
     assert recorded == ["Mach Comps für NVDA", "Die Marge?"]
 
 
+def test_lt_36b_the_reject_host_turn_records_no_user_message() -> None:
+    run = _flow_to_proposal(tail=[say("Welche Peers möchtest du?"), say("Nicht angezeigt 12."), say("Ohne Zahl.")])
+    recorded: list[str] = []
+    original = run.ctx.record_user_message
+
+    def spy(msg):
+        recorded.append(msg.text)
+        original(msg)
+
+    run.ctx.record_user_message = spy  # type: ignore[method-assign]
+    run.say("Mach Comps für NVDA")          # Zug mit Einleitung
+    pid = run.proposal_id
+    before = run.ctx.user_messages
+    run.reject()                             # Host-Zug: weder die Vorlage noch die Vorschlags-ID ist eine Nutzernachricht
+    assert recorded == ["Mach Comps für NVDA"] and run.ctx.user_messages == before == ("Mach Comps für NVDA",)
+    assert pid not in recorded and pid not in run.ctx.user_messages
+    run.say("Die Marge?")                    # Korrekturrunde läuft im selben Zug
+    assert recorded == ["Mach Comps für NVDA", "Die Marge?"]
+    assert run.ctx.user_messages == ("Mach Comps für NVDA", "Die Marge?")
+    run.assert_invariants()
+
+
 def test_lt_37_after_a_tool_use_in_the_introduction_the_confirmation_is_a_valid_host_turn() -> None:
     run = _flow_to_proposal(tail=[say("Bestätigt.")])
     run.client._steps[3] = use(("get_market_data", {"ticker": "NVDA"}))

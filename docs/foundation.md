@@ -3,7 +3,7 @@
 **Projektname:** Scout Research
 **Owner:** Sean Pölka
 **Status:** In Entwicklung — Phase 0–2 abgeschlossen, Härtungs-Session vor Phase 3 durchgeführt, strategische Ausrichtung festgelegt (v1.6)
-**Dokumentversion:** 1.6.20 — Basis für alle folgenden Code-Sessions
+**Dokumentversion:** 1.6.21 — Basis für alle folgenden Code-Sessions
 
 ---
 
@@ -1196,7 +1196,8 @@ Accession Number, Periode und Filing-Datum aus. Kein LLM beteiligt.
 | 1.6.18 | 2026-10-14 | Doku: README neu auf Englisch (Problem, Kernprinzip, Ebenen, Validierung, Status, Quick Start), `docs/assets/social-preview.png`; Plan 13 Punkt 10 (README-Pflege nach Meilensteinen). Kein Code geändert. |
 | 1.6.19 | 2026-10-28 | Phase 3, Schritt 7, Phase B: hohe Review-Befunde H1–H3 aus Plan 12.16 umgesetzt (Plan 12.17, Festlegungen P10–P12): `TURN_ENDED` ab dem Commit vorbelegt (H1), leere Antworten nie im Verlauf und Platzierungsregel 5 (H2), feste Statustexte je Tool statt Tool-Name (H3); Tests LT-51 bis LT-55 (dazu LT-51b, LT-53b), LT-17b, U-F1, U-P1 erweitert, Statusprüfung in den Invarianten; Review und Mutationslauf eingearbeitet (Plan 12.17); Register SG-09, SG-11b, SG-13, SG-14 mit neuen bzw. berichtigten Mutationen; Platzierungsregeln in 12.14.4 angeglichen. Danach (Sean): P10–P12 bestätigt; Text-Blöcke aus Leerraum vor dem Commit entfernt (LT-53c); Einleitung bei `stop_reason` `tool_use` ohne Block als geprüft festgeschrieben (LT-41b); Prompt-Hinweis zu `TURN_ENDED` für den halb-live-Satz in Schritt 10 vorgemerkt. Mutationsbericht vom 2026-10-11 archiviert (`docs/mutation-report-2026-10-11.md`); Aufruf `python -m eval.seed_compare` berichtigt. |
 | 1.6.20 | 2026-10-28 | Arbeitsweise: Betriebsordnung für autonomes Arbeiten (`docs/operating-charter.md`; Rollen CEO/Orchestrator/Implementierer, Entscheidungsstufen A/B/C, Arbeitsregeln, Status- und Eskalationsdateien unter `.orchestrator/`, gitignored); Subagent `implementer` (Sonnet); Plan 13 Regeln 3 und 7 angepasst, Plan 14 (Entscheidungen des Orchestrators) neu. Kein Anwendungscode geändert. |
+| 1.6.21 | 2026-10-28 | Phase 3, Schritt 8 im Pilot der Betriebsordnung (Implementierer Sonnet, Review Opus, Orchestrator Opus): Trace-Schreiber `agent/trace.py` (JSONL je Lauf, Kopf nur aus der Whitelist, `run_mode` aus der Sitzung, Pydantic-Schema, rekursive Schwärzung, Query-Strings entfernt, Gegenprobe je Zeile, `trace_error` statt stillen Datenverlusts, Schlussereignis immer); Upstream-Protokoll `data/http_util.py::RequestLog` (Host, Pfad, Status; Cache-Treffer); Log-Filter `tools/sanitize.py::RedactingFilter` (Einrichten in Schritt 9); `EvalSessionConfig` und Eval-Harness `eval/harness.py` mit Falldateien `eval/cases/`. Dazu aus dem Review der Phase B: M2 (gescheiterte Modellaufrufe werden verbucht), M1 (leere Eingabe, abgelehnte Anfrage), M4 (zwei Mutationen analysiert, ein echtes Testloch geschlossen). Entscheidungen des Orchestrators O-01 bis O-14 (Plan, Abschnitt 14); Register SG-09, SG-11b, SG-13, SG-17 bis SG-21. `Settings.runs_dir`. Kein Live-Aufruf, keine CLI. |
 
 ---
 
-*Ende Dokumentversion 1.6.20*
+*Ende Dokumentversion 1.6.21*
