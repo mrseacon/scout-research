@@ -708,7 +708,7 @@ nicht leer — sonst stünde still `upstream: []` im Trace).
 | 5 | Handler für die Modell-Tools inkl. Allowlist und `resolve_company`-Namensabgleich — **sechs von sieben; `submit_commentary` gehört zu Schritt 6** | Sonnet | T1, T3, T4, T13; T12 für Tool-Ergebnisse; vorher E1–E7 entschieden. **Umgesetzt (2026-10-09)** |
 | 6 | **Slot-Renderer, `submit_commentary`, Backstop** | Opus (Grammatik, Korpus, Grenzfälle), dann Sonnet | T2 mit dem Korpus (Abschnitt 11.6). **Phase A (Policy, Korpus) und Entscheidungen O1–O7 erledigt 2026-10-09; Phase B (Umsetzung) erledigt 2026-10-09, Abschnitt 11.8** |
 | 7 | System-Prompt und Loop: Zustandsmaschine, Gate- und Kommentar-Ende, Budgets, Adapter | Opus (Prompt), Loop Sonnet | T3, T5, geskripteter End-to-End-Lauf. **Phase A (Prompt v1.0.0, Loop-Design, Abschnitt 12) erledigt 2026-10-09; Review eingearbeitet, L1–L9 und V1–V6 entschieden (2026-10-11); Phase B (Umsetzung) erledigt 2026-10-11, Abschnitt 12.15** |
-| 8 | Trace (JSONL), `EvalSessionConfig` | Sonnet | T9, T11, T12 für Trace und Logs |
+| 8 | Trace (JSONL), `EvalSessionConfig` | Sonnet | T9, T11, T12 für Trace und Logs. **Umgesetzt 2026-10-28 (Pilot, Implementierer Sonnet, Review Opus):** `agent/trace.py`, `data/http_util.py::RequestLog`, `tools/sanitize.py::RedactingFilter`, `eval/harness.py`; Einrichten in der CLI: Schritt 9 |
 | 9 | CLI-Chat mit Gate-Abfrage (Host-API) | Sonnet | manueller Live-Lauf ADBE (API-Key nötig), Kosten im Trace |
 | 10 | Live-Review: 3 Läufe (ADBE + 2 Branchen), Prompt-Tuning, Go/No-go Slots (Abschnitt 3), Foundation Doc v1.7 (§7.3 neu, D9-Detail, `submit_commentary`) | Opus | Gate eingehalten; 0 falsche Zahlen im gerenderten Output; Verstöße vor Korrektur dokumentiert |
 
@@ -1762,7 +1762,15 @@ Im Trace stehen Klasse, `status_code` und `request_id`. `str(exc)` geht nie an H
   `ctx.proposals[ctx.current_proposal_id]`, also aus dem Speicher des Codes und nicht aus Modelltext. Sie bildet `keep`
   deterministisch: alle vorgeschlagenen Peers oder die Schnittmenge mit der Fallliste. Fehlende Peers protokolliert sie
   als Abweichung und ergänzt sie nicht. Dann ruft sie `loop.confirm` bzw. `loop.reject` auf. Je Fall höchstens eine
-  Bestätigung, außer der Fall sagt etwas anderes.
+  Entscheidung (mehrere sind im Format nicht vorgesehen).
+- **Umsetzung (Schritt 8, 2026-10-28):** `eval/harness.py` (`EvalSessionConfig(case_id, case_path)`, `load_case`,
+  `run_case`, `CaseResult`); Falldateien `eval/cases/*.yaml`, Format in `eval/cases/README.md`. `case_id` = Dateiname;
+  `keep`/`add` nur bei `confirm` (sonst `ValueError`); Abgleich der Ticker über `normalize_ticker`; ein
+  `ConfirmationError` und ein leeres `keep` werden Abweichungen, der Fall läuft weiter (O-11); da sie keine Entscheidung
+  sind, versucht die Harness es bei einem späteren Vorschlag im selben Fall erneut. `ToolContext.eval_session`
+  ist `object | None` (kein Import aus `eval/`); geschützt durch Architekturtests: Name `EvalSessionConfig` nur in
+  `eval/`, kein `eval_session=` ungleich `None` und kein Kanal `"eval"` (auch positional) in `src/`. Trace optional
+  (`trace_dir` verlangt den Prompt).
 - **Nicht durch das Modell erreichbar:**
   - Die Entscheidung ist eine Funktion aus Falldatei und Code-Speicher; die Harness liest keinen Modelltext.
   - `confirm_peer_set` ist kein Tool.
@@ -1836,7 +1844,7 @@ Testbeschreibungen sind hier festgelegt; der Code folgt in Phase B.
 | `agent/loop.py` (Zustandsmaschine Z1–Z20, Host-Zug, Budgets, `TURN_ENDED`, `LOOP_GUARD`, L3, L4, V2, V5), `agent/model_client.py` (Protokoll, Platzierungsprüfer, `ScriptedModelClient`, SDK-Adapter), `agent/prompt_loader.py`, `agent/budgets.py`, `agent/texts.py` | 7 | umgesetzt |
 | `TURN_ENDED` in `errors.py` und Abschnitt 2, Prompt v1.1.0, `anthropic_max_tokens`, `runs/` in `.gitignore`, Package-Data | 7 | umgesetzt |
 | LT-01 bis LT-50 (LT-33 und LT-44 nur der Teil, der die Schleife betrifft), U-V1, U-M5, U-F1, U-P1, U-H1, U-M2, A-H1, A-E1 | 7 | umgesetzt |
-| Trace-Schreiber, Schema, Schlussereignis in der Datei, T9, T12 für Trace und Logs, LT-33 vollständig, `EvalSessionConfig`, Harness in `eval/` mit E-01, E-02, E-04 | 8 | **nicht gebaut** |
+| Trace-Schreiber, Schema, Schlussereignis in der Datei, T9, T12 für Trace und Logs, LT-33 vollständig, `EvalSessionConfig`, Harness in `eval/` mit E-01, E-02, E-04 | 8 | **umgesetzt** (2026-10-28, Pilot; Abschnitt 6, 12.10, O-05 bis O-10) |
 | CLI (`cli/`, Konstruktion von `HumanInput` im Host-Eingang, Handler-Filter mit `Redactor` einrichten (Filter gebaut: TA-3, Schritt 8), gemeinsames `RequestLog` verdrahten, Scan nach dem Lauf, `make_sdk_client` live) | 9 | **nicht gebaut** |
 
 **Festlegungen, die der Plan nicht ausdrücklich trifft (Sean bitte bestätigen oder ändern):**
@@ -2021,3 +2029,4 @@ zu machen ist; im Bericht an Sean stehen sie gesondert.
 | O-08 | 2026-10-28 | 8 | Fehler im Schreiber | Ereignis, das Schema oder Gegenprobe nicht besteht → nicht geschrieben, inhaltslose Zeile `trace_error`, weiter mit dem Rest; `flush` wirft danach laut; `end` immer, mit `dropped_events`; eine Host-Ausnahme wird nie verdeckt (Review TA-2, H1). Restfenster: ein Abbruch (Strg+C) während `end` selbst geschrieben wird | Kein stiller Datenverlust, keine unvollständige Datei, die vollständig aussieht | Abbrechen beim ersten Fehler (alter Stand) | `flush` beim ersten Fehler werfen lassen |
 | O-09 | 2026-10-28 | 8 | `model_error.latency_s` | im Schema optional, heute `null` | LT-44 prüft das Ereignis exakt; eine zweite Umstellung nach O-02 lohnt sich erst, wenn die Latenz gescheiterter Aufrufe gebraucht wird (Stillstand ist schon über `kind` erkennbar) | Feld im Loop, LT-44 erweitern | Feld in `_send` ergänzen, LT-44 erweitern |
 | O-10 | 2026-10-28 | 8 | Gegenprobe der fertigen Zeile | JSON-Escapes werden vor dem Vergleich durch ein Leerzeichen ersetzt (sonst Fehlalarm der Muster `token=…` über `\n` hinweg); blind nur für Secrets mit `"`, `\` oder Steuerzeichen, die `_redact_tree` vorher abfängt (Review TA-2, N1) | Kein Fehlalarm bei mehrzeiligem, schon geschwärztem Text | Probe auf den decodierten Strings von `json.loads(line)` | `_ESCAPE.sub` ersetzen |
+| O-11 | 2026-10-28 | 8 | Ungültige Bestätigung in der Harness | `ConfirmationError` aus `confirm`/`reject` und leeres `keep` (nach Abgleich, ohne `add`) → Abweichung `confirmation_error` bzw. `empty_keep`, keine Entscheidung, `CaseResult` kommt zurück (Review TA-4, M4) | Ein Golden-Set-Lauf soll eine Abweichung protokollieren, nicht abstürzen und das bisherige Ergebnis verlieren | Ausnahme aufsteigen lassen (laut) | `try/except` in `_decide_gate` entfernen |

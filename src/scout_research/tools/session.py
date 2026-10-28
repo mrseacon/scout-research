@@ -217,8 +217,8 @@ class ToolContext:
         self.redact = Redactor(secrets_to_redact)
         self._token_factory = token_factory
         self.eval_session = eval_session
-        """Wird erst mit Schritt 8 (`EvalSessionConfig`, nur in `eval/` konstruierbar) belegt; ohne sie lehnt
-        `confirm_peer_set` den Kanal `eval` ab."""
+        """Belegt nur von `eval/harness.py` (`EvalSessionConfig`); ohne sie lehnen `confirm_peer_set` und
+        `reject_proposal` den Kanal `eval` ab."""
         self.request_log = request_log if request_log is not None else RequestLog()
         """Upstream-Zugriffe und Cache-Treffer für den Trace (TA-3). Die Clients tragen nur dann etwas ein, wenn sie
         dasselbe Objekt bekommen haben; der Loop liest es über `mark()`/`since()`."""

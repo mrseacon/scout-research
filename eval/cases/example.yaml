@@ -1,0 +1,8 @@
+# Beispielfall: ein Zug, danach Standardbestätigung (alle vorgeschlagenen Peers, keine Ergänzung).
+case_id: example
+turns:
+  - "Mach Comps für NVDA"
+confirmation:
+  action: confirm
+  keep: all_proposed
+  add: []

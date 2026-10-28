@@ -133,6 +133,110 @@ def test_a_e1_the_detector_finds_the_literal() -> None:
     assert eval_channel_literals(ast.parse("loop.confirm(p, channel='cli')")) == []
 
 
+EVAL_DIR = Path(__file__).resolve().parents[2] / "eval"
+EVAL_SESSION_CONFIG = "EvalSessionConfig"
+
+
+def mentions_of(tree: ast.AST, name: str) -> list[int]:
+    """Zeilen, in denen `name` im Code vorkommt: als Name, Attribut, Klasse, Import oder Textliteral (Annotation als
+    String). Docstrings zählen nicht (sie beschreiben, sie benutzen nichts)."""
+    docstrings = {
+        id(node.value)  # Docstrings und Attribut-Docstrings: Textzeilen, die als eigene Anweisung stehen
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+    }
+    lines = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == name:
+            lines.append(node.lineno)
+        elif isinstance(node, ast.Attribute) and node.attr == name:
+            lines.append(node.lineno)
+        elif isinstance(node, ast.ClassDef) and node.name == name:
+            lines.append(node.lineno)
+        elif isinstance(node, ast.alias) and name in {node.name, node.asname}:
+            lines.append(getattr(node, "lineno", 0))
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings \
+                and name in node.value:
+            lines.append(node.lineno)
+    return lines
+
+
+def test_a_e1_eval_session_config_is_defined_only_in_eval_and_never_mentioned_in_src() -> None:
+    """`EvalSessionConfig` ist nur in `eval/` konstruierbar (SM-07): Im Paket steht sie nirgends im Code, `ToolContext`
+    kennt sie nur als `object | None`; definiert ist sie genau einmal, in `eval/harness.py`."""
+    offenders = [f"{path}:{line}" for path, tree in _sources().items() for line in mentions_of(tree, EVAL_SESSION_CONFIG)]
+    assert offenders == []
+    definitions = [
+        f"{path.relative_to(EVAL_DIR)}:{node.lineno}"
+        for path in sorted(EVAL_DIR.rglob("*.py"))
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ClassDef) and node.name == EVAL_SESSION_CONFIG
+    ]
+    assert len(definitions) == 1 and definitions[0].startswith("harness.py:")
+
+
+def test_a_e1_the_mention_detector_finds_code_but_not_docstrings() -> None:
+    assert mentions_of(ast.parse("x = EvalSessionConfig('a', 'b')"), EVAL_SESSION_CONFIG) == [1]
+    assert mentions_of(ast.parse("from eval.harness import EvalSessionConfig"), EVAL_SESSION_CONFIG) == [1]
+    assert mentions_of(ast.parse("def f(c: 'EvalSessionConfig'): ..."), EVAL_SESSION_CONFIG) == [1]
+    assert mentions_of(ast.parse("def f():\n    \"\"\"EvalSessionConfig\"\"\"\n"), EVAL_SESSION_CONFIG) == []
+    assert mentions_of(ast.parse("x = 1\n\"\"\"EvalSessionConfig\"\"\"\n"), EVAL_SESSION_CONFIG) == []
+
+
+GATE_CALLS = {"confirm", "reject", "confirm_peer_set", "reject_proposal"}
+
+
+def eval_session_arguments(tree: ast.AST) -> list[int]:
+    """Zeilen mit dem Schlüsselwortargument `eval_session=<etwas anderes als die Konstante None>`."""
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for kw in node.keywords
+        if kw.arg == "eval_session" and not (isinstance(kw.value, ast.Constant) and kw.value.value is None)
+    ]
+
+
+def eval_channel_positionals(tree: ast.AST) -> list[int]:
+    """Zeilen, in denen einem Aufruf von `confirm`/`reject`/`confirm_peer_set`/`reject_proposal` das Literal `"eval"`
+    positional übergeben wird (`channel` ist dort das vierte bzw. zweite Argument)."""
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _called_name(node) in GATE_CALLS
+        for arg in node.args
+        if isinstance(arg, ast.Constant) and arg.value == "eval"
+    ]
+
+
+def test_a_e1_nothing_in_the_package_passes_an_eval_session_other_than_none() -> None:
+    """Der Kanal `eval` wird nur durch eine Sitzung mit `EvalSessionConfig` frei (SM-07): Im Paket gibt kein Aufruf
+    ein `eval_session=` weiter, das nicht die Konstante `None` ist."""
+    offenders = [f"{path}:{line}" for path, tree in _sources().items() for line in eval_session_arguments(tree)]
+    assert offenders == []
+
+
+def test_a_e1_no_gate_call_in_the_package_passes_the_eval_channel_positionally() -> None:
+    offenders = [f"{path}:{line}" for path, tree in _sources().items() for line in eval_channel_positionals(tree)]
+    assert offenders == []
+
+
+def test_a_e1_the_eval_session_detector_finds_a_value_but_not_none() -> None:
+    assert eval_session_arguments(ast.parse("ToolContext(edgar, market, eval_session=object())")) == [1]
+    assert eval_session_arguments(ast.parse("ToolContext(edgar, market, eval_session=config)")) == [1]
+    assert eval_session_arguments(ast.parse("ToolContext(edgar, market, eval_session=None)")) == []
+    assert eval_session_arguments(ast.parse("ToolContext(edgar, market)")) == []
+
+
+def test_a_e1_the_positional_channel_detector_finds_the_literal() -> None:
+    assert eval_channel_positionals(ast.parse("loop.confirm(p, [], [], 'eval')")) == [1]
+    assert eval_channel_positionals(ast.parse("loop.reject(p, 'eval')")) == [1]
+    assert eval_channel_positionals(ast.parse("ctx.confirm_peer_set(p, [], (), 'eval')")) == [1]
+    assert eval_channel_positionals(ast.parse("ctx.reject_proposal(p, 'eval')")) == [1]
+    assert eval_channel_positionals(ast.parse("loop.confirm(p, [], [], 'cli')")) == []
+    assert eval_channel_positionals(ast.parse("other.send(p, 'eval')")) == []
+
+
 # --- Trace: wer die Loop-Ereignisse liest (Schritt 8, M2) ------------------------------------------------------------
 
 EVENT_READERS = {Path("agent") / "loop.py", Path("agent") / "trace.py"}
