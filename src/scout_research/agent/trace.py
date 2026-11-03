@@ -207,6 +207,19 @@ class Finding(_Model):
     match: str
 
 
+class ExtractedNumber(_Model):
+    """Eine Zahl, die der Backstop gesehen hat: `violation` = Fundstelle der Prüfung, `exempt` = Zahl innerhalb einer
+    Ausnahme (Plan 11.2, Klassen 1–6). `start`/`end` beziehen sich auf den Originaltext."""
+
+    start: int
+    end: int
+    kind: str
+    match: str
+    status: Literal["violation", "exempt"]
+    exempt_span: str | None
+    """Rohtext der ganzen Ausnahmespanne („10-K“ zur Zahl „10“); bei `violation` `None`."""
+
+
 class TextCheckEvent(_Line):
     event: Literal["text_check"]
     where: Literal["end_turn", "beside_tool_use", "intro"]
@@ -214,6 +227,7 @@ class TextCheckEvent(_Line):
     shown: bool
     findings: list[Finding]
     action: Literal["shown", "correction", "withheld", "not_shown", "intro_fixed"]
+    extracted: list[ExtractedNumber]
 
 
 class UnusableResponseEvent(_Line):
@@ -296,6 +310,7 @@ class CommentaryEvent(_Line):
     slots: list[dict[str, Any]]
     problems: list[dict[str, Any]]
     format_chars: int
+    extracted: list[ExtractedNumber]
     action: Literal["rejected", "withheld", "accepted", "accepted_after_n"] | None
     rendered: str | None = None
     warnings_addressed: list[str] | None = None
@@ -686,7 +701,8 @@ class TraceWriter:
         raw: dict[str, Any] = {
             "event": "commentary", "comps_table_id": entry.get("comps_table_id"), "attempt": entry.get("attempt"),
             "raw_text": entry.get("raw_text"), "slots": entry.get("slots"), "problems": entry.get("problems"),
-            "format_chars": entry.get("format_chars"), "action": entry.get("action"),
+            "format_chars": entry.get("format_chars"), "extracted": entry.get("extracted"),
+            "action": entry.get("action"),
         }
         if entry.get("action") in ("accepted", "accepted_after_n", "withheld"):
             stored = self._ctx.commentaries.get(entry.get("comps_table_id", ""))

@@ -314,7 +314,8 @@ class AgentLoop:
             action = "shown" if check.ok else \
                 "withheld" if (self._closing or turn.corrections >= 1) else "correction"
             self.events.append({"event": "text_check", "where": "end_turn", "problems": [p.code for p in check.problems],
-                                "shown": check.ok, "findings": _findings(check.problems), "action": action})
+                                "shown": check.ok, "findings": _findings(check.problems), "action": action,
+                                "extracted": check.extracted})
             if action == "shown":
                 shown = [Shown("text", check.body)] if check.body else []
                 return self._finish(turn, "done", None, [], shown)
@@ -443,7 +444,8 @@ class AgentLoop:
             check = check_text(build_check_session(self.ctx), beside, "slot_text")
             self.events.append({"event": "text_check", "where": "beside_tool_use",
                                 "problems": [p.code for p in check.problems], "shown": False,
-                                "findings": _findings(check.problems), "action": "not_shown"})
+                                "findings": _findings(check.problems), "action": "not_shown",
+                                "extracted": check.extracted})
 
         results = list(self.pending.blocks)  # vorbelegt in _commit (TURN_ENDED)
         ended: str | None = None
@@ -554,7 +556,7 @@ class AgentLoop:
         shown = check.body if check.ok else None
         self.events.append({"event": "text_check", "where": "intro", "problems": [p.code for p in check.problems],
                             "shown": bool(shown), "findings": _findings(check.problems),
-                            "action": "shown" if shown else "intro_fixed"})
+                            "action": "shown" if shown else "intro_fixed", "extracted": check.extracted})
         if shown:
             return self._finish(turn, "done", None, [], [Shown("intro", shown)])
         return self._finish(turn, "done", "intro_fixed", [], [fixed])

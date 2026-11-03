@@ -558,7 +558,8 @@ def test_h1_a_dropped_gate_and_commentary_entries_are_counted_per_source(tmp_pat
     run.say("Mach Comps für NVDA")
     run.ctx.gate_log.append({"event": "erfunden", "proposal_id": "pp_x"})
     run.ctx.commentary_log.append({"event": "commentary", "comps_table_id": "ct_x", "attempt": 1, "raw_text": 5,
-                                   "slots": [], "problems": [], "format_chars": 0, "action": "rejected"})
+                                   "slots": [], "problems": [], "format_chars": 0, "extracted": [],
+                                   "action": "rejected"})
     with pytest.raises(TraceSchemaError):
         tw.flush()
     tw.close()
@@ -905,3 +906,110 @@ def test_the_z10_tool_event_carries_only_its_own_upstream_and_cache_entries() ->
     assert any(e["upstream"] for e in earlier) and any(e["cache"] for e in earlier)
     assert z10["upstream"] == [] and z10["cache"] == []
     run.assert_invariants()
+
+
+# --- TA-7: extrahierte Zahlen im Trace (Plan 6, Zeile „Backstop“) ----------------------------------------------------
+
+MIXED = "Laut 10-K stieg der Umsatz um 25 Prozent."  # „10-K“ ist ausgenommen, „25“ ist ein Verstoß
+MIXED_SLOTS = MIXED[:-1] + " [[stat:ev_ebitda:median]]."
+
+
+def _statuses(entry: dict[str, Any], text: str) -> set[str]:
+    assert all(text[x["start"]: x["end"]] == x["match"] for x in entry["extracted"])
+    return {x["status"] for x in entry["extracted"]}
+
+
+def test_ta7_the_text_checks_carry_extracted_numbers_at_all_three_places(tmp_path: Path) -> None:
+    run = _run([say(MIXED), say("Dazu liegen mir keine Zahlen vor."),
+                use(("resolve_company", {"query": "NVDA"}), text=MIXED), say("Fertig.")])
+    with _writer(run, tmp_path) as tw:
+        run.say("Frage")
+        run.say("Mach Comps für NVDA")
+    checks = _of(_lines(tw.path), "text_check")
+    assert [c["where"] for c in checks] == ["end_turn", "end_turn", "beside_tool_use", "end_turn"]
+    assert _statuses(checks[0], MIXED) == {"exempt", "violation"}
+    assert checks[1]["extracted"] == [] and checks[3]["extracted"] == []
+    assert _statuses(checks[2], MIXED) == {"exempt", "violation"}
+
+    run = _flow_to_proposal(tail=[])
+    run.client._steps[3] = say(MIXED)
+    with _writer(run, tmp_path) as tw:
+        run.say("Mach Comps für NVDA")
+    (intro,) = [c for c in _of(_lines(tw.path), "text_check") if c["where"] == "intro"]
+    assert intro["action"] == "intro_fixed" and _statuses(intro, MIXED) == {"exempt", "violation"}
+
+
+def test_ta7_the_commentary_entries_carry_extracted_numbers(tmp_path: Path) -> None:
+    run = _flow_to_proposal()
+    run.client._steps += [run.compute(), run.submit(MIXED_SLOTS), run.submit(COMMENTARY[:-1] + " laut 10-K.")]
+    with _writer(run, tmp_path) as tw:
+        run.say("Mach Comps für NVDA")
+        tw.flush()
+        run.confirm()
+    rejected, accepted = _of(_lines(tw.path), "commentary")
+    assert rejected["action"] == "rejected" and _statuses(rejected, MIXED_SLOTS) == {"exempt", "violation"}
+    assert accepted["action"] == "accepted_after_n" and _statuses(accepted, COMMENTARY[:-1] + " laut 10-K.") == {"exempt"}
+
+
+def test_ta7_extracted_never_reaches_the_model_the_correction_facts_or_the_user(tmp_path: Path) -> None:
+    run = _flow_to_proposal()
+    run.client._steps += [run.compute(), run.submit(MIXED_SLOTS), run.submit(COMMENTARY)]
+    with _writer(run, tmp_path):
+        first = run.say("Mach Comps für NVDA")
+        second = run.confirm()
+    # „status“ allein taugt nicht (Tool-Ergebnisse tragen ein eigenes `status`); darum die Werte und das Feld der Einträge
+    forbidden = ("extracted", "exempt", "exempt_span", '"status": "violation"', '"status": "exempt"')
+    for r in run.client.requests:
+        dumped = json.dumps(r.messages, ensure_ascii=False)
+        assert not [w for w in forbidden if w in dumped], r.messages
+    tool_events = [e for e in run.loop.events if e["event"] == "tool"]
+    assert any(e["name"] == "submit_commentary" for e in tool_events)
+    for event in tool_events:  # im Trace ja, in Tool-Ergebnissen und Fehlerdetails nein
+        dumped = json.dumps(event["result"], default=str, ensure_ascii=False)
+        assert not [w for w in forbidden if w in dumped], event["result"]
+    assert "extracted" in run.ctx.commentary_log[0] and run.ctx.commentary_log[0]["extracted"]
+    assert all("extracted" not in repr(x) for x in (*first.shown, *second.shown))
+    assert "extracted" not in repr(run.ctx.commentaries[run.table_id])
+
+
+def test_ta7_extracted_is_mandatory_in_both_events() -> None:
+    base = {"event": "text_check", "where": "end_turn", "problems": [], "shown": True, "findings": [], "action": "shown"}
+    validate_loop_event({**base, "extracted": []})
+    with pytest.raises(TraceSchemaError):
+        validate_loop_event(base)
+    with pytest.raises(TraceSchemaError):
+        validate_loop_event({**base, "extracted": [{"start": 0, "end": 1, "kind": "digits", "match": "1",
+                                                    "status": "maybe", "exempt_span": None}]})
+    with pytest.raises(TraceSchemaError):
+        validate_loop_event({**base, "extracted": [{"start": 0, "end": 1, "kind": "digits", "match": "1",
+                                                    "status": "exempt", "exempt_span": "1", "extra": 1}]})
+    with pytest.raises(TraceSchemaError):  # `exempt_span` ist Pflichtfeld (bei `violation` `None`)
+        validate_loop_event({**base, "extracted": [{"start": 0, "end": 1, "kind": "digits", "match": "1",
+                                                    "status": "violation"}]})
+    validate_loop_event({**base, "extracted": [{"start": 0, "end": 1, "kind": "digits", "match": "1",
+                                                "status": "violation", "exempt_span": None},
+                                               {"start": 2, "end": 4, "kind": "digits", "match": "10",
+                                                "status": "exempt", "exempt_span": "10-K"}]})
+    line = {"event": "commentary", "comps_table_id": "ct_x", "attempt": 1, "raw_text": "t", "slots": [], "problems": [],
+            "format_chars": 0, "action": "rejected", "seq": 0, "ts": "2000-01-01T00:00:00+00:00", "run_id": "d", "turn": 0}
+    validate_trace_line(json.dumps({**line, "extracted": []}))
+    with pytest.raises(TraceSchemaError):
+        validate_trace_line(json.dumps(line))
+    with pytest.raises(TraceSchemaError):  # N3: auch im Ereignis `commentary` wird ein unbekannter Status abgewiesen
+        validate_trace_line(json.dumps({**line, "extracted": [{"start": 0, "end": 1, "kind": "digits", "match": "1",
+                                                               "status": "maybe", "exempt_span": None}]}))
+
+
+def test_ta7_a_valid_commentary_entry_without_extracted_is_dropped_as_a_trace_error(tmp_path: Path) -> None:
+    run = _leaky_run()
+    run.client._steps = run.client._steps[1:]
+    run.client._steps.insert(0, use(("resolve_company", {"query": "NVDA"})))
+    tw = _writer(run, tmp_path)
+    run.say("Mach Comps für NVDA")
+    run.ctx.commentary_log.append({"event": "commentary", "comps_table_id": "ct_x", "attempt": 1, "raw_text": "Text",
+                                   "slots": [], "problems": [], "format_chars": 0, "action": "rejected"})
+    with pytest.raises(TraceSchemaError):
+        tw.flush()
+    tw.close()
+    (error,) = _of(_lines(tw.path), "trace_error")
+    assert (error["source"], error["source_event"], error["error_class"]) == ("commentary", "commentary", "TraceSchemaError")

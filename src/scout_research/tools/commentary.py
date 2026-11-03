@@ -83,6 +83,10 @@ class CheckResult:
     """Je Slot: Rohtext und Feldpfad (Provenance, Trace)."""
     warning_markers: set[str] = field(default_factory=set)
     format_chars: int = 0
+    extracted: list[dict[str, Any]] = field(default_factory=list)
+    """Nur für den Trace (Plan 6, „Backstop“): je Zahl, die der Scan sieht, `start`/`end` im **Rohtext**, `kind`, `match`
+    `status` (`violation` = Fundstelle der Prüfung, `exempt` = Zahl innerhalb einer Ausnahme, Klassen 1–6) und
+    `exempt_span` (bei `exempt` der Rohtext der ganzen Ausnahmespanne, sonst `None`). Gültige Slots zählen nicht. Geht nie an das Modell, in Korrektur-Fakten, `Shown` oder Fehlerdetails."""
 
     @property
     def ok(self) -> bool:
@@ -190,6 +194,31 @@ def _adjacency_problems(norm: str, valid: list[tuple[Construct, SlotOk]]) -> lis
     return out
 
 
+def _extracted_entry(n: Normalized, text: str, a: int, b: int, kind: str, status: str,
+                     span: tuple[int, int] | None = None) -> dict[str, Any]:
+    """Eintrag für `CheckResult.extracted`. `exempt_span` ist bei `exempt` der Rohtext der ganzen Ausnahmespanne
+    („10-K“ zur Zahl „10“), damit der Trace ohne Bezugstext zeigt, ob die Ausnahme zu Recht griff."""
+    ra, rb = n.raw_span(a, b)
+    exempt_span = None if span is None else text[slice(*n.raw_span(*span))]
+    return {"start": ra, "end": rb, "kind": kind, "match": text[ra:rb], "status": status, "exempt_span": exempt_span}
+
+
+def _exempt_entries(n: Normalized, text: str, exempt: list[tuple[int, int]],
+                    slots: list[tuple[int, int]]) -> list[dict[str, Any]]:
+    """Zahlen innerhalb der Ausnahmen (Klassen 1–6) für den Trace. Jede Spanne wird für sich gescannt, damit die
+    Zusammenführung benachbarter Funde in `scan_numbers` die Fundstellen der Prüfung nicht berührt; überlappende Spannen
+    ergeben denselben Fund nur einmal, mit der längsten Spanne als `exempt_span`. Funde in gültigen Slots (etwa
+    `[[warn:W1]]`) zählen nicht."""
+    entries: dict[tuple[int, int], dict[str, Any]] = {}
+    for a, b in sorted(set(exempt), key=lambda s: (s[0] - s[1], s[0])):
+        for f in scan_numbers(n.norm[a:b]):
+            fa, fb = a + f.start, a + f.end
+            if any(sa < fb and fa < sb for sa, sb in slots):
+                continue
+            entries.setdefault((fa, fb), _extracted_entry(n, text, fa, fb, f.kind, "exempt", (a, b)))
+    return list(entries.values())
+
+
 def check_text(session: CheckSession, text: str, profile: Profile = "slot_text") -> CheckResult:
     n = normalize(text)
     norm = n.norm
@@ -218,16 +247,21 @@ def check_text(session: CheckSession, text: str, profile: Profile = "slot_text")
 
     exempt = exempt_spans(norm, session.warning_ids, session.identifiers, _trigger_terms(tuple(session.terms)))
     masked = mask(norm, [*exempt, *[(c.a, c.b) for c, _ in valid]])
+    extracted: list[dict[str, Any]] = []
     for finding in scan_numbers(masked, invalid_spans):
         add("NAKED_NUMBER", finding.kind, finding.start, finding.end, _HINTS[finding.kind])
+        extracted.append(_extracted_entry(n, text, finding.start, finding.end, finding.kind, "violation"))
+    extracted += _exempt_entries(n, text, exempt, [(c.a, c.b) for c, _ in valid])
+    extracted.sort(key=lambda e: (e["start"], e["end"], e["status"]))
     problems.sort(key=lambda p: (p.start, p.end, p.code))
 
     slots = [{"slot": text[n.raw_span(c.a, c.b)[0]: n.raw_span(c.a, c.b)[1]], "path": ok.path} for c, ok in valid]
     markers = {ok.warning_id for _, ok in valid if ok.warning_id}
     if problems or profile != "slot_text":
-        return CheckResult(problems, None, slots=slots, warning_markers=markers, format_chars=n.format_chars)
+        return CheckResult(problems, None, slots=slots, warning_markers=markers, format_chars=n.format_chars,
+                           extracted=extracted)
     body, marks = _render_body(n, valid, session)
-    return CheckResult([], body, marks, slots, markers, n.format_chars)
+    return CheckResult([], body, marks, slots, markers, n.format_chars, extracted)
 
 
 def _render_body(n: Normalized, valid: list[tuple[Construct, SlotOk]], session: CheckSession) -> tuple[str, list[str]]:
@@ -464,7 +498,7 @@ def submit_commentary(ctx: ToolContext, args: SubmitCommentaryInput) -> SubmitCo
     attempt = state.rejections + 1
     log: dict[str, Any] = {"event": "commentary", "comps_table_id": stored.id, "attempt": attempt, "raw_text": args.text,
                            "slots": result.slots, "problems": [p.as_detail() for p in result.problems],
-                           "format_chars": result.format_chars}
+                           "format_chars": result.format_chars, "extracted": result.extracted}
     ctx.commentary_log.append(log)
 
     if result.problems:

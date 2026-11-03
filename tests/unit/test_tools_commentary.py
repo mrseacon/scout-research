@@ -278,3 +278,125 @@ def test_further_obfuscated_numbers_are_caught(text: str) -> None:
 ])
 def test_ordinary_text_without_numbers_passes(text: str) -> None:
     assert check_text(_names_session("Adobe Inc."), text, "slot_text").ok, text
+
+
+# --- TA-7: extrahierte Zahlen für den Trace (Plan 6, Zeile „Backstop“) -----------------------------------------------
+
+
+def _spans(entries: list[dict], status: str) -> list[tuple[int, int]]:
+    return [(e["start"], e["end"]) for e in entries if e["status"] == status]
+
+
+def test_extracted_numbers_carry_both_statuses_with_raw_positions_even_behind_invisible_format_chars() -> None:
+    ctx, tid, _ = _table()
+    session = build_check_session(ctx)
+    text = "\u200bSiehe \u200cW1 laut 10-K: \u200b25 Prozent und 2\u200b6."  # unsichtbare Formatzeichen (Cf) vor und in den Funden
+    result = check_text(session, text)
+    assert {e["status"] for e in result.extracted} == {"exempt", "violation"}
+    assert all(set(e) == {"start", "end", "kind", "match", "status", "exempt_span"} for e in result.extracted)
+    assert all(text[e["start"]: e["end"]] == e["match"] for e in result.extracted)
+    exempt = {e["match"] for e in result.extracted if e["status"] == "exempt"}
+    assert "W1" in exempt and any(m.startswith("10") for m in exempt)
+    # M2: die ganze Ausnahmespanne steht im Eintrag, hinter dem Formatzeichen wie davor; Verstöße tragen keine
+    spans = {e["match"]: e["exempt_span"] for e in result.extracted if e["status"] == "exempt"}
+    assert spans == {"W1": "W1", "10": "10-K"}
+    assert all(e["exempt_span"] is None for e in result.extracted if e["status"] == "violation")
+    violations = [e for e in result.extracted if e["status"] == "violation"]
+    assert [(e["start"], e["end"]) for e in violations] == [(p.start, p.end) for p in result.problems if p.code == "NAKED_NUMBER"]
+    assert len(violations) == 2 and "2\u200b6" in {e["match"] for e in violations}  # der Fund über das Formatzeichen hinweg bleibt einer
+    assert result.extracted == sorted(result.extracted, key=lambda e: (e["start"], e["end"]))
+
+
+def test_extracted_numbers_are_also_filled_when_the_text_is_accepted_and_a_warning_id_in_a_valid_slot_does_not_count() -> None:
+    ctx, tid, _ = _table()
+    session = build_check_session(ctx)
+    result = check_text(session, "Laut 10-K und Form 10-K ([[warn:W1]]) gilt W1 für NVDA [[co:NVDA:ev_ebitda]].")
+    assert result.ok and result.body is not None
+    assert result.extracted and {e["status"] for e in result.extracted} == {"exempt"}
+    assert [e["match"] for e in result.extracted].count("W1") == 1  # das W1 im gültigen Slot zählt nicht
+    assert [e["match"] for e in result.extracted].count("10") == 2  # zweimal „10-K“, je Fundstelle ein Eintrag
+
+
+def test_overlapping_exempt_spans_yield_one_entry_per_finding_with_the_longest_span() -> None:
+    from scout_research.tools.numbercheck import exempt_spans, normalize
+
+    session = _names_session("3M Co")  # Begriffe „3M Co“ und „3M“: beide Spannen decken die erste „3M“ ab
+    text = "3M Co und 3M"
+    n = normalize(text)
+    spans = exempt_spans(n.norm, session.warning_ids, session.identifiers, session.terms)
+    assert sorted(spans) == [(0, 2), (0, 5), (10, 12)]  # der Beleg: die Spannen überlappen wirklich
+    result = check_text(session, text)
+    assert result.ok
+    assert result.extracted == [
+        {"start": 0, "end": 2, "kind": "digits", "match": "3M", "status": "exempt", "exempt_span": "3M Co"},
+        {"start": 10, "end": 12, "kind": "digits", "match": "3M", "status": "exempt", "exempt_span": "3M"}]
+
+
+def test_a_company_name_with_a_number_word_is_exempt_as_a_number_word_with_the_whole_name_as_span() -> None:
+    session = _names_session("Five Below, Inc.", "FIVE")
+    result = check_text(session, "Ähnlich wie Five Below.")
+    assert result.ok and result.extracted == [
+        {"start": 12, "end": 16, "kind": "number_word", "match": "Five", "status": "exempt", "exempt_span": "Five Below"}]
+
+
+def test_fixed_raw_positions_of_exempt_entries_behind_format_chars_and_multi_character_folding() -> None:
+    ctx, tid, _ = _table()
+    session = build_check_session(ctx)
+    # Index: ﬃ=0 ' '=1 ZWSP=2 W=3 1=4 ' '=5 u=6 n=7 d=8 ' '=9 ㎏=10 ' '=11 SHY=12 1=13 0=14 U+2011=15 K=16 ' '=17 1=18 ZWSP=19 0=20 -=21 K=22
+    # „ﬃ“ wird zu „ffi“, „㎏“ zu „kg“ (je ein Zeichen mehr im normalisierten Text); die Rohtext-Positionen bleiben die
+    # des Originals.
+    text = "ﬃ ​W1 und ㎏ ­10‑K 1​0-K"
+    result = check_text(session, text)
+    assert result.ok
+    assert [(e["start"], e["end"], e["match"], e["exempt_span"]) for e in result.extracted] == [
+        (3, 5, "W1", "W1"), (13, 15, "10", "10‑K"), (18, 21, "1​0", "1​0-K")]
+
+
+def test_slot_cases_in_extracted_a_numeric_field_name_is_a_violation_but_unknown_ids_and_embedded_digits_are_not() -> None:
+    ctx, tid, _ = _table()
+    session = build_check_session(ctx)
+    numeric = check_text(session, "[[co:NVDA:25]] x")
+    assert [(e["status"], e["match"], e["exempt_span"]) for e in numeric.extracted] == [("violation", "25", None)]
+    assert check_text(session, "[[warn:W9]] x").extracted == []
+    assert check_text(session, "[[co:NVDA:ev25]] x").extracted == []
+
+
+def test_text_without_a_number_and_text_of_valid_slots_only_extract_nothing() -> None:
+    ctx, tid, _ = _table()
+    session = build_check_session(ctx)
+    plain = check_text(session, "NVDA wird am oberen Ende der Peers bewertet.")
+    assert plain.ok and plain.extracted == []
+    slots_only = check_text(session, "NVDA: [[co:NVDA:ev_ebitda]] gegen [[stat:ev_ebitda:median]].")
+    assert slots_only.ok and slots_only.slots and slots_only.extracted == []
+    rejected = check_text(session, "Unbekannt: [[co:NVDA:gibts_nicht]] und [[nope]].")
+    assert not rejected.ok and rejected.extracted == []  # Slot-Probleme sind keine Zahlen
+    assert check_text(session, "").extracted == []
+
+
+def test_the_rationale_profile_fills_extracted_like_any_other() -> None:
+    ctx, tid, _ = _table()
+    result = check_text(build_check_session(ctx), "Laut 10-K 25 Prozent", "rationale")
+    assert not result.ok and {e["status"] for e in result.extracted} == {"exempt", "violation"}
+
+
+def test_the_violation_entries_are_exactly_the_naked_number_problems_over_the_whole_corpus() -> None:
+    from tests.unit.number_check_corpus import build_session, load_corpus
+
+    corpus = load_corpus()
+    sessions: dict[str, object] = {}
+    accepted = rejected = exempt_seen = 0
+    for case in corpus["cases"]:
+        session = sessions.setdefault(case["session"], build_session(corpus, case["session"]))
+        result = check_text(session, case["text"], case["profile"])
+        naked = sorted((p.start, p.end, p.kind) for p in result.problems if p.code == "NAKED_NUMBER")
+        violations = sorted((e["start"], e["end"], e["kind"]) for e in result.extracted if e["status"] == "violation")
+        assert violations == naked, case["id"]
+        assert all((e["exempt_span"] is None) == (e["status"] == "violation") for e in result.extracted), case["id"]
+        assert all(case["text"][e["start"]: e["end"]] == e["match"] for e in result.extracted), case["id"]
+        assert all(e["status"] in ("violation", "exempt") for e in result.extracted), case["id"]
+        keys = [(e["start"], e["end"]) for e in result.extracted if e["status"] == "exempt"]
+        assert len(keys) == len(set(keys)), case["id"]
+        accepted += result.ok
+        rejected += not result.ok
+        exempt_seen += bool(keys)
+    assert accepted and rejected and exempt_seen  # beide Rückgabewege und die Ausnahmen kommen im Korpus wirklich vor
