@@ -71,17 +71,17 @@ Value, concept and accession are in the golden set. Period start and filing date
 |---|---|---|
 | Golden set | 5 companies (AAPL, MSFT, NVDA, ADSK; CDNS only `total_debt`), values checked by hand against the 10-K statements, pinned to period end and accession | `eval/golden_set/` |
 | Extractor vs. golden set | Offline comparison; two deviations are known and pinned with a reason (ADSK `total_debt`, CDNS lower-bound flag), the rest match, some within a stated rounding tolerance | `python -m eval.seed_compare`, `tests/unit/test_golden_reproduction.py` |
-| Number-check corpus | 239 cases (accepted texts, bare numbers, slot errors, attacks) as a parametrised test | `tests/data/number_check_corpus.yaml` |
-| Mutation probes | Removing a guard must turn tests red. Full agent run (2026-10-11): 35 mutations, none toothless (34 caught, one not applicable). Targeted agent runs on 2026-10-28: after the loop fixes 10 mutations on four guards, all caught; during step 8, 35 mutations on eight register rows, 34 caught, one not applicable (stale fragment, corrected, not re-run). Not every mutation in the register has run in its current wording, and some guards still rest on a single test | [`docs/mutation-report-2026-10-11.md`](docs/mutation-report-2026-10-11.md), `docs/security-guards.md`, plan sections 12.16, 12.17 |
-| Guard register | 27 register rows with 69 mutations, each row with module and tests (one, the log filter, only partly implemented until the CLI installs it) | `docs/security-guards.md` |
+| Number-check corpus | 259 cases (accepted texts, bare numbers, slot errors, attacks) as a parametrised test, plus invariants over all Unicode code points for characters that fold to digits | `tests/data/number_check_corpus.yaml`, `tests/unit/test_tools_commentary.py` |
+| Mutation probes | Removing a guard must turn tests red. Full agent run (2026-10-11): 35 mutations, none toothless (34 caught, one not applicable). Targeted agent runs on 2026-10-28: after the loop fixes 10 mutations on four guards, all caught; during step 8, 35 mutations on eight register rows, 34 caught, one not applicable (stale fragment, corrected). On 2026-11-03: 25 mutations, 24 caught, one not applicable (stale fragment, corrected and caught when re-run by hand). Not every mutation in the register has run in its current wording, and some guards still rest on a single test | [`docs/mutation-report-2026-10-11.md`](docs/mutation-report-2026-10-11.md), `docs/security-guards.md`, plan sections 12.16, 12.17 |
+| Guard register | 28 register rows with 88 mutations, each row with module and tests (one, the log filter, only partly implemented until the CLI installs it) | `docs/security-guards.md` |
 | Trace | One JSONL file per run: header from a whitelist, every line schema-checked and redacted, query strings removed, a final check per line; so far only produced in tests | `src/scout_research/agent/trace.py`, `tests/unit/test_trace.py` |
 | Evaluation harness | In evaluation, peer confirmation comes only from the case file and the code's own state, never from model text; tested against a scripted model, with one example case so far | `eval/harness.py`, `eval/cases/`, `tests/unit/test_eval_harness.py` |
 | Independent review | A read-only reviewer agent checks diffs against the plan; findings are tracked in the plan | plan sections 12.14, 12.16, 12.17, 14 |
 | Push gate | Full suite, clean tree, secret scan on added lines; a hook enforces it for the agent's own shell calls (not for pushes from a personal terminal) | `scripts/push_gate.py`, `.claude/hooks/` |
 
-The unit and integration suite has 1189 tests (`pytest --collect-only`, as of 2026-11-03), all passing in a fresh clone. No test is marked as live (the `live` marker selects none).
+The unit and integration suite has 1291 tests (`pytest --collect-only`, as of 2026-11-03), all passing in a fresh clone. No test is marked as live (the `live` marker selects none).
 
-Honest limits: the golden set is five companies, a small sample. It shows the extraction path is sound on those filings, not that it is accurate in general. The agent loop, the trace and the evaluation harness have been tested only against a scripted model, not against a live one.
+Honest limits: the golden set is five companies, a small sample. It shows the extraction path is sound on those filings, not that it is accurate in general. The agent loop, the trace and the evaluation harness have been tested only against a scripted model, not against a live one. The number check rests on closed lists and patterns: reviews on 2026-11-03 found Unicode disguises that passed it and that the 239-case corpus of that time had missed (for example `💯. Text`). These are fixed, but others may exist; words a human reads as numbers outside the lists, such as a number word with an accent, are a documented residual risk.
 
 ## Status and roadmap
 
@@ -109,7 +109,7 @@ cp .env.example .env
 Fill `EDGAR_CONTACT_EMAIL` in `.env` with a real contact address (SEC fair-access policy). The Finnhub and Anthropic keys are optional for the steps below.
 
 ```bash
-pytest                        # 1189 passed
+pytest                        # 1291 passed
 python -m eval.seed_compare   # offline: extractor vs. golden set, uses fixtures
 ```
 
