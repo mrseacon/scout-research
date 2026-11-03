@@ -1323,6 +1323,96 @@ cases:
     category: attack_slot_concatenation
     reason: "Zwei Slots nur durch Leerraum getrennt („350,00 USD 640,50 USD“) — zwischen Slots muss ein Nicht-Leerzeichen stehen."
 
+  - id: ST-B80
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EBIT-Marge von ADBE: ٣️٥️ %"
+    expect: [NAKED_NUMBER]
+    findings: ["٣️٥"]
+    category: attack_unicode_digits
+    reason: "Arabisch-indische Ziffern mit angehängtem Variantenzeichen; die Zahlprüfung darf nicht an der Clusterlänge hängen. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B81
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EBIT-Marge von ADBE: ٣́٥́ %"
+    expect: [NAKED_NUMBER]
+    findings: ["٣́٥́"]
+    category: attack_unicode_digits
+    reason: "Arabisch-indische Ziffern mit kombinierendem Akzent. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B82
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat 🔟️ Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["🔟"]
+    category: attack_unicode_digits
+    reason: "Emoji „10“ mit Variantenzeichen. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B83
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat 三́ Prozent Marge."
+    expect: [NAKED_NUMBER]
+    findings: ["三́"]
+    category: attack_unicode_digits
+    reason: "CJK-Zahlzeichen mit kombinierendem Akzent. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B84
+    lang: de
+    profile: slot_text
+    session: base
+    text: "INTU liegt auf Rang Ⅻ́ der Peers."
+    expect: [NAKED_NUMBER]
+    findings: ["Ⅻ́"]
+    category: attack_unicode_digits
+    reason: "Römisches Zahlzeichen mit kombinierendem Akzent. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B85
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat १️२️ Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["१️२"]
+    category: attack_unicode_digits
+    reason: "Devanagari-Ziffern mit angehängtem Variantenzeichen. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B86
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat zwe️i Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["zwe️i"]
+    category: attack_unicode_digits
+    reason: "Unsichtbares Variantenzeichen im Zahlwort wird wie ein Formatzeichen entfernt. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B87
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat 1͏2 Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["1͏2"]
+    category: attack_unicode_digits
+    reason: "COMBINING GRAPHEME JOINER zerreißt die Ziffernfolge nicht. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B88
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat ١󠄀٢ Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["١󠄀٢"]
+    category: attack_unicode_digits
+    reason: "Variantenzeichen aus dem Ergänzungsbereich zwischen Unicode-Ziffern. Plan 11.1 Punkt 2, Klasse 17."
+
   # ===============================================================================================================
   # ST-C — Slot-Gültigkeit
   # ===============================================================================================================

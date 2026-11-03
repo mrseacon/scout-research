@@ -64,12 +64,24 @@ def _norm_char(ch: str) -> str:
     return unicodedata.normalize("NFKC", ch)
 
 
+_INVISIBLE_MARKS = frozenset(
+    {*range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0), 0x034F, 0x180B, 0x180C, 0x180D, 0x180F}
+)
+"""Unsichtbare Zeichen der Kategorie `Mn` ohne sichtbare Wirkung (Variantenzeichen U+FE00–U+FE0F und U+E0100–U+E01EF,
+COMBINING GRAPHEME JOINER U+034F, mongolische Variantenzeichen U+180B–U+180D und U+180F). Sie werden wie `Cf` entfernt
+und gezählt (Plan 11.1 Punkt 1): sonst zerreißen sie Zahlwörter und Ziffernfolgen und täuschen ein anderes Cluster vor."""
+
+
+def _is_invisible(ch: str) -> bool:
+    return unicodedata.category(ch) == "Cf" or ord(ch) in _INVISIBLE_MARKS
+
+
 def normalize(raw: str) -> Normalized:
     clean_chars: list[str] = []
     clean_to_raw: list[int] = []
     format_chars = 0
     for i, ch in enumerate(raw):
-        if unicodedata.category(ch) == "Cf":
+        if _is_invisible(ch):
             format_chars += 1
             continue
         clean_chars.append(ch)
@@ -85,7 +97,13 @@ def normalize(raw: str) -> Normalized:
         while j < len(clean) and unicodedata.category(clean[j]).startswith("M"):
             j += 1
         cluster = clean[i:j]
-        folded = _norm_char(cluster) if len(cluster) == 1 else unicodedata.normalize("NFKC", cluster)
+        base = cluster[0]
+        # Zahlzeichen mit angehängtem Zeichen laufen über `_norm_char` (Plan 11.1 Punkt 2, Klasse 17); NFKC faltet
+        # sie nicht, und der Anhang würde sonst die Fundstelle verdecken. Die angehängten Zeichen entfallen im `norm`.
+        if len(cluster) == 1 or (not base.isascii() and (base.isnumeric() or base == "\U0001F51F")):
+            folded = _norm_char(base)
+        else:
+            folded = unicodedata.normalize("NFKC", cluster)
         for ch in folded:
             norm.append(ch)
             norm_start.append(i)

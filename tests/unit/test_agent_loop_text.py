@@ -42,6 +42,17 @@ def test_lt_04_a_second_violation_gives_only_the_fixed_notice_and_never_the_raw_
     run.assert_invariants()
 
 
+def test_lt_04b_a_unicode_digit_with_appended_variation_selectors_is_caught_twice_and_never_shown() -> None:
+    raw = "٣\ufe0f٥\ufe0f %"
+    run = Run(standard_world(), [say(raw), say(raw)])
+    result = run.say("Wie ist die Marge von NVDA?")
+    assert result.outcome == "done" and result.state is LoopState.IDLE and result.reason == "withheld"
+    assert shown_texts(result) == ["Antwort zurückgehalten: Sie enthielt Zahlen, die sich nicht prüfen ließen."]
+    assert not any(ch in _all_shown(result) for ch in "٣٥\ufe0f")
+    assert len(run.client.requests) == 2  # genau eine Korrekturrunde
+    run.assert_invariants()
+
+
 def test_lt_05_fin_and_mkt_slots_before_the_table_render_with_value_and_unit() -> None:
     run = Run(standard_world(), [])
     run.client._steps = [

@@ -988,10 +988,10 @@ Jeder Modelltext läuft durch genau ein Profil:
 | `free_text` | Modelltext ohne Comps-Tabelle (Rückfragen, Einleitung nach dem Vorschlag, Antworten aus `get_financials`) | nur typisierte Treffer in Tool-Ergebnissen der Sitzung (11.3); **entfällt bei O1 = B** |
 
 Allen Profilen gemeinsam sind die Ausnahmen (11.2, Klassen 1–6) und die Vorverarbeitung:
-1. Unsichtbare Formatzeichen (Unicode-Kategorie `Cf`, z. B. U+200B, U+00AD) entfernen; ihr Vorkommen geht in den Trace.
+1. Unsichtbare Formatzeichen (Unicode-Kategorie `Cf`, z. B. U+200B, U+00AD) und `Mn`-Zeichen ohne Zahlwert, die Wörter und Ziffernfolgen zerreißen (Variantenzeichen, U+034F; ergänzt 2026-11-03, `_INVISIBLE_MARKS`) entfernen; ihr Vorkommen geht in den Trace.
 2. **Vor** der Normalisierung: jedes Zeichen mit `str.isnumeric()`, das keine ASCII-Ziffer ist (arabisch-indisch,
    Devanagari, Fullwidth, Hoch-/Tiefstellung, `½`, `①`, römische Zahlzeichen `Ⅻ`, CJK), ist eine Fundstelle. Grund:
-   NFKC macht aus `Ⅻ` die Buchstaben `XII`, die der ASCII-Scan nicht mehr sieht.
+   NFKC macht aus `Ⅻ` die Buchstaben `XII`, die der ASCII-Scan nicht mehr sieht. Das gilt auch mit angehängtem Zeichen (`٣́`, `Ⅻ́`): Das Zahlzeichen entscheidet das Cluster (Review TA-7, H1, 2026-11-03; vor dem Fix ein Durchlass).
 3. NFKC (Fullwidth-Klammern und -Doppelpunkte werden ASCII, der Slot-Parser sieht sie dann normal).
 4. Gültige Slots durch einen ziffernfreien Platzhalter ersetzen; slot-ähnliche, ungültige Konstrukte bleiben im Text
    und werden mitgeprüft (eine Zahl in einem kaputten Slot ist eine nackte Zahl).

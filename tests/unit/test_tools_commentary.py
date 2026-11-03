@@ -272,6 +272,49 @@ def test_further_obfuscated_numbers_are_caught(text: str) -> None:
     assert not check_text(session, text, "slot_text").ok, text
 
 
+# TA-8: Zahlzeichen mit angehängtem Zeichen (Plan 11.1 Punkt 2, Klasse 17) und unsichtbare Variantenzeichen
+
+_MARKED_NUMBERS = [
+    # (Text, Fundstelle im Rohtext: das Zahlzeichen samt Anhang bzw. die ganze Folge bis zur letzten Ziffer)
+    ("٣\ufe0f٥\ufe0f %", "٣\ufe0f٥"),
+    ("٣\u0301٥\u0301 %", "٣\u0301٥\u0301"),
+    ("\U0001F51F\ufe0f", "\U0001F51F"),
+    ("三\u0301 Prozent", "三\u0301"),
+    ("Ⅻ\u0301", "Ⅻ\u0301"),
+    ("१\ufe0f२\ufe0f", "१\ufe0f२"),
+    ("zwe\ufe0fi Peers", "zwe\ufe0fi"),
+    ("1\u034f2", "1\u034f2"),
+    ("١\U000E0100٢", "١\U000E0100٢"),
+    ("１\u0301７\u0301 %", "１\u0301７\u0301"),
+]
+
+
+@pytest.mark.parametrize(("text", "finding"), _MARKED_NUMBERS)
+def test_numbers_with_appended_marks_or_invisible_variation_selectors_are_found_at_the_raw_position(text: str, finding: str) -> None:
+    result = check_text(_names_session("Adobe Inc."), text, "slot_text")
+    assert not result.ok, text
+    assert {p.code for p in result.problems} == {"NAKED_NUMBER"}, [(p.code, p.kind) for p in result.problems]
+    a = text.index(finding)
+    assert any(p.start <= a and p.end >= a + len(finding) for p in result.problems), [(p.start, p.end, p.match) for p in result.problems]
+
+
+@pytest.mark.parametrize("text", ["⚠\ufe0f Bitte prüfen", "Nestlé", "Nestle\u0301", "Café", "Cafe\u0301 ist ein Wort", "\u2764\ufe0f gefällt"])
+def test_variation_selectors_without_a_number_and_accents_in_words_stay_accepted(text: str) -> None:
+    result = check_text(_names_session("Adobe Inc."), text, "slot_text")
+    assert result.ok, [(p.code, p.kind, p.match) for p in result.problems]
+
+
+def test_invisible_variation_selectors_are_removed_and_counted_like_format_chars() -> None:
+    assert check_text(_names_session("Adobe Inc."), "⚠\ufe0f Bitte prüfen \U000E0100x\u034f", "slot_text").format_chars == 3
+    assert check_text(_names_session("Adobe Inc."), "a\u180bb\u180cc\u180dd\u180fe", "slot_text").format_chars == 4
+    assert check_text(_names_session("Adobe Inc."), "Nestle\u0301", "slot_text").format_chars == 0  # sichtbarer Akzent bleibt
+
+
+def test_keycap_form_is_still_found_after_the_variation_selector_is_removed() -> None:
+    result = check_text(_names_session("Adobe Inc."), "Platz 1\ufe0f\u20e3", "slot_text")
+    assert not result.ok and {p.code for p in result.problems} == {"NAKED_NUMBER"}
+
+
 @pytest.mark.parametrize("text", [
     "ADBE ist günstiger als der Median", "keine Peers", "ein einziger Peer", "Die Quelle, z. B. das 10-K, nennt es.",
     "U.S.A. und e.g. sind Abkürzungen", "Das P/E ist hoch, siehe oben", "a b c bleibt harmlos",
