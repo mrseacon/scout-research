@@ -1473,6 +1473,56 @@ cases:
     category: attack_unicode_digits
     reason: "Khmer-Variantenzeichen U+17B4 ist unsichtbar und zerreißt das Zahlwort nicht. Plan 11.1 Punkt 2, Klasse 17."
 
+  - id: ST-B95
+    lang: de
+    profile: slot_text
+    session: base
+    text: "💯. Segmente von ADBE"
+    expect: [NAKED_NUMBER]
+    findings: ["💯"]
+    category: attack_unicode_digits
+    reason: "Bildzeichen „100“ als vermeintliche Listennummer; Klasse 17 geht vor Klasse 3. Plan 11.2, Klasse 17."
+
+  - id: ST-B96
+    lang: de
+    profile: slot_text
+    session: base
+    text: "百. Segmente von ADBE"
+    expect: [NAKED_NUMBER]
+    findings: ["百"]
+    category: attack_unicode_digits
+    reason: "CJK-Zahlzeichen als vermeintliche Listennummer. Plan 11.2, Klasse 17."
+
+  - id: ST-B97
+    lang: de
+    profile: slot_text
+    session: base
+    text: "٣. Segmente von ADBE"
+    expect: [NAKED_NUMBER]
+    findings: ["٣"]
+    category: attack_unicode_digits
+    reason: "Arabisch-indische Ziffer als vermeintliche Listennummer. Plan 11.2, Klasse 17."
+
+  - id: ST-B98
+    lang: de
+    profile: slot_text
+    session: base
+    text: "١٧. Segmente von ADBE"
+    expect: [NAKED_NUMBER]
+    findings: ["١٧"]
+    category: attack_unicode_digits
+    reason: "Arabisch-indische Ziffern als vermeintliche Listennummer. Plan 11.2, Klasse 17."
+
+  - id: ST-B99
+    lang: de
+    profile: slot_text
+    session: base
+    text: "🈔) Peers von ADBE"
+    expect: [NAKED_NUMBER]
+    findings: ["🈔"]
+    category: attack_unicode_digits
+    reason: "Durch NFKC gefaltetes Zahlzeichen als vermeintliche Listennummer mit Klammer. Plan 11.2, Klasse 17."
+
   # ===============================================================================================================
   # ST-C — Slot-Gültigkeit
   # ===============================================================================================================

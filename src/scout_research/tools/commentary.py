@@ -245,7 +245,9 @@ def check_text(session: CheckSession, text: str, profile: Profile = "slot_text")
         for a, b, hint in _adjacency_problems(norm, valid):
             add("SLOT_UNKNOWN", "slot_adjacent", a, b, hint)
 
-    exempt = exempt_spans(norm, session.warning_ids, session.identifiers, _trigger_terms(tuple(session.terms)))
+    # Klasse 17 geht vor (Plan 11.2): eine Ausnahme gilt nie für eine Stelle, die aus einem Nicht-ASCII-Zeichen entstand
+    exempt = [(a, b) for a, b in exempt_spans(norm, session.warning_ids, session.identifiers, _trigger_terms(tuple(session.terms)))
+              if not any(a <= i < b for i in n.foreign_digits)]
     masked = mask(norm, [*exempt, *[(c.a, c.b) for c, _ in valid]])
     extracted: list[dict[str, Any]] = []
     for finding in scan_numbers(masked, invalid_spans):

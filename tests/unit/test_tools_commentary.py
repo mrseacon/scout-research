@@ -397,6 +397,65 @@ def test_an_accepted_text_with_a_variation_selector_is_rendered_without_it_and_a
     assert "32,8x" in plain.body
 
 
+# TA-10: Klasse 17 geht vor; keine Ausnahme (Listennummer, Warnungs-ID, Formname …) gilt für eine Stelle, die aus einem
+# Nicht-ASCII-Zeichen entstanden ist
+
+_EXEMPT_COLLISIONS = ["💯. Segmente", "百. Segmente", "⼆. Segmente", "٣. Segmente", "١٧. Segmente", "①. Segmente", "🈔) Peers",
+                      "- ⼆. Segmente", "1꣣. Segmente", "⚀. Segmente", "W⼆ prüfen", "１０-K", "Das １０-K nennt es."]
+
+
+def _collision_session():
+    from scout_research.tools.slots import CheckSession
+
+    return CheckSession(warning_ids=frozenset({"W9", "W1"}))
+
+
+@pytest.mark.parametrize("text", _EXEMPT_COLLISIONS)
+def test_an_exemption_never_covers_a_digit_that_came_from_a_non_ascii_character(text: str) -> None:
+    result = check_text(_collision_session(), text, "slot_text")
+    assert not result.ok and result.body is None, text
+    assert {p.code for p in result.problems} == {"NAKED_NUMBER"}, [(p.code, p.kind, p.match) for p in result.problems]
+    violations = [(e["start"], e["end"]) for e in result.extracted if e["status"] == "violation"]
+    assert violations and all(any(p.start == a and p.end == b for p in result.problems) for a, b in violations), result.extracted
+    assert not any(e["status"] == "exempt" and e["start"] < violations[0][1] and violations[0][0] < e["end"] for e in result.extracted)
+
+
+@pytest.mark.parametrize("text", ["3. Segmente", "17. Segmente", "- 3. Segmente", "Das 10-K nennt es.", "Siehe W1.", "Wie 3M oder 3m."])
+def test_ascii_exemptions_stay_valid(text: str) -> None:
+    from scout_research.tools.commentary import exempt_terms
+    from scout_research.tools.slots import CheckSession
+
+    session = CheckSession(warning_ids=frozenset({"W1"}), terms=tuple(exempt_terms(["3M Co"])))
+    result = check_text(session, text, "slot_text")
+    assert result.ok, [(p.code, p.match) for p in result.problems]
+
+
+def test_foreign_digits_holds_exactly_the_norm_indices_of_digits_from_non_ascii_sources() -> None:
+    from scout_research.tools.numbercheck import normalize
+
+    assert normalize("a ٣. b").foreign_digits == frozenset({2})
+    assert normalize("a 3. b").foreign_digits == frozenset()
+    assert normalize("3\u0301").foreign_digits == frozenset()  # ASCII-Ziffer mit Anhang
+    assert normalize("1꣣").foreign_digits == frozenset({1})  # die Mn-Ziffer, nicht die ASCII-Ziffer davor
+    assert normalize("１７").foreign_digits == frozenset({0, 1})
+    assert normalize("⼆").norm == "9" and normalize("⼆").foreign_digits == frozenset({0})
+
+
+def test_invariant_every_character_that_folds_to_an_ascii_digit_is_a_finding_even_as_a_list_number() -> None:
+    import sys
+    import unicodedata
+
+    from scout_research.tools.numbercheck import _MARK_DIGITS, _PICTOGRAPH_NUMBERS, normalize
+
+    session = _names_session("Adobe Inc.")
+    chars = {chr(cp) for cp in range(0x80, sys.maxunicode + 1)
+             if unicodedata.category(chr(cp)) not in ("Cn", "Co", "Cs") and any("0" <= c <= "9" for c in normalize(chr(cp)).norm)}
+    chars |= {chr(cp) for cp in (*_MARK_DIGITS, *_PICTOGRAPH_NUMBERS)}
+    assert len(chars) > 500
+    missed = [f"U+{ord(c):04X}" for c in sorted(chars) if check_text(session, c + ". Segmente von ADBE", "slot_text").ok]
+    assert not missed, missed[:20]
+
+
 @pytest.mark.parametrize("text", [
     "ADBE ist günstiger als der Median", "keine Peers", "ein einziger Peer", "Die Quelle, z. B. das 10-K, nennt es.",
     "U.S.A. und e.g. sind Abkürzungen", "Das P/E ist hoch, siehe oben", "a b c bleibt harmlos",

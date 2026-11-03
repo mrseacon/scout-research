@@ -37,6 +37,9 @@ class Normalized:
     norm_start: list[int]
     norm_end: list[int]
     format_chars: int
+    foreign_digits: frozenset[int] = frozenset()
+    """`norm`-Indizes der ASCII-Ziffern, die aus einem Nicht-ASCII-Zeichen entstanden sind (Plan 11.2, Klasse 17 geht
+    vor: eine Ausnahme gilt nie für so eine Stelle)."""
 
     def raw_span(self, a: int, b: int) -> tuple[int, int]:
         """Norm-Bereich [a, b) → Rohtext-Bereich."""
@@ -111,6 +114,7 @@ def normalize(raw: str) -> Normalized:
     norm: list[str] = []
     norm_start: list[int] = []
     norm_end: list[int] = []
+    foreign_digits: set[int] = set()
     i = 0
     while i < len(clean):
         j = i + 1
@@ -126,13 +130,17 @@ def normalize(raw: str) -> Normalized:
         else:
             folded = unicodedata.normalize("NFKC", cluster)
         for ch in folded:
+            foreign = not base.isascii()
             if _is_number_char(ch):  # auch, was erst NFKC zum Zahlzeichen macht (`⼆` → `二`)
-                ch = _norm_char(ch)
+                ch, foreign = _norm_char(ch), True
+            if foreign and "0" <= ch <= "9":
+                foreign_digits.add(len(norm))
             norm.append(ch)
             norm_start.append(i)
             norm_end.append(j)
         i = j
-    return Normalized(raw, clean, clean_to_raw, "".join(norm), norm_start, norm_end, format_chars)
+    return Normalized(raw, clean, clean_to_raw, "".join(norm), norm_start, norm_end, format_chars,
+                      frozenset(foreign_digits))
 
 
 # --- Ausnahmen (Klassen 1–6) --------------------------------------------------------------------------------------
