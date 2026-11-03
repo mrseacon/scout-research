@@ -1413,6 +1413,66 @@ cases:
     category: attack_unicode_digits
     reason: "Variantenzeichen aus dem Ergänzungsbereich zwischen Unicode-Ziffern. Plan 11.1 Punkt 2, Klasse 17."
 
+  - id: ST-B89
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EBIT-Marge von ADBE: ⼆ Prozent"
+    expect: [NAKED_NUMBER]
+    findings: ["⼆"]
+    category: attack_unicode_digits
+    reason: "Kangxi-Radikal wird erst durch NFKC zum Zahlzeichen 二; es muss nach der Faltung nochmals als Zahlzeichen erkannt werden. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B90
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat 🈔 Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["🈔"]
+    category: attack_unicode_digits
+    reason: "Eingekreistes CJK-Zeichen wird durch NFKC zu 二. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B91
+    lang: de
+    profile: slot_text
+    session: base
+    text: "EBIT-Marge von ADBE: 💯 % ist stark."
+    expect: [NAKED_NUMBER]
+    findings: ["💯"]
+    category: attack_unicode_digits
+    reason: "Bildzeichen „100“ wie 🔟 (geschlossene Liste). Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B92
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat ⚀ Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["⚀"]
+    category: attack_unicode_digits
+    reason: "Würfelfläche 1 als Bildzeichen mit Zahl (geschlossene Liste). Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B93
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Der Kurs von ADBE꣣꣥ ist hoch."
+    expect: [NAKED_NUMBER]
+    findings: ["ADBE꣣꣥"]
+    category: attack_unicode_digits
+    reason: "Sichtbare Ziffern der Kategorie Mn (Devanagari-Erweiterung) direkt hinter einem Buchstaben. Plan 11.1 Punkt 2, Klasse 17."
+
+  - id: ST-B94
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hat zwe឴i Segmente."
+    expect: [NAKED_NUMBER]
+    findings: ["zwe឴i"]
+    category: attack_unicode_digits
+    reason: "Khmer-Variantenzeichen U+17B4 ist unsichtbar und zerreißt das Zahlwort nicht. Plan 11.1 Punkt 2, Klasse 17."
+
   # ===============================================================================================================
   # ST-C — Slot-Gültigkeit
   # ===============================================================================================================

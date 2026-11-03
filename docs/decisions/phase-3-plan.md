@@ -991,7 +991,7 @@ Allen Profilen gemeinsam sind die Ausnahmen (11.2, Klassen 1–6) und die Vorver
 1. Unsichtbare Formatzeichen (Unicode-Kategorie `Cf`, z. B. U+200B, U+00AD) und `Mn`-Zeichen ohne Zahlwert, die Wörter und Ziffernfolgen zerreißen (Variantenzeichen, U+034F; ergänzt 2026-11-03, `_INVISIBLE_MARKS`) entfernen; ihr Vorkommen geht in den Trace.
 2. **Vor** der Normalisierung: jedes Zeichen mit `str.isnumeric()`, das keine ASCII-Ziffer ist (arabisch-indisch,
    Devanagari, Fullwidth, Hoch-/Tiefstellung, `½`, `①`, römische Zahlzeichen `Ⅻ`, CJK), ist eine Fundstelle. Grund:
-   NFKC macht aus `Ⅻ` die Buchstaben `XII`, die der ASCII-Scan nicht mehr sieht. Das gilt auch mit angehängtem Zeichen (`٣́`, `Ⅻ́`): Das Zahlzeichen entscheidet das Cluster (Review TA-7, H1, 2026-11-03; vor dem Fix ein Durchlass).
+   NFKC macht aus `Ⅻ` die Buchstaben `XII`, die der ASCII-Scan nicht mehr sieht. Das gilt auch mit angehängtem Zeichen (`٣́`, `Ⅻ́`): Das Zahlzeichen entscheidet das Cluster (Review TA-7, H1, 2026-11-03; vor dem Fix ein Durchlass). Ebenso für Zeichen, die erst NFKC zum Zahlzeichen macht (`⼆`), sichtbare `Mn`-Ziffern (U+A8E0–A8E9, U+11366–1136C) und eine geschlossene Liste von Bildzeichen mit Zahl (`💯`, `🔞`, `🔢`, Würfelflächen, `🆛` u. a.; O-16). **Offen (E-03):** Am Zeilenanfang greift nach der Faltung noch die Listennummer-Ausnahme (`💯. Text`, `百. Text`, `١٧. Text`).
 3. NFKC (Fullwidth-Klammern und -Doppelpunkte werden ASCII, der Slot-Parser sieht sie dann normal).
 4. Gültige Slots durch einen ziffernfreien Platzhalter ersetzen; slot-ähnliche, ungültige Konstrukte bleiben im Text
    und werden mitgeprüft (eine Zahl in einem kaputten Slot ist eine nackte Zahl).
@@ -1283,7 +1283,7 @@ ohne stille Korrektur (außer `.`↔`-`), `(n = k)` an jeder Statistik, englisch
 **Grenzen (Restrisiko, bewusst):** Richtungsaussagen („liegt über dem Median“) und ein gültiger Slot mit falscher
 Kennzahl bleiben modellgeneriert (Phase 5); Zahlwörter anderer Sprachen („douze“), römische Zahlen in ASCII („XII“),
 Buchstaben als Ziffernersatz („l7“), qualitative Mengen ohne Zahl („die meisten“); nicht-numerische
-Zeichenfolgen, die ein Mensch als Zahl liest, soweit sie nicht in den Listen stehen.
+Zeichenfolgen, die ein Mensch als Zahl liest, soweit sie nicht in den Listen stehen. Dazu zählen auch sichtbare Akzente auf Buchstaben in Zahlwörtern (`zwéi`; Review TA-7, B6).
 
 **Für Schritt 7 (Prompt und Loop):**
 
@@ -2043,3 +2043,4 @@ zu machen ist; im Bericht an Sean stehen sie gesondert.
 | O-13 | 2026-10-28 | 8 (M1) | Feld `pending_discarded` im Ereignis `model_error` | entfällt | `kind == "bad_request"` verwirft immer; LT-44 vergleicht exakt und müsste ein drittes Mal umgestellt werden (nach O-02) | Feld nur bei `bad_request`, LT-44 erweitern | Feld ergänzen, LT-44 und `ModelErrorEvent` erweitern |
 | O-14 | 2026-10-28 | 8 (M1) | `_drive` (`unexpected_stop`) gegen `_intro` (geprüften Text zeigen) bei `stop_reason` `tool_use` ohne Block | bleibt unterschiedlich, Kommentar in `_drive` | In `_drive` fehlt eine angekündigte Aktion: den Text als Antwort zu zeigen, stellte eine nicht erfolgte Aktion als erledigt dar. In `_intro` ist der Vorschlag schon deterministisch gezeigt, die Einleitung ist Beiwerk und läuft durch `check_text`; LT-41b und LT-53b schreiben beide Wege fest | `_intro` wie `_drive` (feste Einleitung); `_drive` wie `_intro` (Text zeigen) | Zweig in `_intro` auf `intro_fixed` stellen, LT-41b anpassen (Stufe C: Testerwartung) |
 | O-15 | 2026-11-03 | 8 (TA-7) | Backstop im Trace | `exempt` getrennt vom Prüf-Scan, je Spanne; `violation` unverändert aus der bestehenden Schleife; `exempt_span` trägt die längste Ausnahme; `rationale` bleibt draußen | Die Zusammenführung benachbarter Funde darf die Prüfentscheidung nicht berühren; ein Korpustest belegt: Verstöße = `NAKED_NUMBER`-Funde | Zweiter Gesamtscan ohne Maske; Klasse 1–6 je Eintrag | `_exempt_entries` und das Feld `extracted` entfernen |
+| O-16 | 2026-11-03 | 8 (TA-9) | Bildzeichen mit Zahl | Geschlossene Liste `_PICTOGRAPH_NUMBERS` (`🔟`, `💯`, `🔞`, `🔢`, Würfelflächen, aus U+1F19B–U+1F1AC nur Zeichen, deren Unicode-Name eine Zahl nennt), Fundstelle wie Klasse 17 | Ein Leser sieht eine Zahl; kein legitimer Gebrauch in einem Comps-Text | Als Restrisiko in 11.2 lassen | Eintrag aus der Menge entfernen |

@@ -315,6 +315,88 @@ def test_keycap_form_is_still_found_after_the_variation_selector_is_removed() ->
     assert not result.ok and {p.code for p in result.problems} == {"NAKED_NUMBER"}
 
 
+# TA-9: Zahlzeichen, die erst NFKC erzeugt, sichtbare Ziffern der Kategorie Mn, Bildzeichen mit Zahl, Khmer-Variantenzeichen
+
+_FURTHER_NUMBERS = ["⼆ Prozent", "🈔 Peers", "🉁", "ADBE꣣꣥", "💯 % Marge", "⚀ Peers", "🔞", "zwe\u17b4i Peers", "zwe\u17b5i Peers",
+                    "\U0001F51F\u0301", "🔢 Peers", "\U0001F4AF\u0301 %", "🆛 Peers", "🆢"]
+
+
+@pytest.mark.parametrize("text", _FURTHER_NUMBERS)
+def test_numbers_made_by_nfkc_visible_mark_digits_and_pictographs_are_caught(text: str) -> None:
+    result = check_text(_names_session("Adobe Inc."), text, "slot_text")
+    assert not result.ok, text
+    assert {p.code for p in result.problems} == {"NAKED_NUMBER"}, [(p.code, p.kind) for p in result.problems]
+
+
+def test_exact_raw_positions_of_a_nfkc_made_number_and_of_a_mark_digit_behind_letters() -> None:
+    session = _names_session("Adobe Inc.")
+    assert [(p.start, p.end) for p in check_text(session, "⼆ Prozent", "slot_text").problems] == [(0, 1)]
+    assert [(p.start, p.end) for p in check_text(session, "ADBE꣣꣥", "slot_text").problems] == [(0, 6)]
+
+
+@pytest.mark.parametrize("text", ["👍 Gut", "🔥 Stark", "⚠\ufe0f Bitte prüfen", "🆕 Neu", "🚀 Rakete"])
+def test_pictographs_without_a_number_stay_accepted(text: str) -> None:
+    assert check_text(_names_session("Adobe Inc."), text, "slot_text").ok, text
+
+
+def test_invariant_normalize_leaves_no_non_ascii_numeric_character_for_any_code_point() -> None:
+    """Plan 11.1 Punkt 2: Kein Zeichen mit `isnumeric()` außer ASCII-Ziffern darf in `norm` überleben, auch nicht mit
+    angehängtem Zeichen. Die Codepunkte werden zur Laufzeit erzeugt, damit neue Unicode-Versionen mitgeprüft werden."""
+    import sys
+    import unicodedata
+
+    from scout_research.tools.numbercheck import normalize
+
+    leaks = []
+    for cp in range(0x80, sys.maxunicode + 1):
+        ch = chr(cp)
+        if unicodedata.category(ch) in ("Cn", "Co", "Cs"):
+            continue
+        for appended in ("", "\u0301"):
+            norm = normalize(ch + appended).norm
+            if any(not c.isascii() and c.isnumeric() for c in norm):
+                leaks.append(f"U+{cp:04X}{'+U+0301' if appended else ''}")
+    assert not leaks, leaks[:20]
+
+
+def test_invariant_every_visible_mark_digit_behind_a_letter_is_a_finding() -> None:
+    import sys
+    import unicodedata
+
+    digits = [chr(cp) for cp in range(0x80, sys.maxunicode + 1)
+              if unicodedata.category(chr(cp)).startswith("M") and "DIGIT" in unicodedata.name(chr(cp), "")]
+    assert len(digits) >= 17
+    session = _names_session("Adobe Inc.")
+    missed = [f"U+{ord(d):04X}" for d in digits if check_text(session, "a" + d, "slot_text").ok]
+    assert not missed, missed
+
+
+# Unicode-Eigenschaft Default_Ignorable_Code_Point, soweit Kategorie Mn (UCD 15/16, DerivedCoreProperties.txt)
+_DEFAULT_IGNORABLE_MN = {0x034F, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F, *range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0)}
+
+
+def test_invisible_marks_are_exactly_the_default_ignorable_mn_characters() -> None:
+    import unicodedata
+
+    from scout_research.tools.numbercheck import _INVISIBLE_MARKS
+
+    assert all(unicodedata.category(chr(cp)) == "Mn" for cp in _DEFAULT_IGNORABLE_MN)
+    assert set(_INVISIBLE_MARKS) == _DEFAULT_IGNORABLE_MN
+
+
+def test_an_accepted_text_with_a_variation_selector_is_rendered_without_it_and_a_slot_with_one_resolves_like_with_a_cf_char() -> None:
+    ctx, tid, _ = _table()
+    session = build_check_session(ctx)
+    plain = check_text(session, "NVDA ⚠ liegt mit [[co:NVDA:ev_ebitda]] vorn.")
+    assert plain.ok
+    for invisible in ("\ufe0f", "\u200b"):
+        result = check_text(session, f"NVDA ⚠{invisible} liegt mit [[co:NVDA{invisible}:ev_ebitda]] vorn.")
+        assert result.ok, [(p.code, p.match) for p in result.problems]
+        assert result.body == plain.body and invisible not in result.body
+        assert result.format_chars == 2
+    assert "32,8x" in plain.body
+
+
 @pytest.mark.parametrize("text", [
     "ADBE ist günstiger als der Median", "keine Peers", "ein einziger Peer", "Die Quelle, z. B. das 10-K, nennt es.",
     "U.S.A. und e.g. sind Abkürzungen", "Das P/E ist hoch, siehe oben", "a b c bleibt harmlos",

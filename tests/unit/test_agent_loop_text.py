@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from scout_research.agent import texts
 from scout_research.agent.loop import LoopState
 from scout_research.agent.model_client import ModelCallError, Streamed
@@ -49,6 +51,17 @@ def test_lt_04b_a_unicode_digit_with_appended_variation_selectors_is_caught_twic
     assert result.outcome == "done" and result.state is LoopState.IDLE and result.reason == "withheld"
     assert shown_texts(result) == ["Antwort zurückgehalten: Sie enthielt Zahlen, die sich nicht prüfen ließen."]
     assert not any(ch in _all_shown(result) for ch in "٣٥\ufe0f")
+    assert len(run.client.requests) == 2  # genau eine Korrekturrunde
+    run.assert_invariants()
+
+
+@pytest.mark.parametrize("raw", ["٣\u0301٥\u0301 %", "Die Marge liegt bei 💯 %", "ADBE꣣꣥ ist teuer", "⼆ Peers"])
+def test_lt_04c_further_disguised_numbers_are_caught_twice_and_never_shown(raw: str) -> None:
+    run = Run(standard_world(), [say(raw), say(raw)])
+    result = run.say("Wie ist die Marge von NVDA?")
+    assert result.outcome == "done" and result.state is LoopState.IDLE and result.reason == "withheld"
+    assert shown_texts(result) == ["Antwort zurückgehalten: Sie enthielt Zahlen, die sich nicht prüfen ließen."]
+    assert not any(ch in _all_shown(result) for ch in "٣٥💯꣣꣥⼆\u0301")
     assert len(run.client.requests) == 2  # genau eine Korrekturrunde
     run.assert_invariants()
 

@@ -29,7 +29,8 @@ Buchstabe noch Leerraum."""
 class Normalized:
     raw: str
     clean: str
-    """Rohtext ohne unsichtbare Formatzeichen (Kategorie `Cf`); daraus wird gerendert."""
+    """Rohtext ohne unsichtbare Formatzeichen (Kategorie `Cf` und die unsichtbaren `Mn` aus `_INVISIBLE_MARKS`); daraus
+    wird gerendert."""
     clean_to_raw: list[int]
     norm: str
     """Für den Scan: NFKC, Ziffern aller Schriften als ASCII, andere Zahlzeichen als `9`."""
@@ -47,13 +48,32 @@ class Normalized:
         return self.norm_start[a], self.norm_end[b - 1]
 
 
+_MARK_DIGITS = frozenset({*range(0xA8E0, 0xA8EA), *range(0x11366, 0x1136D)})
+"""Sichtbare Ziffern der Kategorie `Mn` (kombinierende Devanagari- und Grantha-Ziffern, die 17 `M*`-Zeichen mit `DIGIT`
+im Namen). Sie hängen am Vorzeichen davor und ergeben dennoch eine Ziffer (Plan 11.1 Punkt 2, Klasse 17)."""
+
+_PICTOGRAPH_NUMBERS = frozenset({
+    0x1F51F,                    # Emoji „10“ (keine Unicode-Zahl, aber eine)
+    0x1F4AF, 0x1F51E, 0x1F522,  # 💯, 🔞, 🔢
+    *range(0x2680, 0x2686),     # Würfelflächen ⚀–⚅
+    0x1F19B, *range(0x1F19D, 0x1F1A5),  # 🆛 3D … 🆤 120P (Namen mit Zahl; 1F19C, 1F1A5–1F1AC nennen keine)
+})
+"""Geschlossene Liste von Bildzeichen mit sichtbarer Zahl (Plan 11.1 Punkt 2, Klasse 17, Erweiterung). Sie zählen wie
+`🔟` als Zahlzeichen und falten zu `9`."""
+
+
+def _is_number_char(ch: str) -> bool:
+    """Nicht-ASCII-Zeichen, das für den Leser eine Zahl zeigt."""
+    return not ch.isascii() and (ch.isnumeric() or ord(ch) in _MARK_DIGITS or ord(ch) in _PICTOGRAPH_NUMBERS)
+
+
 def _norm_char(ch: str) -> str:
     if ch.isascii():
         return ch
+    if ord(ch) in _MARK_DIGITS or ord(ch) in _PICTOGRAPH_NUMBERS:
+        return "9"
     if ch.isdecimal():  # arabisch-indisch, Devanagari, Fullwidth …
         return str(unicodedata.decimal(ch))
-    if ch == "\U0001F51F":  # Emoji „10“ (keine Unicode-Zahl, aber eine)
-        return "9"
     if ch.isnumeric():  # Hoch-/Tiefstellung, Brüche, ①, Ⅻ, CJK …
         folded = unicodedata.normalize("NFKC", ch)
         return folded if folded.isascii() and folded.isdigit() else "9"
@@ -65,10 +85,10 @@ def _norm_char(ch: str) -> str:
 
 
 _INVISIBLE_MARKS = frozenset(
-    {*range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0), 0x034F, 0x180B, 0x180C, 0x180D, 0x180F}
+    {*range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0), 0x034F, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F}
 )
-"""Unsichtbare Zeichen der Kategorie `Mn` ohne sichtbare Wirkung (Variantenzeichen U+FE00–U+FE0F und U+E0100–U+E01EF,
-COMBINING GRAPHEME JOINER U+034F, mongolische Variantenzeichen U+180B–U+180D und U+180F). Sie werden wie `Cf` entfernt
+"""Unsichtbare Zeichen der Kategorie `Mn` ohne Zahlwert (Variantenzeichen U+FE00–U+FE0F und U+E0100–U+E01EF,
+COMBINING GRAPHEME JOINER U+034F, Khmer U+17B4/U+17B5, mongolische Variantenzeichen U+180B–U+180D und U+180F). Sie werden wie `Cf` entfernt
 und gezählt (Plan 11.1 Punkt 1): sonst zerreißen sie Zahlwörter und Ziffernfolgen und täuschen ein anderes Cluster vor."""
 
 
@@ -100,11 +120,14 @@ def normalize(raw: str) -> Normalized:
         base = cluster[0]
         # Zahlzeichen mit angehängtem Zeichen laufen über `_norm_char` (Plan 11.1 Punkt 2, Klasse 17); NFKC faltet
         # sie nicht, und der Anhang würde sonst die Fundstelle verdecken. Die angehängten Zeichen entfallen im `norm`.
-        if len(cluster) == 1 or (not base.isascii() and (base.isnumeric() or base == "\U0001F51F")):
-            folded = _norm_char(base)
+        if len(cluster) == 1 or _is_number_char(base):
+            # sichtbare Ziffern unter den angehängten Zeichen (Mn) bleiben Ziffern
+            folded = _norm_char(base) + "".join("9" for m in cluster[1:] if ord(m) in _MARK_DIGITS)
         else:
             folded = unicodedata.normalize("NFKC", cluster)
         for ch in folded:
+            if _is_number_char(ch):  # auch, was erst NFKC zum Zahlzeichen macht (`⼆` → `二`)
+                ch = _norm_char(ch)
             norm.append(ch)
             norm_start.append(i)
             norm_end.append(j)
