@@ -31,6 +31,10 @@ class PlacementError(Exception):
     """Der Verlauf verletzt eine Platzierungsregel der API (12.14.1); ein Programmfehler, nie ein Modellfehler."""
 
 
+ModelErrorKind = Literal["unavailable", "auth", "bad_request", "not_found", "unprocessable", "stalled", "deadline",
+                         "unexpected", "interrupted"]  # eine Quelle für Client, Zuordnung und Trace-Schema (TA-13)
+
+
 class ModelCallError(Exception):
     """Ein Modellaufruf ist gescheitert. Nur `kind`, Klasse, Status und `request_id` — nie der Text der Ausnahme.
 
@@ -39,7 +43,7 @@ class ModelCallError(Exception):
 
     def __init__(
         self,
-        kind: Literal["unavailable", "auth", "bad_request", "stalled", "deadline", "unexpected", "interrupted"],
+        kind: ModelErrorKind,
         error_class: str | None = None,
         status_code: int | None = None,
         request_id: str | None = None,
@@ -282,18 +286,35 @@ _UNAVAILABLE = {"APIConnectionError", "APITimeoutError", "RateLimitError", "Inte
 _AUTH = {"AuthenticationError", "PermissionDeniedError"}
 
 
+# Rückfall über den HTTP-Status, nur wenn kein bekannter Klassenname passt (TA-13, N-3)
+_STATUS_KINDS: dict[int, ModelErrorKind] = {
+    400: "bad_request", 413: "bad_request", 401: "auth", 403: "auth", 404: "not_found", 422: "unprocessable",
+    408: "unavailable", 409: "unavailable",
+}  # 429 fehlt absichtlich: der bestehende Test LT-44 verlangt für eine unbekannte Klasse mit 429 `unexpected` (offen)
+
+
 def map_sdk_exception(exc: BaseException) -> ModelCallError:
+    """Ordnet eine SDK-Ausnahme zu: zuerst die Klassennamen der MRO, nur ohne bekannte Klasse der `status_code`
+    (`_STATUS_KINDS`, >= 500 -> `unavailable`; sonst `unexpected`; TA-13, O-25). Ein Wiederholen gibt es hier nicht."""
     names = {c.__name__ for c in type(exc).__mro__}
-    kind: Literal["unavailable", "auth", "bad_request", "unexpected"]
+    status = getattr(exc, "status_code", None)
+    kind: ModelErrorKind
     if names & _AUTH:
         kind = "auth"
     elif names & _UNAVAILABLE:
         kind = "unavailable"
     elif "BadRequestError" in names:
         kind = "bad_request"
+    elif "NotFoundError" in names:
+        kind = "not_found"
+    elif "UnprocessableEntityError" in names:
+        kind = "unprocessable"
+    elif isinstance(status, int) and not isinstance(status, bool) and status in _STATUS_KINDS:
+        kind = _STATUS_KINDS[status]
+    elif isinstance(status, int) and not isinstance(status, bool) and status >= 500:
+        kind = "unavailable"
     else:
         kind = "unexpected"
-    status = getattr(exc, "status_code", None)
     request_id = getattr(exc, "request_id", None)
     return ModelCallError(
         kind,

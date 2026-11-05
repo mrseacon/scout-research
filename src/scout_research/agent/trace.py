@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
+from scout_research.agent.model_client import ModelErrorKind
 from scout_research.agent.prompt_loader import tools_hash
 
 if TYPE_CHECKING:
@@ -144,7 +145,7 @@ class ModelCallEvent(_Line):
 
 class ModelErrorEvent(_Line):
     event: Literal["model_error"]
-    kind: str
+    kind: ModelErrorKind
     error_class: str | None
     status_code: int | None
     request_id: str | None
@@ -260,7 +261,7 @@ class TurnEndEvent(_Line):
     state: str
     calls: int
     tools: int
-    closing: Literal["cost", "context", "auth", "bad_request", "budget_run", "budget_day", "budget_ledger"] | None
+    closing: Literal["cost", "context", "auth", "not_found", "bad_request", "budget_run", "budget_day", "budget_ledger"] | None
     session_cost_usd: float
 
 

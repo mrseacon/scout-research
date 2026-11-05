@@ -8,7 +8,7 @@ aus `data/` (T8).
 Was die Schleife durchsetzt, auch wenn das Modell die Regeln bricht (12.11): jede Antwort, die der Nutzer sieht, läuft
 durch `check_text` und wird als `CheckResult.body` gezeigt, nie als Rohtext (SM-05); Text neben `tool_use` wird nie
 gezeigt (L3); Host-Züge tragen einen festen Vorlagentext, der nie `HumanInput` ist (V1, SM-02); der Verlauf besteht
-nur aus vollständigen Paaren, ein gescheiterter Aufruf lässt den Anfrageteil ausstehend (Z16), außer bei `bad_request`:
+nur aus vollständigen Paaren, ein gescheiterter Aufruf lässt den Anfrageteil ausstehend (Z16), außer bei `bad_request`/`unprocessable`:
 dann fällt der Text des Menschen weg (O-12).
 
 `events` sind rohe Ereignisse für den Trace-Schreiber (`agent/trace.py`, Schritt 8): kein Schema, kein Schreiben.
@@ -391,10 +391,13 @@ class AgentLoop:
             if exc.kind == "auth":
                 self._closing = "auth"
                 return self._finish(turn, "closed", "auth", [texts.user_text(lang, "auth")])
+            if exc.kind == "not_found":  # Modell oder Endpunkt unbekannt: Konfiguration, jeder weitere Aufruf scheitert gleich
+                self._closing = "not_found"
+                return self._finish(turn, "closed", "not_found", [texts.user_text(lang, "not_found")])
             if exc.kind == "interrupted":
                 self._interrupted = True
                 return self._finish(turn, "failed", "interrupted", [texts.user_text(lang, "interrupted")])
-            if exc.kind == "bad_request":
+            if exc.kind in {"bad_request", "unprocessable"}:  # 422 teilt den Pfad von 400 (TA-13, O-25)
                 # Vermutlich ist der Text des Menschen die Ursache; ihn erneut zu senden, scheitert erneut (M1, O-12,
                 # Abweichung von Z16). Eine zweite Ablehnung in Folge liegt am festen Verlauf: Die Sitzung schließt.
                 self._discard_human_text()
