@@ -1425,12 +1425,25 @@ Nutzernachricht (erst die `tool_result`-Blöcke, dann der Text des Menschen bzw.
 | Zug | 10 Modellaufrufe, 12 Tool-Ausführungen, 10 min (V3) | `FAILED` |
 | Sitzung, Kosten | Summe `usage` × Preistabelle (Abschnitt 8): Warnung bei 1 $, Hartgrenze 2 $ (L1) | Hinweis bzw. `CLOSED` |
 | Sitzung, Kontext | Input-Tokens eines Aufrufs über einer harten Grenze (etwa 150.000; L7, keine Kompaktierung) | `CLOSED` mit Hinweis „neue Sitzung starten“ |
+| Lauf (Prozess), Kosten | `BUDGET_RUN_USD`, Default 1 $ (Schritt 9a, TA-12b, SG-24) | vor jedem Aufruf Vorprüfung im schlechtesten Fall (O-24); erreicht → kein Aufruf, `CLOSED`, Ereignis `budget_stop` |
+| Tag (UTC), Kosten | `BUDGET_DAY_USD`, Default 3 $; Summe aller Läufe im Kostenbuch `<RUNS_DIR>/spend_ledger.json` (Sperre, atomar) | wie Lauf; Buch nicht lesbar oder nicht schreibbar → `CLOSED` (fail-closed, `budget_ledger`) |
 
 Kosten werden aus `usage` jedes Aufrufs berechnet (Input, Output, Cache-Read, Cache-Write getrennt) und im Trace je
 Aufruf und als Summe geführt. Die Preistabelle steht in der Konfiguration, nicht im Code verteilt. Die Grenzen der Sitzung werden **nach jedem
 Aufruf** aus der gemeldeten `usage` geprüft, nicht erst am Zugende (V3). Das gilt auch für **gescheiterte** Aufrufe (M2, 2026-10-28): Der
 Adapter zählt `usage` aus `message_start`/`message_delta` mit und hängt sie an `ModelCallError`; der Loop verbucht sie
 und prüft die Grenzen genauso. Schätzregel und Strg+C im Stream: O-03, O-04 (Abschnitt 14).
+
+**Lauf- und Tagesdeckel (Schritt 9a, TA-12b; O-24, SG-24).** Beide zählen jeden Aufruf, auch gescheiterte (M2). Vor
+jedem Aufruf gilt: gebucht + Obergrenze des nächsten Aufrufs ≥ Grenze → kein Aufruf. Die Obergrenze rechnet mit dem
+teuersten Input-Satz der Preistabelle und `max_tokens` zum Output-Preis; ihre Input-Tokens stehen je Aufruf als
+`upper_input_tokens` im Ereignis `model_call`. Die Budgetgründe gehen `cost` und `context` vor (die längere Sperre
+gewinnt), nicht `auth`/`bad_request`. Beide Limits stehen im Trace-Kopf (SG-19). Bekannte Grenzen:
+(1) Die Annahme „1 Token ≤ 1 Byte UTF-8 plus Aufschlag“ ist erst im Live-Lauf belegt (Abgleich `upper_input_tokens`
+gegen `input + cache_read + cache_write`). (2) Zwei parallele Prozesse reservieren nichts; der Tagesdeckel kann um
+eine Obergrenze je Prozess überschritten werden (heute läuft nichts parallel). (3) Ein gelöschtes Kostenbuch setzt den
+Tag auf 0. (4) Strg+C mitten in der Buchung sperrt das Buch für diesen Prozess (fail-closed). (5) `fcntl.flock`: nur
+POSIX. (6) SDK-Retries (2) innerhalb eines `create` deckt die Vorprüfung nur als einen Versuch ab.
 
 ### 12.9 Streaming
 
@@ -2051,3 +2064,4 @@ zu machen ist; im Bericht an Sean stehen sie gesondert.
 | O-21 | 2026-11-05 | 9a (Auftrag 12) | `asyncio_default_fixture_loop_scope` | `"function"` in `[tool.pytest.ini_options]` | Künftiger Default von pytest-asyncio, also keine Verhaltensänderung beim nächsten Update; die Suite hat keine asynchronen Fixtures (Warnung weg, 1310 passed) | `"session"` (gemeinsame Schleife, Kopplung zwischen Tests) | Zeile entfernen |
 | O-22 | 2026-11-05 | 9a (Auftrag 11) | Packaging | `pyproject.toml` bleibt für die Installation unverändert: im frischen Klon mit neuer venv `pip install -e ".[dev]"`, `python -I -c "import scout_research"` lädt aus `src/` des Klons, Suite 1310 passed. `pythonpath = ["src", "."]` bleibt nur für pytest (`tests.network_guard`, `eval`). Der CLI-Einstieg (`[project.scripts]`) kommt mit TA-14 und wird dann im frischen Klon geprüft | Kein Eingriff ohne Befund | `pythonpath` entfernen und Tests auf installiertes Paket umstellen | — |
 | O-23 | 2026-11-05 | 9a | Triviale Konfiguration ohne Implementierer und Reviewer (Vorgabe Sean, 2026-11-05; Betriebsordnung 3, Regel 7) | Konfigurationsänderungen von wenigen Zeilen ohne Programmlogik (etwa `pyproject.toml`) macht der Orchestrator selbst; Kontrolle: vollständige Suite und Push-Gate; nicht für `src/`, `scripts/`, `.claude/`, Tests. Erste Anwendung: `asyncio_default_fixture_loop_scope` (O-21, schon in 0d5bf90 gesetzt; Suite 1310 passed ohne Warnung, neu geprüft) | Ein Implementierer- und Review-Zyklus kostet für eine Zeile Konfiguration mehr, als er prüft; Suite und Gate fangen Fehler | Voller Ablauf je Teilaufgabe (Betriebsordnung 3, Regel 2) | Regel 7 in der Betriebsordnung streichen |
+| O-24 | 2026-11-05 | 9a (TA-12b) | Lauf- und Tagesdeckel: Vorprüfung (Review R1, M4; Wahl „schlechtester Fall“ von Sean, 2026-11-05) | Vor jedem Aufruf: gebucht + Obergrenze ≥ Grenze → kein Aufruf. Obergrenze = Input-Tokens × teuerster Input-Satz (`max(input, cache_read, cache_write)`) + `max_tokens` × Output-Preis. Input-Tokens: Kontext-Tokens des letzten erfolgreichen Aufrufs (`input + cache_read + cache_write`; bei gültigem Präfix monoton per `max`, bei 0 keine Referenz) + UTF-8-Bytes der seither angehängten Nachrichten + Aufschlag 1.000 + 50 je Nachricht; volle Bytezählung (system, tools, messages) beim ersten Aufruf, ohne gemeldete Nutzung und wenn der alte Request kein Präfix des neuen ist; kein Deckel bei der Kontextgrenze (Review R2, H-A). Defaults 1 $ je Lauf, 3 $ je Tag (UTC) | Ein Deckel, der um einen Aufruf überschritten werden kann, ist keiner; die Bytezählung braucht keinen Tokenizer und überschätzt; Nutzung des letzten Aufrufs hält sie eng | Nachprüfung allein (weich um einen Aufruf); pauschal Kontextgrenze als Input; Tokenizer-Schätzung | in `AgentLoop._send` die Vorprüfung auf `exhausted(0.0)` setzen |

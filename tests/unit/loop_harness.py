@@ -16,6 +16,7 @@ from scout_research.agent.model_client import (
     Step,
     check_placement,
 )
+from scout_research.agent.spend import SpendBudget
 from scout_research.agent.trace import validate_loop_event
 from scout_research.tools.session import HumanInput
 from tests.unit.tool_world import AAPL_CIK, MSFT_CIK, NVDA_CIK, World
@@ -56,7 +57,7 @@ class Run:
 
     def __init__(self, world: World, steps: list[Step], config: LoopConfig | None = None,
                  language: str = "de", dispatch: Callable | None = None, system: str = SYSTEM,
-                 **ctx_kwargs: Any) -> None:
+                 budget: SpendBudget | None = None, **ctx_kwargs: Any) -> None:
         self.clock = ManualClock()
         ctx_kwargs.setdefault("output_language", language)
         self.ctx = world.context(clock=self.clock, **ctx_kwargs)
@@ -66,7 +67,7 @@ class Run:
         if dispatch is not None:
             kwargs["dispatch"] = dispatch
         self.loop = AgentLoop(self.ctx, self.client, system, config or LoopConfig(language=language),
-                              on_status=self.status.append, clock=self.clock, **kwargs)
+                              on_status=self.status.append, clock=self.clock, budget=budget, **kwargs)
 
     # --- Aktionen ----------------------------------------------------------------------------------------------
 

@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     runs_dir: Path = Path("runs")
     """Ordner der Trace-Dateien (Plan 6, 12.10). Der Desktop liegt in iCloud: für Live-Läufe ein lokaler Pfad außerhalb."""
 
+    budget_run_usd: float = 1.0
+    """Budgetdeckel je Lauf in US-Dollar (Plan 12.8, TA-12b); zusätzlich zur Sitzungsgrenze, es gilt die strengste."""
+    budget_day_usd: float = 3.0
+    """Budgetdeckel je UTC-Tag über alle Läufe (Kostenbuch unter `runs_dir`)."""
+
     edgar_requests_per_second: int = 10
     finnhub_requests_per_minute: int = 55
 
@@ -48,6 +53,20 @@ class Settings(BaseSettings):
     def _positive_max_tokens(cls, value: int) -> int:
         if value < 256:
             raise ValueError("ANTHROPIC_MAX_TOKENS muss mindestens 256 sein.")
+        return value
+
+    @field_validator("budget_run_usd", "budget_day_usd", mode="before")
+    @classmethod
+    def _blank_budget_is_default(cls, value: object, info) -> object:
+        if isinstance(value, str) and not value.strip():
+            return cls.model_fields[info.field_name].default
+        return value
+
+    @field_validator("budget_run_usd", "budget_day_usd")
+    @classmethod
+    def _positive_budget(cls, value: float) -> float:
+        if not value > 0 or value == float("inf"):
+            raise ValueError("BUDGET_RUN_USD und BUDGET_DAY_USD müssen größer als 0 sein.")
         return value
 
     @field_validator("anthropic_model", "anthropic_effort", "output_language", "runs_dir", mode="before")

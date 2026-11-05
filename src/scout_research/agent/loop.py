@@ -19,6 +19,7 @@ Seit Schritt 8 tragen sie auch Argumente und Modell-Ergebnisse der Tools sowie d
 from __future__ import annotations
 
 import copy
+import json
 import traceback
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -38,6 +39,7 @@ from scout_research.agent.model_client import (
     history_content,
     is_usable,
 )
+from scout_research.agent.spend import SpendBudget
 from scout_research.tools.commentary import build_check_session, check_text
 from scout_research.tools.handlers import ToolOutcome, coded_outcome, dispatch as default_dispatch, tool_definitions
 from scout_research.tools.session import (
@@ -140,6 +142,12 @@ class _Turn:
     notices: list[str] = field(default_factory=list)
 
 
+BOUND_FIXED_TOKENS = 1000
+"""Fester Sicherheitsaufschlag auf die Input-Obergrenze (Tool-Use-Systemprompt der API, Rahmen-Token; O-24)."""
+BOUND_PER_MESSAGE_TOKENS = 50
+"""Aufschlag je Nachricht im Request (Rahmen-Token je Nachricht; O-24)."""
+
+
 class AgentLoop:
     def __init__(
         self,
@@ -150,6 +158,8 @@ class AgentLoop:
         dispatch: Callable[[ToolContext, str, Any], ToolOutcome] = default_dispatch,
         on_status: Callable[[str], None] | None = None,
         clock: Callable[[], float] | None = None,
+        *,
+        budget: SpendBudget | None,
     ) -> None:
         self.ctx = ctx
         self.client = client
@@ -159,6 +169,8 @@ class AgentLoop:
         self._dispatch = dispatch
         self._on_status = on_status
         self._clock = clock or ctx.clock
+        self._bound_ref: tuple[int, list[dict[str, Any]]] | None = None  # (Kontext-Token, Nachrichten) des letzten Aufrufs
+        self._budget = budget  # Lauf- und Tagesgrenze (TA-12b); ohne Default: wer keinen Deckel will, übergibt bewusst `None`
         self.tools = tool_definitions()
         self.history: list[dict[str, Any]] = []
         self.pending = Pending()
@@ -265,6 +277,8 @@ class AgentLoop:
             items.append(Shown("notice", texts.user_text(self.config.language, "cost_closed")))
         elif self._closing == "context":
             items.append(Shown("notice", texts.user_text(self.config.language, "context_closed")))
+        elif self._closing in {"budget_run", "budget_day", "budget_ledger"}:
+            items.append(Shown("notice", texts.user_text(self.config.language, f"{self._closing}_closed")))
         items += [Shown("notice", t) for t in turn.notices]
         if self._closing:
             outcome = "closed"
@@ -341,9 +355,15 @@ class AgentLoop:
     def _send(self, turn: _Turn, blocks, facts, tool_choice) -> TurnResult | tuple[ModelResponse, bool]:
         """Ein Modellaufruf. Gibt `(Antwort, brauchbar)` oder ein fertiges `TurnResult` bei Fehler zurück."""
         lang = self.config.language
+        request = self._request(blocks, facts, tool_choice)
+        upper_tokens = self._upper_input_tokens(request)
+        if self._budget is not None:  # Vorprüfung im schlechtesten Fall: bei erreichter Grenze gar kein Aufruf (O-24)
+            reason = self._budget.exhausted(self._upper_usd(request, upper_tokens))
+            if reason is not None:
+                self._budget_stop(reason)
+                return self._finish(turn, "closed", reason, [])
         self._status(texts.user_text(lang, "status_working"))
         turn.calls += 1
-        request = self._request(blocks, facts, tool_choice)
         started = self._clock()
         try:
             response = self.client.create(request, lambda kind: None)
@@ -361,8 +381,13 @@ class AgentLoop:
                                 "cache_creation_input_tokens": usage.cache_creation_input_tokens if usage else None,
                                 "cost_usd": call_cost, "usage_estimated": exc.usage_estimated,
                                 "session_cost_usd": self.session_cost})
-            if usage is not None:
-                self._check_limits(turn, usage)
+            try:  # nach dem Ereignis; Grenzen gelten auch, wenn Strg+C das Buchen unterbricht (fail closed)
+                if self._budget is not None:
+                    self._budget.charge(call_cost)
+            finally:
+                if usage is not None:
+                    self._check_limits(turn, usage)
+                self._check_budget()
             if exc.kind == "auth":
                 self._closing = "auth"
                 return self._finish(turn, "closed", "auth", [texts.user_text(lang, "auth")])
@@ -382,13 +407,20 @@ class AgentLoop:
         # Kosten und Kontext **nach jedem Aufruf** aus der gemeldeten Nutzung (V3, L1, L7)
         call_cost = cost_usd(response.usage, self.config.price)
         self.session_cost += call_cost
+        self._update_bound_ref(response.usage, request.messages)
         self.events.append({"event": "model_call", "stop_reason": response.stop_reason, "request_id": response.request_id,
                             "input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens,
                             "cache_read_input_tokens": response.usage.cache_read_input_tokens,
                             "cache_creation_input_tokens": response.usage.cache_creation_input_tokens,
                             "cost_usd": call_cost, "session_cost_usd": self.session_cost, "tool_choice": tool_choice["type"],
-                            "messages": len(request.messages), "latency_s": self._clock() - started})
-        self._check_limits(turn, response.usage)
+                            "messages": len(request.messages), "latency_s": self._clock() - started,
+                            "upper_input_tokens": upper_tokens})
+        try:  # nach dem Ereignis; Grenzen gelten auch, wenn Strg+C das Buchen unterbricht (fail closed)
+            if self._budget is not None:
+                self._budget.charge(call_cost)
+        finally:
+            self._check_limits(turn, response.usage)
+            self._check_budget()
         return response, is_usable(response)
 
     def _discard_human_text(self) -> None:
@@ -407,6 +439,81 @@ class AgentLoop:
         if self.session_cost >= self.config.cost_warning_usd and not self._cost_warned:
             self._cost_warned = True
             turn.notices.append(texts.user_text(self.config.language, "cost_warning"))
+
+    def _upper_input_tokens(self, request: ModelRequest) -> int:
+        """Obergrenze der Input-Tokens des nächsten Aufrufs (O-24, schlechtester Fall).
+
+        Annahme: 1 Token <= 1 Byte UTF-8, plus Aufschlag (`BOUND_FIXED_TOKENS` fest, `BOUND_PER_MESSAGE_TOKENS` je Nachricht).
+        Das ist plausibel, aber erst im Live-Lauf belegt (das Trace-Feld `upper_input_tokens` im `model_call` erlaubt den
+        Vergleich mit der tatsächlichen Nutzung). Es gibt keinen Deckel bei der eigenen Kontextgrenze: Sie schließt erst
+        nach dem Aufruf, ein größerer Request würde gesendet und bezahlt.
+
+        Mit gesicherter Nutzung des letzten Aufrufs (Kontext-Token aus `usage`) und einem Verlauf, der seither nur
+        angehängt wurde: diese Token plus Bytes der hinzugekommenen Nachrichten. Sonst (erster Aufruf, letzter Aufruf
+        ohne Nutzung, Verlauf verändert): Bytes von system + tools + messages."""
+        messages = request.messages
+        overhead = BOUND_FIXED_TOKENS + BOUND_PER_MESSAGE_TOKENS * len(messages)
+        base = self._ref_base(messages)
+        if base is not None:
+            tokens, start = base
+            return tokens + _json_bytes(messages[start:]) + overhead
+        return _json_bytes({"system": request.system, "tools": request.tools, "messages": messages}) + overhead
+
+    def _ref_base(self, messages: list[dict[str, Any]]) -> tuple[int, int] | None:
+        """(Kontext-Token des letzten Aufrufs, Index der ersten neuen Nachricht), wenn `messages` den alten Request als
+        Präfix enthält. Die trailing `system`-Nachricht (Fakten) des alten Requests bleibt außen vor: `_commit` übernimmt
+        die Fakten in den Verlauf, die Ausnahme macht die Präfixprüfung nur nachsichtiger; alte Fakten werden dann ggf.
+        doppelt gezählt (Überschätzung, nie Unterschätzung)."""
+        ref = self._bound_ref
+        if ref is None:
+            return None
+        tokens, old = ref
+        if old and old[-1].get("role") == "system":
+            old = old[:-1]
+        if len(old) <= len(messages) and messages[:len(old)] == old:
+            return tokens, len(old)
+        return None
+
+    def _update_bound_ref(self, usage: Usage, messages: list[dict[str, Any]]) -> None:
+        """Referenz für die nächste Schranke. Ohne gemeldete Kontext-Token (<= 0) keine Referenz (volle Bytezählung).
+        Gilt das Präfix, ist die Referenz monoton (`max`): Der neue Request enthält den alten, eine kleinere gemeldete
+        Zahl wäre eine Unstimmigkeit der Nutzungsangabe und würde die Schranke senken."""
+        tokens = usage.context_tokens
+        if tokens <= 0:
+            self._bound_ref = None
+            return
+        base = self._ref_base(messages)
+        if base is not None:
+            tokens = max(tokens, base[0])
+        self._bound_ref = (tokens, messages)
+
+    def _upper_usd(self, request: ModelRequest, input_tokens: int) -> float:
+        """Obergrenze der Kosten des nächsten Aufrufs aus der Preistabelle der Konfiguration: Input mit dem teuersten
+        Satz (Input, Cache-Read, Cache-Write), Output mit `max_tokens` zum Output-Preis."""
+        price = self.config.price
+        input_rate = max(price.input, price.cache_read, price.cache_write)
+        return (input_tokens * input_rate + request.max_tokens * price.output) / 1_000_000
+
+    def _next_call_upper_usd(self, request: ModelRequest) -> float:
+        return self._upper_usd(request, self._upper_input_tokens(request))
+
+    @property
+    def budget(self) -> SpendBudget | None:
+        return self._budget
+
+    def _check_budget(self) -> None:
+        """Lauf- und Tagesgrenze nach einem Aufruf, gelungen oder gescheitert (TA-12b); die Blöcke dieser Antwort werden
+        dann wie bei der Kostengrenze nicht ausgeführt."""
+        reason = self._budget.exhausted() if self._budget is not None else None
+        if reason is not None:
+            self._budget_stop(reason)
+
+    def _budget_stop(self, reason: str) -> None:
+        assert self._budget is not None
+        if self._closing in (None, "cost", "context"):  # die längerfristige Sperre gewinnt vor Kosten- und Kontextgrenze
+            self._closing = reason
+        self.events.append({"event": "budget_stop", "reason": reason, "run_spent_usd": self._budget.run_spent,
+                            "day_total_usd": self._budget.day_total()})
 
     def _commit(self, blocks, facts, response: ModelResponse) -> None:
         # Ab hier hat jedes tool_use ein Ergebnis: vorbelegt mit TURN_ENDED, Block für Block ersetzt. Eine Ausnahme
@@ -565,6 +672,10 @@ class AgentLoop:
 def _findings(problems: Sequence[Any]) -> list[dict[str, Any]]:
     """Fundstellen der Textprüfung fürs Ereignis: Code, Art, Bereich im Rohtext und der gefundene Ausschnitt."""
     return [{"code": p.code, "kind": p.kind, "start": p.start, "end": p.end, "match": p.match} for p in problems]
+
+
+def _json_bytes(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"))
 
 
 def _KNOWN(loop: AgentLoop) -> set[str]:

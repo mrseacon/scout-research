@@ -224,7 +224,8 @@ def test_the_writer_refuses_a_prompt_that_is_not_the_text_the_loop_sends(tmp_pat
 HEADER_KEYS = {"event", "seq", "ts", "run_id", "turn", "session_id", "run_mode", "git_commit", "model", "effort",
                "output_language", "prompt_version", "prompt_sha256", "tools_sha256", "params"}
 PARAM_KEYS = {"max_tokens", "max_calls_per_turn", "max_tools_per_turn", "turn_seconds", "call_seconds",
-              "stall_seconds", "cost_warning_usd", "cost_limit_usd", "context_limit_tokens", "price"}
+              "stall_seconds", "cost_warning_usd", "cost_limit_usd", "context_limit_tokens", "budget_run_usd",
+              "budget_day_usd", "price"}
 
 
 def test_the_header_has_exactly_the_whitelisted_keys_and_the_model_rejects_extras(tmp_path: Path) -> None:

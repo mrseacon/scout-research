@@ -41,7 +41,7 @@ _URL_QUERY = re.compile(r"(https?://[^\s?#\"']*)\?[^\s\"'#]*")
 _KNOWN_GATE_ENTRIES = frozenset(("proposed", "confirmed", "rejected", "commentary"))
 _GIT_COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 LOOP_EVENTS = frozenset(("model_call", "model_error", "tool", "text_check", "unusable_response", "loop_error",
-                         "turn_end"))
+                         "budget_stop", "turn_end"))
 """Ereignisarten, die der Loop selbst erzeugt (`gate` ist nur Positionsmarker und wird nicht geschrieben)."""
 
 
@@ -100,6 +100,8 @@ class TraceParams(_Model):
     cost_warning_usd: float
     cost_limit_usd: float
     context_limit_tokens: int
+    budget_run_usd: float | None
+    budget_day_usd: float | None
     price: TracePrice
 
 
@@ -137,6 +139,7 @@ class ModelCallEvent(_Line):
     tool_choice: str
     messages: int
     latency_s: float
+    upper_input_tokens: int
 
 
 class ModelErrorEvent(_Line):
@@ -242,6 +245,14 @@ class LoopErrorEvent(_Line):
     traceback: str
 
 
+class BudgetStopEvent(_Line):
+    """Lauf- oder Tagesgrenze erreicht bzw. Kostenbuch nicht lesbar (TA-12b); `day_total_usd` ist dann `None`."""
+    event: Literal["budget_stop"]
+    reason: Literal["budget_run", "budget_day", "budget_ledger"]
+    run_spent_usd: float
+    day_total_usd: float | None
+
+
 class TurnEndEvent(_Line):
     event: Literal["turn_end"]
     outcome: str
@@ -249,7 +260,7 @@ class TurnEndEvent(_Line):
     state: str
     calls: int
     tools: int
-    closing: str | None
+    closing: Literal["cost", "context", "auth", "bad_request", "budget_run", "budget_day", "budget_ledger"] | None
     session_cost_usd: float
 
 
@@ -344,7 +355,7 @@ class EndEvent(_Line):
 TraceEvent = Annotated[
     Union[
         HeaderEvent, ModelCallEvent, ModelErrorEvent, ToolEvent, TextCheckEvent, UnusableResponseEvent, LoopErrorEvent,
-        TurnEndEvent, GateEvent, CommentaryEvent, TraceErrorEvent, EndEvent,
+        BudgetStopEvent, TurnEndEvent, GateEvent, CommentaryEvent, TraceErrorEvent, EndEvent,
     ],
     Field(discriminator="event"),
 ]
@@ -511,6 +522,7 @@ class TraceWriter:
         self._file = open(self.path, "x", encoding="utf-8")  # noqa: SIM115 — lebt bis `close`; nie überschreiben
         try:
             config = loop.config
+            budget = loop.budget
             self._emit({
                 "event": "header", "session_id": session_id or f"s-{secrets.token_hex(6)}",
                 "run_mode": "eval" if loop.ctx.eval_session is not None else "interactive",
@@ -523,6 +535,8 @@ class TraceWriter:
                     "call_seconds": config.call_seconds, "stall_seconds": config.stall_seconds,
                     "cost_warning_usd": config.cost_warning_usd, "cost_limit_usd": config.cost_limit_usd,
                     "context_limit_tokens": config.context_limit_tokens,
+                    "budget_run_usd": budget.run_limit_usd if budget is not None else None,
+                    "budget_day_usd": budget.day_limit_usd if budget is not None else None,
                     "price": {"input": config.price.input, "output": config.price.output,
                               "cache_read": config.price.cache_read, "cache_write": config.price.cache_write},
                 },
