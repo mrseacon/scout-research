@@ -71,6 +71,7 @@ Im Zweifel zwischen zwei Stufen gilt die strengere.
    Subagents vor der Weitergabe prüfen (Diff lesen, Tests selbst laufen lassen).
 6. **Register:** Ändert eine Teilaufgabe Schutzmaßnahmen, ändert sie das Register im selben Commit, danach läuft der
    `mutation-prober` (Plan, Abschnitt 13, Regel 4).
+7. **Triviale Konfiguration (O-23, Sean, 2026-11-05):** Konfigurationsänderungen von wenigen Zeilen ohne Programmlogik (etwa eine Einstellung in `pyproject.toml`) macht der Orchestrator selbst, ohne Implementierer und ohne `reviewer`; Kontrolle sind die vollständige Suite und das Push-Gate; nie für Code unter `src/`, `scripts/`, `.claude/` oder Tests.
 
 ## 4. Eskalation bei Fehlschlägen
 
