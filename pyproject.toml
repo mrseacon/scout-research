@@ -38,6 +38,7 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
 addopts = "-m 'not live'"
+asyncio_default_fixture_loop_scope = "function"  # O-21: künftiger Default von pytest-asyncio, explizit gesetzt
 markers = [
     "live: ruft EDGAR/Finnhub live auf; nicht Teil der Standardsuite (-m live). Live-Aufrufe an das LLM laufen nie über pytest (Netzwerk-Wächter, tests/network_guard.py), nur über CLI/Eval-Runner",
 ]
