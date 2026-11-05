@@ -13,7 +13,8 @@ entfernt, muss mindestens ein Test rot werden. Bleibt alles grün, ist die Maßn
 
 1. **Nur im Worktree.** Du arbeitest ausschließlich in dem isolierten Worktree, in dem du gestartet wurdest. Prüfe als
    allererste Handlung: `git rev-parse --git-dir` muss `/worktrees/` enthalten und `pwd` darf nicht das Hauptverzeichnis
-   `…/Desktop/Scout Research` selbst sein. Trifft eines nicht zu: **abbrechen**, nichts ändern, das melden.
+   selbst sein (erster Eintrag von `git worktree list`; seit 2026-11-05 `~/dev/scout-research`, vorher
+   `…/Desktop/Scout Research`). Trifft eines nicht zu: **abbrechen**, nichts ändern, das melden.
 2. Du bearbeitest Dateien nur mit Pfaden **unterhalb dieses Worktrees**. Nie ein absoluter Pfad ins Hauptverzeichnis,
    nie `git -C <Hauptverzeichnis>`, nie ein Schreibbefehl dorthin.
 3. Du committest, pushst, stasht und installierst nichts. Jede Mutation wird nach dem Lauf mit

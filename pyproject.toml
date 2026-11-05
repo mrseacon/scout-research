@@ -39,5 +39,5 @@ testpaths = ["tests"]
 pythonpath = ["src", "."]
 addopts = "-m 'not live'"
 markers = [
-    "live: ruft externe Dienste (LLM, EDGAR, Finnhub) live auf; nicht Teil der Standardsuite (-m live)",
+    "live: ruft EDGAR/Finnhub live auf; nicht Teil der Standardsuite (-m live). Live-Aufrufe an das LLM laufen nie über pytest (Netzwerk-Wächter, tests/network_guard.py), nur über CLI/Eval-Runner",
 ]
