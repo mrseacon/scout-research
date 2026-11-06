@@ -24,6 +24,9 @@ ui = [
     "streamlit>=1.35",
 ]
 
+[project.scripts]
+scout-research = "scout_research.cli:main"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

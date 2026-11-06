@@ -244,14 +244,43 @@ class AgentLoop:
             self._on_status(text)
 
     def _run(self, user_turn: UserTurn) -> TurnResult:
-        self.state = LoopState.RUNNING
-        self._interrupted = False
+        """Ein Zug. Nach dem Verlassen, egal womit, ist `state` nie `RUNNING` (TA-14): Ein zweites Strg+C während der
+        Behandlung des ersten (Abbruchzweig, `_finish`, Anhängen von `turn_end`) steigt zum Host auf, der Loop bleibt
+        benutzbar. Verlauf und `pending` sind zu jedem Zeitpunkt gültig (`_commit`, H1), das Ereignis `turn_end` trägt
+        dann den Grund `interrupted_twice` (bzw. `aborted` bei einer anderen Ausnahme)."""
+        mark = len(self.events)  # vor dem Zustandswechsel berechnet: nach `RUNNING` läuft nur noch, was abgesichert ist (N1)
         turn = _Turn(started=self._clock())
+        try:
+            self.state = LoopState.RUNNING
+            self._interrupted = False
+            return self._run_guarded(turn, user_turn)
+        except BaseException as exc:
+            self.state = self._rest_state()  # zuerst: ein weiteres Strg+C darf den Zustand nicht mehr verändern
+            if not any(e.get("event") == "turn_end" for e in self.events[mark:]):
+                reason = "interrupted_twice" if isinstance(exc, KeyboardInterrupt) else "aborted"
+                try:
+                    self.events.append(self._turn_end_event("failed", reason, turn.calls, turn.tools))
+                except BaseException:  # noqa: BLE001, S110 — der Abbruch selbst steigt auf
+                    pass
+            raise
+        finally:
+            if self.state is LoopState.RUNNING:  # Absicherung: kein Pfad lässt den Loop im Zug stehen
+                self.state = self._rest_state()
+
+    def _run_guarded(self, turn: _Turn, user_turn: UserTurn) -> TurnResult:
         cost_before = self.session_cost
         result: TurnResult
         try:
             result = self._drive(turn, user_turn)
-        except (PlacementError, AssertionError):
+        except PlacementError as exc:
+            if self._closing != "placement":  # Fehler des Verlaufs vom Client o. ä.: Programmfehler, steigt zum Host auf
+                self.state = self._rest_state()
+                raise
+            # Die Invariante nach `_commit` ist verletzt (N3): Die Sitzung schließt, der Host sieht den festen Text
+            self.events.append({"event": "loop_error", "error_class": type(exc).__name__,
+                                "traceback": self.ctx.redact("".join(traceback.format_exception(exc)))})
+            result = self._finish(turn, "closed", "placement", [texts.user_text(self.config.language, "internal")])
+        except AssertionError:
             self.state = self._rest_state()
             raise
         except KeyboardInterrupt:
@@ -264,10 +293,12 @@ class AgentLoop:
         result.state = self.state
         result.cost_usd = self.session_cost - cost_before
         result.calls = turn.calls
-        self.events.append({"event": "turn_end", "outcome": result.outcome, "reason": result.reason,
-                            "state": self.state.value, "calls": turn.calls, "tools": turn.tools,
-                            "closing": self._closing, "session_cost_usd": self.session_cost})
+        self.events.append(self._turn_end_event(result.outcome, result.reason, turn.calls, turn.tools))
         return result
+
+    def _turn_end_event(self, outcome: str, reason: str | None, calls: int, tools: int) -> dict[str, Any]:
+        return {"event": "turn_end", "outcome": outcome, "reason": reason, "state": self.state.value, "calls": calls,
+                "tools": tools, "closing": self._closing, "session_cost_usd": self.session_cost}
 
     def _finish(self, turn: _Turn, outcome: str, reason: str | None, notices: list[str],
                 shown: list[Shown] | None = None, commentary_id: str | None = None) -> TurnResult:
@@ -531,6 +562,11 @@ class AgentLoop:
         prefilled = Pending(tuple(_result_block(b, ended) for b in uses), ())
         self.history.extend(entries)
         self.pending = prefilled
+        try:
+            check_prefilled(self.history, self.pending)  # ausdrücklich, nicht nur implizit (TA-14, Teil B)
+        except PlacementError:
+            self._closing = "placement"  # der Verlauf ist nicht mehr verlässlich: die Sitzung schließt (N3)
+            raise
 
     def _unusable(self, turn: _Turn, response: ModelResponse, committed: bool = False) -> TurnResult:
         """`refusal`, `max_tokens` (V5), unerwartete Gründe, leere Antwort (H2): verworfen, nichts ausgeführt
@@ -670,6 +706,18 @@ class AgentLoop:
         if shown:
             return self._finish(turn, "done", None, [], [Shown("intro", shown)])
         return self._finish(turn, "done", "intro_fixed", [], [fixed])
+
+
+def check_prefilled(history: list[dict[str, Any]], pending: Pending) -> None:
+    """Invariante nach `_commit` (H1, SG-13): Jede `tool_use`-ID der letzten Assistant-Nachricht hat genau ein Ergebnis in
+    `pending`, in derselben Reihenfolge, und `pending` enthält sonst nichts. Wirft `PlacementError` (Programmfehler)."""
+    last = history[-1] if history else None
+    if last is None or last.get("role") != "assistant":
+        raise PlacementError("nach _commit steht kein assistant-Turn am Ende des Verlaufs")
+    ids = [b.get("id") for b in last["content"] if b.get("type") == "tool_use"]
+    got = [b.get("tool_use_id") for b in pending.blocks if b.get("type") == "tool_result"]
+    if len(set(ids)) != len(ids) or got != ids or len(pending.blocks) != len(ids):
+        raise PlacementError("nach _commit hat nicht jedes tool_use genau ein vorbelegtes Ergebnis")
 
 
 def _findings(problems: Sequence[Any]) -> list[dict[str, Any]]:

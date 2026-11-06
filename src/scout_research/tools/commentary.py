@@ -461,20 +461,48 @@ def _cell(row: dict[str, Any], name: str, lang: str) -> str:
     return text + ("*" if name in ("ebitda", "ev_ebitda") and row.get("ebitda_approximated", True) else "")
 
 
-def render_withheld(table: dict[str, Any], lang: str) -> str:
-    """Hinweis „Kommentar zurückgehalten“, deterministisch gerenderte Tabelle und Warnungsliste (Plan, Abschnitt 3)."""
+def render_table(table: dict[str, Any], lang: str) -> str:
+    """Die Comps-Tabelle als deterministischer Text (Kopfzeile, Ziel, Peers, Statistikzeilen), nur aus den gespeicherten
+    Werten des Codes. Gemeinsam genutzt von `render_withheld` und der CLI."""
     t = _TEXTS[lang]
     columns = ["revenue", "ebit", "ebitda", "enterprise_value", "ev_revenue", "ev_ebitda", "ev_ebit", "pe"]
     head = ["Ticker", "Periodenende" if lang == "de" else "Period end", *columns]
-    lines = [t["withheld"], "", basis_line(table, lang), "", "| " + " | ".join(head) + " |",
-             "|" + "---|" * len(head)]
+    lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for label, row in [(f"{table['target']['ticker']} ({t['target']})", table["target"]), *[(p["ticker"], p) for p in table["peers"]]]:
         lines.append("| " + " | ".join([label, fmt_date(row["period_end"], lang), *[_cell(row, c, lang) for c in columns]]) + " |")
     for agg in ("min", "median", "mean", "max"):
         cells = {s["multiple"]: (fmt_value("multiple", s[agg], lang) + f" (n = {s['n']})") if s.get(agg) is not None else "–"
                  for s in table["statistics"]}
         lines.append("| " + " | ".join([t["stat"][agg], "", "", "", "", "", *[cells.get(m, "–") for m in ("ev_revenue", "ev_ebitda", "ev_ebit", "pe")]]) + " |")
-    lines += ["", t["warnings"], *([_warning_line(w, lang) for w in table["warnings"]] or [t["no_warnings"]])]
+    return "\n".join(lines)
+
+
+def table_legend(table: dict[str, Any], lang: str) -> list[str]:
+    """Fußnotenlegende zur Tabelle: nur die Marken, die in dieser Tabelle vorkommen (`*` angenähertes EBITDA, `†` Untergrenzen
+    in der Statistik, `‡` ausgeschlossene Werte, `§` Kurse von verschiedenen Tagen)."""
+    rows = [table["target"], *table["peers"]]
+    marks = []
+    if any(r.get("ebitda_approximated", True) and (r.get("ebitda") is not None or r.get("ev_ebitda") is not None) for r in rows):
+        marks.append("*")
+    if any(s["lower_bound"] for s in table["statistics"]):
+        marks.append("†")
+    if any(s["excluded"] for s in table["statistics"]):
+        marks.append("‡")
+    if not table["basis"].get("price_as_of"):
+        marks.append("§")
+    return _footnotes(table, marks, [s["multiple"] for s in table["statistics"]], lang)
+
+
+def render_warnings(table: dict[str, Any], lang: str) -> list[str]:
+    """Titel und Zeilen der Warnungsliste (oder „Keine Warnungen.“)."""
+    return [_TEXTS[lang]["warnings"], *([_warning_line(w, lang) for w in table["warnings"]] or [_TEXTS[lang]["no_warnings"]])]
+
+
+def render_withheld(table: dict[str, Any], lang: str) -> str:
+    """Hinweis „Kommentar zurückgehalten“, deterministisch gerenderte Tabelle und Warnungsliste (Plan, Abschnitt 3)."""
+    t = _TEXTS[lang]
+    lines = [t["withheld"], "", basis_line(table, lang), "", render_table(table, lang)]
+    lines += ["", *render_warnings(table, lang)]
     return "\n".join(lines)
 
 

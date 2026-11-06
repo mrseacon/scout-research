@@ -109,7 +109,7 @@ class TraceParams(_Model):
 class HeaderEvent(_Line):
     event: Literal["header"]
     session_id: str
-    run_mode: Literal["interactive", "eval"]
+    run_mode: Literal["interactive", "eval", "demo"]
     git_commit: str | None
     model: str
     effort: str
@@ -254,14 +254,32 @@ class BudgetStopEvent(_Line):
     day_total_usd: float | None
 
 
+TurnReason = Literal[
+    # Zugende des Loops (`_finish`, `ended`): Abbruch, Grenzen, Ergebnis
+    "interrupted", "interrupted_twice", "aborted", "loop_error", "limit_calls", "turn_deadline", "limit_tools",
+    "loop_guard", "withheld", "commentary", "placement",
+    # Schließgründe (`_closing`) und Fehlerarten des Modelldienstes (`ModelErrorKind`)
+    "cost", "context", "budget_run", "budget_day", "budget_ledger", "auth", "not_found", "bad_request", "unprocessable",
+    "unavailable", "stalled", "deadline", "unexpected",
+    # verworfene Antworten (`_unusable`)
+    "refusal", "max_tokens", "empty_response", "unexpected_stop",
+    # Einleitung nach dem Vorschlag: `intro_<Grund>` des gescheiterten Aufrufs bzw. des Hosts
+    "intro_skipped", "intro_unusable", "intro_tool_use", "intro_fixed", "intro_unavailable", "intro_stalled",
+    "intro_deadline", "intro_unexpected", "intro_bad_request", "intro_unprocessable", "intro_auth", "intro_not_found",
+    "intro_interrupted", "intro_budget_run", "intro_budget_day", "intro_budget_ledger",
+]
+"""Alle Gründe, die `turn_end` tragen darf. Ein neuer Grund im Loop muss hier stehen (Test gleicht den Quelltext ab)."""
+
+
 class TurnEndEvent(_Line):
     event: Literal["turn_end"]
     outcome: str
-    reason: str | None
+    reason: TurnReason | None
     state: str
     calls: int
     tools: int
-    closing: Literal["cost", "context", "auth", "not_found", "bad_request", "budget_run", "budget_day", "budget_ledger"] | None
+    closing: Literal["cost", "context", "auth", "not_found", "bad_request", "budget_run", "budget_day", "budget_ledger",
+                     "placement"] | None
     session_cost_usd: float
 
 
@@ -526,7 +544,8 @@ class TraceWriter:
             budget = loop.budget
             self._emit({
                 "event": "header", "session_id": session_id or f"s-{secrets.token_hex(6)}",
-                "run_mode": "eval" if loop.ctx.eval_session is not None else "interactive",
+                "run_mode": ("eval" if loop.ctx.eval_session is not None else
+                             "demo" if loop.ctx.demo_session is not None else "interactive"),
                 "git_commit": git_commit, "model": config.model, "effort": config.effort,
                 "output_language": config.language, "prompt_version": prompt.version,
                 "prompt_sha256": _sha256(loop.system_prompt), "tools_sha256": tools_hash(loop.tools),

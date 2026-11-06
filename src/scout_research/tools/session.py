@@ -208,6 +208,7 @@ class ToolContext:
         token_factory: Callable[[], str] = lambda: secrets.token_hex(6),
         eval_session: object | None = None,
         request_log: RequestLog | None = None,
+        demo_session: object | None = None,
     ) -> None:
         self.edgar = edgar
         self.market = market
@@ -217,6 +218,9 @@ class ToolContext:
         self.redact = Redactor(secrets_to_redact)
         self._token_factory = token_factory
         self.eval_session = eval_session
+        self.demo_session = demo_session
+        """Kennzeichnet die Demo-Welt (`scout-research chat --scripted`); der Trace leitet `run_mode: "demo"` daraus ab (SG-19:
+        abgeleitet, nie übergeben). Schaltet keine Fähigkeit frei."""
         """Belegt nur von `eval/harness.py` (`EvalSessionConfig`); ohne sie lehnen `confirm_peer_set` und
         `reject_proposal` den Kanal `eval` ab."""
         self.request_log = request_log if request_log is not None else RequestLog()

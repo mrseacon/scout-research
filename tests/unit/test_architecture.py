@@ -115,7 +115,7 @@ def test_t8_agent_imports_nothing_from_data() -> None:
 def test_a_e1_agent_tools_and_cli_import_nothing_from_eval() -> None:
     offenders = []
     for path, tree in _sources().items():
-        if path.parts[0] in {"agent", "tools", "cli"}:
+        if path.parts[0] in {"agent", "tools", "cli", "cli.py", "demo"}:
             offenders += [f"{path}: {m}" for m in imports_of(tree) if m == "eval" or m.startswith(("eval.", "scout_research.eval"))]
     assert offenders == []
 
