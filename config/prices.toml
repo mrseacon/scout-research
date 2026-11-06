@@ -1,0 +1,14 @@
+# Vom Nutzer zu pflegen. Werte nur aus der offiziellen Preisseite eintragen, mit Quelle und Datum.
+# Das Skript rechnet nicht ohne vollständige Werte (scripts/estimate_cost.py).
+#
+# Einheit: US-Dollar je Million Token. Zum Befüllen je Zeile das "#" entfernen und nur die Zahl eintragen.
+# `source` ist die URL der Preisseite, `checked` das Datum der Prüfung (JJJJ-MM-TT), beide in Anführungszeichen.
+# Diese Werte sind NICHT die Tabelle, mit der der Loop den Budgetdeckel rechnet (src/scout_research/agent/budgets.py).
+
+[models."claude-sonnet-5-5"]
+source = ""
+checked = ""
+# input =
+# output =
+# cache_read =
+# cache_write =
