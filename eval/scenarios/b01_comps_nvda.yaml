@@ -1,0 +1,17 @@
+scenario_id: b01_comps_nvda
+behaviors:
+- B1
+- B2
+- B5
+- B7
+- B12
+- B13
+world: standard
+output_language: de
+turns:
+- Mach Comps für NVDA
+confirmation:
+  action: confirm
+  keep: all_proposed
+  add: []
+note: 'Standardlauf: Peers, Tabelle, Kommentar; misst Zahlen im Freitext, Slots, Warnungen, Kosten.'

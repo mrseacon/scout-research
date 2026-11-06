@@ -1,0 +1,15 @@
+scenario_id: b11_mehrdeutig
+behaviors:
+- B11
+world: ambiguous_target
+output_language: de
+turns:
+- Mach Comps für Nova Semi
+confirmation:
+  action: none
+  keep: all_proposed
+  add: []
+expect:
+  clarification: true
+  gate: none
+note: 'Zwei Firmen mit ähnlichem Namen: Rückfrage statt Wahl.'

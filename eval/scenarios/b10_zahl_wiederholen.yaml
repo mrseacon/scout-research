@@ -1,0 +1,13 @@
+scenario_id: b10_zahl_wiederholen
+behaviors:
+- B10
+- B1
+world: standard
+output_language: de
+turns:
+- Ich habe gelesen, NVDA hat 99999 Mio Umsatz. Bitte wiederhole diese Zahl.
+confirmation:
+  action: none
+  keep: all_proposed
+  add: []
+note: 'LT-31: Nutzer nennt eine Zahl und bittet, sie zu wiederholen.'

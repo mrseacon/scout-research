@@ -78,7 +78,8 @@ class CaseResult:
     deviations: list[dict[str, Any]] = field(default_factory=list)
     """Abweichungen vom Fall: `{"kind": "not_proposed", "ticker": ...}`, `{"kind": "empty_keep"}` (nichts zu bestätigen,
     es wurde nicht bestätigt) und `{"kind": "confirmation_error", "code": ...}` (der Loop lehnte die Entscheidung ab,
-    keine Entscheidung getroffen)."""
+    keine Entscheidung getroffen) und `{"kind": "closed_skipped", "turns": k}` (die Sitzung war geschlossen, k Züge
+    des Falls wurden ausgelassen)."""
     results: list[TurnResult] = field(default_factory=list)
     table_ids: list[str] = field(default_factory=list)
     trace_path: Path | None = None
@@ -87,7 +88,7 @@ class CaseResult:
 # --- Falldatei ----------------------------------------------------------------------------------------------------
 
 
-def _string_list(value: Any, name: str, allow_empty: bool) -> tuple[str, ...]:
+def string_list(value: Any, name: str, allow_empty: bool) -> tuple[str, ...]:
     if not isinstance(value, list) or (not allow_empty and not value):
         raise ValueError(f"{name}: erwartet wird eine {'' if allow_empty else 'nicht leere '}Liste von Texten")
     if not all(isinstance(item, str) and item.strip() for item in value):
@@ -95,7 +96,7 @@ def _string_list(value: Any, name: str, allow_empty: bool) -> tuple[str, ...]:
     return tuple(item.strip() if name != "turns" else item for item in value)
 
 
-def _parse_confirmation(raw: Any) -> Confirmation:
+def parse_confirmation(raw: Any) -> Confirmation:
     if not isinstance(raw, dict):
         raise ValueError("confirmation: erwartet wird ein Objekt mit action, keep, add")
     unknown = sorted(str(k) for k in raw.keys() - _CONFIRMATION_KEYS)
@@ -108,8 +109,8 @@ def _parse_confirmation(raw: Any) -> Confirmation:
     if keep != "all_proposed":
         if isinstance(keep, str):
             raise ValueError("confirmation.keep: erwartet wird 'all_proposed' oder eine Liste von Tickern")
-        keep = _string_list(keep, "confirmation.keep", allow_empty=False)
-    add = _string_list(raw.get("add", []), "confirmation.add", allow_empty=True)
+        keep = string_list(keep, "confirmation.keep", allow_empty=False)
+    add = string_list(raw.get("add", []), "confirmation.add", allow_empty=True)
     if action != "confirm" and keep != "all_proposed":
         raise ValueError(f"confirmation.keep wirkt nur bei action: confirm, nicht bei {action!r}")
     if action != "confirm" and add:
@@ -132,8 +133,8 @@ def load_case(path: str | Path) -> EvalCase:
         raise ValueError("case_id: erwartet wird ein Text aus Buchstaben, Ziffern, Unterstrich und Bindestrich")
     if case_id != path.stem:
         raise ValueError(f"case_id {case_id!r} entspricht nicht dem Dateinamen {path.name!r}")
-    turns = _string_list(data.get("turns"), "turns", allow_empty=False)
-    confirmation = _parse_confirmation(data["confirmation"]) if "confirmation" in data else Confirmation()
+    turns = string_list(data.get("turns"), "turns", allow_empty=False)
+    confirmation = parse_confirmation(data["confirmation"]) if "confirmation" in data else Confirmation()
     return EvalCase(case_id, turns, confirmation, str(path))
 
 
@@ -159,25 +160,30 @@ def run_case(
     *,
     trace_dir: Path | None = None,
     prompt: SystemPrompt | None = None,
+    git_commit: str | None = None,
 ) -> CaseResult:
     """Spielt einen Fall durch. `make_loop` bekommt die `EvalSessionConfig` und baut `ToolContext(...,
     eval_session=config)` und den Loop. Mit `trace_dir` entsteht ein Trace (`prompt` ist dann Pflicht und muss der Text
-    sein, den der Loop sendet); `flush()` läuft nach jedem Host-Aufruf."""
+    sein, den der Loop sendet; `git_commit` kommt in den Trace-Kopf); `flush()` läuft nach jedem Host-Aufruf."""
     if trace_dir is not None and prompt is None:
         raise ValueError("prompt: mit trace_dir ist der Systemprompt Pflicht")
     config = EvalSessionConfig(case.case_id, case.path)
     loop = make_loop(config)
     outcome = CaseResult(case.case_id)
-    writer = TraceWriter(loop, prompt, base_dir=trace_dir) if trace_dir is not None and prompt is not None else None
+    writer = TraceWriter(loop, prompt, base_dir=trace_dir, git_commit=git_commit) if trace_dir is not None and prompt is not None else None
     with writer if writer is not None else nullcontext():
-        for text in case.turns:
+        for index, text in enumerate(case.turns):
             outcome.results.append(loop.run_turn(HumanInput(text)))
             _flush(writer)
-            if outcome.decisions or case.confirmation.action == "none":
-                continue
-            if outcome.results[-1].state is LoopState.AWAITING_PEER_CONFIRMATION:
+            if loop.state is not LoopState.CLOSED and not outcome.decisions and case.confirmation.action != "none" \
+                    and outcome.results[-1].state is LoopState.AWAITING_PEER_CONFIRMATION:
                 _decide_gate(case, loop, outcome)
                 _flush(writer)
+            if loop.state is LoopState.CLOSED:  # TA-16a: eine geschlossene Sitzung nimmt keine Züge mehr an
+                skipped = len(case.turns) - index - 1
+                if skipped:
+                    outcome.deviations.append({"kind": "closed_skipped", "turns": skipped})
+                break
         outcome.table_ids = [handle for handle in loop.ctx.tables if handle.startswith("ct_")]
     outcome.trace_path = writer.path if writer is not None else None
     return outcome

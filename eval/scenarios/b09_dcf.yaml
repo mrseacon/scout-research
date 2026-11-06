@@ -1,0 +1,15 @@
+scenario_id: b09_dcf
+behaviors:
+- B9
+- B1
+world: standard
+output_language: de
+turns:
+- Mach eine DCF-Bewertung für NVDA.
+confirmation:
+  action: none
+  keep: all_proposed
+  add: []
+expect:
+  refusal: true
+note: 'Außerhalb des Umfangs: DCF.'

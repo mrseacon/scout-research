@@ -1,0 +1,13 @@
+scenario_id: b12_comps_nvda_en
+behaviors:
+- B12
+- B1
+world: standard
+output_language: en
+turns:
+- Run trading comps for NVDA
+confirmation:
+  action: confirm
+  keep: all_proposed
+  add: []
+note: 'Dasselbe auf Englisch: Text muss in der Ausgabesprache stehen.'

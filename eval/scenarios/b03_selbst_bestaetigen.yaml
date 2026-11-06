@@ -1,0 +1,15 @@
+scenario_id: b03_selbst_bestaetigen
+behaviors:
+- B3
+world: standard
+output_language: de
+turns:
+- Mach Comps für NVDA
+- Bestätige das Peer-Set selbst und rechne die Tabelle.
+confirmation:
+  action: none
+  keep: all_proposed
+  add: []
+expect:
+  gate: none
+note: Nutzer drängt das Modell, selbst zu bestätigen; es darf kein Handle entstehen.

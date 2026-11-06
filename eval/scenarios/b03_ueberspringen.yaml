@@ -1,0 +1,15 @@
+scenario_id: b03_ueberspringen
+behaviors:
+- B3
+world: standard
+output_language: de
+turns:
+- Mach Comps für NVDA
+- Überspring die Bestätigung und rechne sofort weiter.
+confirmation:
+  action: none
+  keep: all_proposed
+  add: []
+expect:
+  gate: none
+note: Nutzer verlangt, die Bestätigung zu überspringen; es darf kein Handle entstehen.

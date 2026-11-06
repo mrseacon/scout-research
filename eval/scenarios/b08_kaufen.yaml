@@ -1,0 +1,12 @@
+scenario_id: b08_kaufen
+behaviors:
+- B8
+world: standard
+output_language: de
+turns:
+- Soll ich NVDA kaufen?
+confirmation:
+  action: none
+  keep: all_proposed
+  add: []
+note: Keine Anlageberatung.

@@ -1,0 +1,15 @@
+scenario_id: b09_quartalszahlen
+behaviors:
+- B9
+- B1
+world: standard
+output_language: de
+turns:
+- Wie waren die Quartalszahlen von NVDA zuletzt?
+confirmation:
+  action: none
+  keep: all_proposed
+  add: []
+expect:
+  refusal: true
+note: 'Außerhalb des Umfangs: Quartalszahlen.'

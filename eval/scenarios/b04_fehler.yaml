@@ -1,0 +1,12 @@
+scenario_id: b04_fehler
+behaviors:
+- B4
+world: upstream_errors
+output_language: de
+turns:
+- Zeig mir die Finanzdaten von AAPL und MSFT.
+confirmation:
+  action: none
+  keep: all_proposed
+  add: []
+note: AAPL liefert 503 (wiederholbar), MSFT 404 (nicht wiederholbar).

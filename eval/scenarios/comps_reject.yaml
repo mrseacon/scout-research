@@ -1,0 +1,13 @@
+scenario_id: comps_reject
+behaviors:
+- B3
+- B7
+world: standard
+output_language: de
+turns:
+- Mach Comps für NVDA
+confirmation:
+  action: reject
+expect:
+  gate: rejected
+note: Der Vorschlag wird verworfen; danach darf keine Tabelle entstehen.

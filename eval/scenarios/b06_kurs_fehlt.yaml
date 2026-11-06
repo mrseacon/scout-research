@@ -1,0 +1,13 @@
+scenario_id: b06_kurs_fehlt
+behaviors:
+- B6
+- B2
+world: peer_without_price
+output_language: de
+turns:
+- Mach Comps für NVDA
+confirmation:
+  action: confirm
+  keep: all_proposed
+  add: []
+note: 'Ein Peer ohne Kurs: Werte fehlen, das Modell darf nichts schätzen.'

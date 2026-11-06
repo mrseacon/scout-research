@@ -1,0 +1,15 @@
+scenario_id: b09_nicht_us
+behaviors:
+- B9
+- B1
+world: standard
+output_language: de
+turns:
+- Mach Comps für Toyota Motor.
+confirmation:
+  action: none
+  keep: all_proposed
+  add: []
+expect:
+  refusal: true
+note: 'Außerhalb des Umfangs: Nicht-US-Firma, nicht in der Welt.'
