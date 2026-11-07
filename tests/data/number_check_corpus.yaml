@@ -2912,3 +2912,177 @@ cases:
     category: plain
     reason: "„einzige“ ist kein Zahlwort."
     added_in: phase_b
+
+  - id: ST-B100
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt zwéi Peers mit abweichendem Geschäftsjahr."
+    expect: [NAKED_NUMBER]
+    findings: ["zwéi"]
+    category: number_word
+    reason: "Zahlwort mit Akzent (vorkomponiert U+00E9); Diakritika fallen vor dem Abgleich weg (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B101
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt zwe\u0301i Peers mit abweichendem Geschäftsjahr."
+    expect: [NAKED_NUMBER]
+    findings: ["zwe\u0301i"]
+    category: number_word
+    reason: "Zahlwort mit kombinierendem Akzent (e + U+0301) (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B102
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt dréi Peers mit abweichendem Geschäftsjahr."
+    expect: [NAKED_NUMBER]
+    findings: ["dréi"]
+    category: number_word
+    reason: "Zahlwort mit Akzent (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B103
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt beim P/E auf dem fünfté Platz."
+    expect: [NAKED_NUMBER]
+    findings: ["fünfté"]
+    category: ordinal
+    reason: "Ordinalstamm mit Umlaut und zusätzlichem Akzent (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B104
+    lang: de
+    profile: slot_text
+    session: base
+    text: "INTU ist der zwèite Peer nach Umsatz."
+    expect: [NAKED_NUMBER]
+    findings: ["zwèite"]
+    category: ordinal
+    reason: "Ordinal mit Gravis (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B105
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Der Markt umfasst eine Millión Kunden."
+    expect: [NAKED_NUMBER]
+    findings: ["Millión"]
+    category: magnitude_word
+    reason: "Größenordnungswort mit Akzent (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B106
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "The peer set was cut to tén names."
+    expect: [NAKED_NUMBER]
+    findings: ["tén"]
+    category: number_word
+    reason: "Englisches Zahlwort mit Akzent (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B107
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "The group has séven members."
+    expect: [NAKED_NUMBER]
+    findings: ["séven"]
+    category: number_word
+    reason: "Englisches Zahlwort mit Akzent (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B108
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt z w é i Peers mit abweichendem Geschäftsjahr."
+    expect: [NAKED_NUMBER]
+    findings: ["z w é i"]
+    category: number_word
+    reason: "Gesperrt geschriebenes Zahlwort mit Akzent (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: RA-30
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Hat Nestlé als Referenz im Blick."
+    expect: accepted
+    category: plain
+    reason: "Gegenprobe: „Nestlé“ verliert den Akzent, ergibt aber kein Zahlwort (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: RA-31
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Das Café nebenan ist ein gutes Beispiel."
+    expect: accepted
+    category: plain
+    reason: "Gegenprobe: „Café“ verliert den Akzent, ergibt aber kein Zahlwort (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B109
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt zwólf Peers im Vergleichsset."
+    expect: [NAKED_NUMBER]
+    findings: ["zwólf"]
+    category: number_word
+    reason: "Umlaut-Wort mit Akzent statt Umlaut: die umlautlose Form `zwolf` steht in den Listen (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B110
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt zwo\u0308\u0301lf Peers im Vergleichsset."
+    expect: [NAKED_NUMBER]
+    findings: ["zwo\u0308\u0301lf"]
+    category: number_word
+    reason: "Umlaut plus kombinierender Akzent (o, U+0308, U+0301) (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B111
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt ac\u20ddht Peers im Vergleichsset."
+    expect: [NAKED_NUMBER]
+    findings: ["ac\u20ddht"]
+    category: number_word
+    reason: "Zahlwort mit umschließendem Zeichen (U+20DD, Kategorie Me) (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B112
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt zw\u0903ei Peers im Vergleichsset."
+    expect: [NAKED_NUMBER]
+    findings: ["zw\u0903ei"]
+    category: number_word
+    reason: "Zahlwort mit einem Mc-Zeichen (U+0903) mitten im Wort (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b
+
+  - id: ST-B113
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt beim P/E auf dem fúnfte Platz."
+    expect: [NAKED_NUMBER]
+    findings: ["fúnfte"]
+    category: ordinal
+    reason: "Ordinal mit Akzent im Stamm statt Umlaut: `fúnft` wird zu `funft` (TA-17, Plan 11 Restrisiko `zwéi`)."
+    added_in: phase_b

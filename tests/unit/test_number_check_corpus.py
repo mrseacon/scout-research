@@ -83,7 +83,8 @@ _PIECES = ["ADBE", "liegt", "über", "dem", "Median", "[[", "]]", "[[co:ADBE:pe]
            "-", "%", "x", "Q", "FY", "zwei", "Dutzend", "doppelt", "so", "hoch", "ein", "Prozent", "zweit", "3M", "CIK",
            "0000796343", "„", "“", "`", "*", "_", "ct_0001", "&#49;", "ß", "é", "́"]
 _NUMBERS = ["17", "17,0x", "1 2 . 5", "٣٢", "１７", "²⁶", "½", "Ⅻ", "🔟", "2025-11-28", "FY2025", "Q3", "21,5 Mrd. USD", "zwei",
-            "zwölf", "doppelt so", "ein Prozent", "z w e i", "tausend", "Hälfte", "zweitgrößte", "dozen"]
+            "zwölf", "doppelt so", "ein Prozent", "z w e i", "tausend", "Hälfte", "zweitgrößte", "dozen",
+            "zwéi", "dréißig", "Fünfté", "zwéi", "z w é i", "Millión"]
 _SAFE = ["ADBE liegt", "der Median", "über", "Peers", "und", "wegen des 10-K", "[[co:ADBE:pe]]", "(siehe oben)", "\n- "]
 
 

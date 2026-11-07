@@ -250,24 +250,24 @@ def scan_digits(masked: str, invalid_slots: list[tuple[int, int]] = ()) -> list[
 
 # --- Zahlwörter, Größenordnungen, Ränge, Vergleiche ---------------------------------------------------------------
 
-_DE_NUM = ("anderthalb", "eineinhalb", "einhalb", "zwölf", "zwoelf", "zwanzig", "dreißig", "dreissig", "vierzig", "fünfzig", "funfzig", "sechzig",
+_DE_NUM = ("anderthalb", "eineinhalb", "einhalb", "zwölf", "zwolf", "zwoelf", "zwanzig", "dreißig", "dreissig", "vierzig", "fünfzig", "funfzig", "sechzig",
            "siebzig", "achtzig", "neunzig", "hundert", "tausend", "dutzend", "zwei", "zwo", "drei", "vier", "fünf",
            "funf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "null", "eins")
 _DE_GLUE = ("ein", "und", "komma")
 _DE_SUFFIXES = ("", "e", "en", "er", "es", "em", "s", "mal", "fach", "fache", "fachen", "facher", "faches", "stellig",
-                "stellige", "stelligen", "stelliger", "jährig", "jährige", "jährigen", "tägig", "tägige")
+                "stellige", "stelligen", "stelliger", "jährig", "jährige", "jährigen", "tägig", "tägige", "jahrig", "jahrige", "jahrigen", "tagig", "tagige")
 _EN_NUM = frozenset("""two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen
 seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred hundreds thousand thousands
 zero dozen dozens million millions billion billions trillion trillions""".split())
-_ENUM_ADVERBS = frozenset("""erstens zweitens drittens viertens fünftens sechstens siebtens achtens neuntens zehntens
+_ENUM_ADVERBS = frozenset("""erstens zweitens drittens viertens fünftens funftens sechstens siebtens achtens neuntens zehntens
 firstly secondly thirdly fourthly""".split())
-_ORDINAL_STEMS = ("zweit", "dritt", "viert", "fünft", "funft", "sechst", "siebt", "neunt", "zehnt", "elft", "zwölft",
+_ORDINAL_STEMS = ("zweit", "dritt", "viert", "fünft", "funft", "sechst", "siebt", "neunt", "zehnt", "elft", "zwölft", "zwolft",
                   "zwanzigst", "hundertst", "tausendst")
-_ORDINAL_EXCEPTIONS = re.compile(r"dritt(?:anbieter|land|länder|staat|staaten|mittel|partei|parteien|kunden|verkäufer)")
+_ORDINAL_EXCEPTIONS = re.compile(r"dritt(?:anbieter|land|länder|staat|staaten|mittel|partei|parteien|kunden|verkäufer|verkaufer)")
 _EN_ORDINALS = frozenset("""third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth twentieth hundredth
 thousandth""".split())
 _FRACTION = re.compile(
-    r"(?:ein|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)?(?:drittel|viertel|fünftel|funftel|sechstel|siebtel|"
+    r"(?:ein|zwei|drei|vier|fünf|funf|sechs|sieben|acht|neun|zehn)?(?:drittel|viertel|fünftel|funftel|sechstel|siebtel|"
     r"achtel|neuntel|zehntel|zwanzigstel|hundertstel|tausendstel)n?")
 _MAGNITUDE_PREFIXES = ("milliard", "million", "billion", "trillion", "billiard")
 
@@ -276,7 +276,7 @@ _PHRASES = [
     (re.compile(r"\bdoppelt\s+(?:so\b|viel\w*|hoch\w*|gro(?:ß|ss)\w*|teuer\w*|stark\w*)", re.I), "multiplicative"),
     (re.compile(r"\bdoppelte[nrsm]?\b", re.I), "multiplicative"),
     (re.compile(r"\bhalb(?:e[nrsm]?)?\s+so\b", re.I), "multiplicative"),
-    (re.compile(r"\bhalbier\w*|\bverdoppel\w*|\bverdreifach\w*|\bvervierfach\w*|\bverzehnfach\w*|\bhälfte\b", re.I),
+    (re.compile(r"\bhalbier\w*|\bverdoppel\w*|\bverdreifach\w*|\bvervierfach\w*|\bverzehnfach\w*|\bh(?:ä|a)lfte\b", re.I),
      "multiplicative"),
     (re.compile(r"\btwice\b|\bhalf\b|\bhalves\b|\bhalved\b|\bquadrupl\w*|\btripl(?:e|ed|es|ing)\b", re.I),
      "multiplicative"),
@@ -335,8 +335,26 @@ def _classify_token(token: str, following: str) -> str | None:
     return None
 
 
-def scan_words(masked: str) -> list[Finding]:
-    """Zahlwörter ab „zwei“, Größenordnungswörter, Ränge und Vergleiche in Worten (Klassen 11–14)."""
+@lru_cache(maxsize=4096)
+def _strip_diacritic(ch: str) -> str:
+    """Grundbuchstabe eines Buchstabens mit Diakritikum (NFKD, kombinierende Zeichen `Mn` weg), nur wenn genau ein
+    Zeichen übrig bleibt; sonst das Zeichen selbst (`ß`, `æ`, `ø`, `ł`, Ligaturen …)."""
+    if ch.isascii():
+        return ch
+    decomposed = unicodedata.normalize("NFKD", ch)
+    base = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+    if len(base) == 1 and base != ch and len(base) < len(decomposed) and base.isalpha():
+        return base
+    return ch
+
+
+def strip_diacritics(masked: str) -> str:
+    """Zeichengenaue Kopie von `masked` ohne Diakritika (`zwéi` → `zwei`); Positionen bleiben 1:1 (Plan 11 Restrisiko
+    `zwéi`, TA-17). `norm` selbst behält das `é`, weil Slots, Sitzungsbegriffe („Nestlé“) und Ausnahmen daran hängen."""
+    return "".join(_strip_diacritic(ch) for ch in masked)
+
+
+def _scan_words_in(masked: str) -> list[Finding]:
     found: list[Finding] = []
     phrase_spans: list[tuple[int, int]] = []
     for pattern, kind in _PHRASES:
@@ -354,6 +372,31 @@ def scan_words(masked: str) -> list[Finding]:
         kind = _classify_token(m.group(0), masked[m.end(): m.end() + 12])
         if kind is not None:
             found.append(Finding(m.start(), m.end(), kind))
+    return found
+
+
+def scan_words(masked: str) -> list[Finding]:
+    """Zahlwörter ab „zwei“, Größenordnungswörter, Ränge und Vergleiche in Worten (Klassen 11–14).
+
+    Der Abgleich läuft auf `masked` (damit `fünf`, `zwölf`, `dreißig` über ihre Umlaut-Formen gefunden werden) und auf
+    der Kopie ohne Diakritika (`zwéi`, `dréißig`); die Fundstellen beider Läufe werden vereinigt (TA-17)."""
+    found = _scan_words_in(masked)
+    if masked.isascii():  # ohne Nicht-ASCII-Zeichen gibt es nichts zu entfernen
+        return _merge_adjacent_numbers(masked, sorted(found, key=lambda f: (f.start, f.end)))
+    folded = strip_diacritics(masked)
+    if folded != masked:
+        found = [*found, *(f for f in _scan_words_in(folded) if f not in found)]
+    # Kombinierende Zeichen (Mn, Mc, Me), die sich nicht zu einem Buchstaben verbinden lassen (`c` + U+0300), zerreißen
+    # sonst das Wort; dritte Fassung ohne sie, Fundstellen über die Positionsliste zurück auf `masked` gelegt.
+    kept = [i for i, ch in enumerate(folded) if not unicodedata.category(ch).startswith("M")]
+    if len(kept) != len(folded):
+        for f in _scan_words_in("".join(folded[i] for i in kept)):
+            start, end = kept[f.start], kept[f.end - 1] + 1
+            while end < len(masked) and unicodedata.category(masked[end]).startswith("M"):
+                end += 1
+            mapped = Finding(start, end, f.kind)
+            if mapped not in found:
+                found.append(mapped)
     return _merge_adjacent_numbers(masked, sorted(found, key=lambda f: (f.start, f.end)))
 
 
