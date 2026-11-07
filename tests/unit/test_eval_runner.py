@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,13 +21,21 @@ TWO = ["--scenario", "b01_comps_nvda", "--scenario", "b03_ueberspringen"]
 EVAL_DIR = Path(__file__).resolve().parents[2] / "eval"
 
 
+@pytest.fixture(autouse=True)
+def _no_sdk_import():
+    """Kein Runner-Test darf `anthropic` importieren (vor und nach jedem Test verglichen)."""
+    before = "anthropic" in sys.modules
+    yield
+    assert before or "anthropic" not in sys.modules
+
+
 def _report(out: Path) -> tuple[str, dict]:
     return (out / "report.md").read_text(encoding="utf-8"), json.loads((out / "report.json").read_text(encoding="utf-8"))
 
 
 def test_dry_run_two_scenarios_three_runs(tmp_path: Path, capsys) -> None:
     out = tmp_path / "out"
-    assert main([*TWO, "--runs", "3", "--out", str(out)]) == 0
+    assert main([*TWO, "--runs", "3", "--out", str(out)], env={}) == 0
     text, data = _report(out)
     assert "TROCKENLAUF – kein Messergebnis" in text and data["dry_run"] is True
     assert "B1: 3 von 3 erfüllt" in text and "B3: 3 von 3 erfüllt" in text
@@ -37,25 +46,25 @@ def test_dry_run_two_scenarios_three_runs(tmp_path: Path, capsys) -> None:
 
 
 def test_fewer_than_three_runs_is_a_usage_error(tmp_path: Path, capsys) -> None:
-    assert main([*TWO, "--runs", "2", "--out", str(tmp_path / "o")]) == 2
+    assert main([*TWO, "--runs", "2", "--out", str(tmp_path / "o")], env={}) == 2
     assert not (tmp_path / "o").exists()
 
 
-@pytest.mark.parametrize("argv", [["--scenario", "gibt_es_nicht"], ["--prompt-variant", "turn_ended"], ["--bogus"]])
+@pytest.mark.parametrize("argv", [["--scenario", "gibt_es_nicht"], ["--prompt-variant", "gibt_es_nicht"], ["--bogus"]])
 def test_usage_errors_exit_2(tmp_path: Path, argv: list[str], capsys) -> None:
-    assert main([*argv, "--out", str(tmp_path / "o")]) == 2
+    assert main([*argv, "--out", str(tmp_path / "o")], env={}, isatty=lambda: False) == 2  # nie echte Umgebung oder stdin
 
 
 def test_live_is_refused_before_any_client_is_built(tmp_path: Path, capsys) -> None:
     calls: list[int] = []
-    assert main([*TWO, "--live", "--out", str(tmp_path / "o")], test_client_factory=lambda s, r: calls.append(1)) == 2
+    assert main([*TWO, "--live", "--out", str(tmp_path / "o")], test_client_factory=lambda s, r: calls.append(1), env={}) == 2
     assert LIVE_NOT_ALLOWED in capsys.readouterr().err and calls == [] and not (tmp_path / "o").exists()
 
 
 def test_auth_aborts_the_set_and_the_rest_is_not_run(tmp_path: Path, capsys) -> None:
     out = tmp_path / "out"
     code = main([*TWO, "--out", str(out)],
-                test_client_factory=lambda s, r: ScriptedModelClient([ModelCallError("auth", status_code=401)]))
+                test_client_factory=lambda s, r: ScriptedModelClient([ModelCallError("auth", status_code=401)]), env={})
     assert code == 4
     text, data = _report(out)
     assert data["aborted"] == "auth" and "Satz abgebrochen" in text
@@ -84,14 +93,14 @@ def test_a_hard_failure_gives_exit_3(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(runner, "evaluate_run", failing)
     out = tmp_path / "out"
-    assert main(["--scenario", "b03_ueberspringen", "--out", str(out)]) == 3
+    assert main(["--scenario", "b03_ueberspringen", "--out", str(out)], env={}) == 3
     text, data = _report(out)
     assert "erfunden für den Test" in text and len(data["hard_failures"]) == 3 and data["hard_failures"][0]["trace"]
 
 
 def test_a_crash_in_a_run_makes_it_invalid_not_passed(tmp_path: Path) -> None:
     out = tmp_path / "out"
-    assert main(["--scenario", "b03_ueberspringen", "--out", str(out)], test_client_factory=lambda s, r: ScriptedModelClient([])) == 5
+    assert main(["--scenario", "b03_ueberspringen", "--out", str(out)], test_client_factory=lambda s, r: ScriptedModelClient([]), env={}) == 5
     text, data = _report(out)
     summary = data["scenarios"]["b03_ueberspringen"]
     assert summary["n_valid"] == 0 and len(summary["invalid"]) == 3
@@ -156,7 +165,7 @@ def _script(*steps_factory):
 
 def _e2e(tmp_path: Path, factory) -> tuple[int, dict]:
     out = tmp_path / "out"
-    code = main(["--scenario", "b08_kaufen", "--out", str(out)], test_client_factory=factory)
+    code = main(["--scenario", "b08_kaufen", "--out", str(out)], test_client_factory=factory, env={})
     return code, _report(out)[1]
 
 
@@ -198,7 +207,7 @@ def test_e2e_a_general_pattern_hit_is_only_a_figure(tmp_path: Path, text: str) -
     from tests.unit.loop_harness import say
 
     out = tmp_path / "out"
-    assert main(["--scenario", "b10_api_key", "--out", str(out)], test_client_factory=_script(lambda: say(text))) == 0
+    assert main(["--scenario", "b10_api_key", "--out", str(out)], test_client_factory=_script(lambda: say(text)), env={}) == 0
     data = _report(out)[1]
     secret = data["scenarios"]["b10_api_key"]["behaviors"]["B10-Secret"]
     assert data["hard_failures"] == [] and secret["counts"]["erfüllt"] == 3 and sum(secret["measures"]["pattern_redactions"]) == 3
@@ -255,7 +264,7 @@ def test_every_abort_closing_stops_the_set_with_exit_4(tmp_path: Path, kind: str
         kwargs["test_client_factory"] = lambda s, r: ScriptedModelClient([ModelCallError(kind)])
     else:
         kwargs["budget_factory"] = _ledger_budget(tmp_path, kind)
-    assert main(["--scenario", "b08_kaufen", "--scenario", "b09_dcf", "--out", str(out)], **kwargs) == 4
+    assert main(["--scenario", "b08_kaufen", "--scenario", "b09_dcf", "--out", str(out)], **kwargs, env={}) == 4
     data = _report(out)[1]
     assert data["aborted"] == kind
     assert len(data["scenarios"]["b08_kaufen"]["not_run"]) == 2 and len(data["scenarios"]["b09_dcf"]["not_run"]) == 3
@@ -271,7 +280,7 @@ def test_the_closing_is_read_from_the_trace_of_a_run_with_an_exception(tmp_path:
     monkeypatch.setattr(runner, "run_case", crashing)
     out = tmp_path / "out"
     code = main(["--scenario", "b08_kaufen", "--out", str(out)],
-                test_client_factory=lambda s, r: ScriptedModelClient([ModelCallError("auth")]))
+                test_client_factory=lambda s, r: ScriptedModelClient([ModelCallError("auth")]), env={})
     assert code == 4 and _report(out)[1]["aborted"] == "auth"
 
 
@@ -291,7 +300,7 @@ def test_the_trace_header_carries_the_git_commit(tmp_path: Path) -> None:
 
 def test_n_a_runs_do_not_count_in_n(tmp_path: Path) -> None:
     out = tmp_path / "out"
-    assert main(["--scenario", "b01_comps_nvda", "--out", str(out)]) == 0
+    assert main(["--scenario", "b01_comps_nvda", "--out", str(out)], env={}) == 0
     text, data = _report(out)
     b2 = data["scenarios"]["b01_comps_nvda"]["behaviors"]["B2"]
     assert b2["n"] == 0 and b2["counts"]["n/a"] == 3

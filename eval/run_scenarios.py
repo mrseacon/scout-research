@@ -3,11 +3,20 @@
 Jeder Lauf hat seine eigene Welt, seinen eigenen Loop und seinen eigenen Trace (über `run_case` aus `eval/harness.py`, Modus
 eval). Ausgewertet wird nur der Trace (`eval/metrics.py`). Der Standardmodus ist der Trockenlauf: ein skriptiertes Modell
 antwortet zahlenfrei mit `end_turn`; er prüft die Pipeline (Welt, Loop, Trace, Auswertung, Bericht) ohne Kosten und liefert
-kein Messergebnis. Den Live-Modus gibt es noch nicht (Stufe C): `--live` endet mit festem Text, ohne einen Client zu bauen.
+kein Messergebnis.
+
+`--live` (TA-16b) läuft nur, wenn alle drei Bedingungen gelten, in dieser Reihenfolge und bevor ein Client gebaut oder `anthropic`
+importiert wird: `SCOUT_EVAL_LIVE=1`, stdin ist ein Terminal, und der Nutzer gibt nach der Vorschau (Läufe, Modell, Deckel,
+bereits gebuchte Tageskosten) exakt `LIVE <Gesamtläufe>` ein. Sonst fester Text `LIVE_NOT_ALLOWED`, Exit 2, keine Ausgabe. Die
+Settings werden erst nach den ersten beiden Bedingungen gelesen (die Vorschau braucht Deckel und Kostenbuch); den Schlüssel
+bekommt nur die Standard-Fabrik, erst nach der Eingabe. Im Live-Modus gilt Schutz 12.10: Logging mit Schwärzung vor dem ersten
+Lauf, Scan des ganzen Ausgabeordners nach dem Satz (`scout_research.live_guard`); auch der Trockenlauf scannt, mit den Secrets
+der Testwelt.
 
 Exit-Codes: 0 fertig (auch bei weichen Verfehlungen), 2 Bedienfehler, 3 harter Ausfall in irgendeinem Lauf, 4 Satz abgebrochen
 (`auth`, `not_found`, `budget_day`, `budget_ledger`), 5 mindestens ein ungültiger Lauf (Trace schema-ungültig, fehlend oder
-Ausnahme im Lauf: die harten Regeln waren dort nicht prüfbar). Rangfolge bei mehreren: 3 vor 4 vor 5 vor 0.
+Ausnahme im Lauf: die harten Regeln waren dort nicht prüfbar), 6 Secret in der Ausgabe gefunden. Rangfolge bei mehreren:
+6 vor 3 vor 4 vor 5 vor 0.
 
 Modus und Fabriken laufen nicht auseinander: `dry` baut immer den Trockenlauf-Client und ein eigenes Kostenbuch im
 Ausgabeordner (ein Test-Hook `test_client_factory` ist im Bericht gekennzeichnet); jeder andere Modus verlangt ausdrücklich
@@ -18,9 +27,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,24 +39,37 @@ from typing import Any
 from eval.harness import EvalCase, EvalSessionConfig, run_case
 from eval.metrics import ERFUELLT, MANUELL, NA, STATUSES, VERFEHLT, RunVerdict, closing_of, evaluate_run
 from eval.scenarios import Scenario, load_all
+from eval.variants import PROMPT_VARIANTS, load_variant_prompt, variant_overrides
 from eval.worlds import KNOWN_SECRETS, WORLDS
 from scout_research.agent.budgets import LoopConfig, Usage
 from scout_research.agent.loop import AgentLoop
-from scout_research.agent.model_client import ModelClient, ModelResponse, ScriptedModelClient
-from scout_research.agent.prompt_loader import load_system_prompt
+from scout_research.agent.model_client import AnthropicAdapter, ModelClient, ModelResponse, ScriptedModelClient, make_sdk_client
 from scout_research.agent.spend import SpendBudget
 from scout_research.agent.trace import current_git_commit
 from scout_research.cli import LIVE_NOT_ALLOWED, make_budget
+from scout_research.config import get_settings
+from scout_research.live_guard import scan_findings, secrets_of, setup_logging, teardown_logging
+from scout_research.tools.sanitize import Redactor
 
 MIN_RUNS = 3
 DEFAULT_RUNS = 3
-EXIT_OK, EXIT_USAGE, EXIT_HARD, EXIT_ABORTED, EXIT_INVALID = 0, 2, 3, 4, 5
+EXIT_OK, EXIT_USAGE, EXIT_HARD, EXIT_ABORTED, EXIT_INVALID, EXIT_SECRET = 0, 2, 3, 4, 5, 6
 ABORT_CLOSINGS = frozenset(("auth", "not_found", "budget_day", "budget_ledger"))
 DRY_TEXT = "Trockenlauf: keine Modellantwort."
 DRY_BANNER = "TROCKENLAUF – kein Messergebnis"
 MODES = ("dry", "live")
-PROMPT_VARIANTS = ("active",)
-"""Bis TA-16b nur der aktive Prompt."""
+LIVE_ENV = "SCOUT_EVAL_LIVE"
+LIVE_BANNER = "LIVE – echtes Modell, Kosten angefallen"
+NO_KEY_TEXT = "Live-Modus: ANTHROPIC_API_KEY fehlt in den Settings."
+NO_SETTINGS_TEXT = "Live-Modus: Die Settings sind nicht lesbar (siehe .env)."
+LEDGER_UNREADABLE_TEXT = "Live-Modus: Das Kostenbuch ist nicht lesbar; ohne Tagessumme kein Live-Lauf."
+SECRET_FOUND_TEXT = "Secret in der Ausgabe gefunden (Wert nicht angezeigt). Betroffene Dateien: {files}. Ausgabe nicht weitergeben."
+UNCHECKABLE_TEXT = "Nicht prüfbar (Datei nicht lesbar): {files}."
+LINK_TEXT = "Nicht geprüft (Link): {files}."
+OUT_NOT_EMPTY_TEXT = "Live-Modus: --out muss ein neuer oder leerer Ordner sein (kein Link)."
+NO_PRICE_TEXT = "Für das Modell ist kein Preis hinterlegt."
+SCAN_FAILED_TEXT = "Scan fehlgeschlagen; die Ausgabe gilt als nicht geprüft."
+ABORTED_ALSO_TEXT = "Lauf zusätzlich abgebrochen: {name}"
 
 ClientFactory = Callable[[Scenario, int], ModelClient]
 BudgetFactory = Callable[[], SpendBudget]
@@ -112,9 +136,10 @@ def _shown_dump(result: Any, ctx: Any) -> tuple[list[dict[str, str]], int, int]:
 
 
 def _run_one(scenario: Scenario, run: int, out_dir: Path, client_factory: ClientFactory,
-             budget_factory: BudgetFactory, git_commit: str | None = None) -> RunRecord:
+             budget_factory: BudgetFactory, git_commit: str | None = None, prompt_variant: str = "active",
+             loop_config: LoopConfig | None = None) -> RunRecord:
     record = RunRecord(scenario.scenario_id, run, "ungültig")
-    prompt = load_system_prompt(scenario.output_language)
+    prompt = load_variant_prompt(prompt_variant, scenario.output_language)
     case = EvalCase(scenario.scenario_id, scenario.turns, scenario.confirmation, scenario.path)
     holder: dict[str, Any] = {}
 
@@ -122,7 +147,7 @@ def _run_one(scenario: Scenario, run: int, out_dir: Path, client_factory: Client
         world = WORLDS[scenario.world]()
         ctx = world.context(eval_session=config, output_language=scenario.output_language)
         budget = budget_factory()
-        loop = AgentLoop(ctx, client_factory(scenario, run), prompt.text, LoopConfig(language=scenario.output_language),
+        loop = AgentLoop(ctx, client_factory(scenario, run), prompt.text, replace(loop_config or LoopConfig(), language=scenario.output_language),
                          budget=budget)
         holder["ctx"] = ctx
         return loop
@@ -164,16 +189,21 @@ def _run_one(scenario: Scenario, run: int, out_dir: Path, client_factory: Client
 
 def run_set(scenarios: list[Scenario], runs: int, out_dir: Path, *, mode: str = "dry", prompt_variant: str = "active",
             client_factory: ClientFactory | None = None, budget_factory: BudgetFactory | None = None,
-            test_client_factory: ClientFactory | None = None) -> SetResult:
+            test_client_factory: ClientFactory | None = None, loop_config: LoopConfig | None = None,
+            budget_hook: bool = False) -> SetResult:
     """Führt alle Läufe nacheinander aus; bricht den Satz ab, wenn ein Lauf mit `auth`, `not_found`, `budget_day` oder
     `budget_ledger` endet (die übrigen Läufe stehen dann als `nicht gelaufen` im Ergebnis).
+
+    `loop_config` (Live: `LoopConfig.from_settings`) gilt für Loop, Bericht und Trace-Kopf gemeinsam; die Sprache setzt das Szenario.
+    `budget_hook` kennzeichnet im Modus live eine eingespielte Budget-Fabrik.
 
     `dry`: Trockenlauf-Client und eigenes Kostenbuch im Ausgabeordner; `client_factory` ist dort verboten, nur der gekennzeichnete
     Test-Hook `test_client_factory` ersetzt den Client. Jeder andere Modus verlangt `client_factory` und `budget_factory`."""
     out_dir = Path(out_dir)
     if mode not in MODES:
         raise ValueError(f"mode muss einer von {MODES} sein, nicht {mode!r}")
-    budget_hook = mode == "dry" and budget_factory is not None
+    budget_hook = budget_hook if mode != "dry" else budget_factory is not None
+    loop_config = loop_config or LoopConfig()
     if mode == "dry":
         if client_factory is not None:
             raise ValueError("mode dry: der Client ist der Trockenlauf-Client (nur test_client_factory ersetzt ihn)")
@@ -186,20 +216,22 @@ def run_set(scenarios: list[Scenario], runs: int, out_dir: Path, *, mode: str = 
             raise ValueError("test_client_factory gilt nur im Modus dry")
         if client_factory is None or budget_factory is None:
             raise ValueError(f"mode {mode}: client_factory und budget_factory (SpendBudget.from_settings) sind Pflicht")
-    prompt = load_system_prompt("de")
-    result = SetResult(scenarios, runs, mode, prompt_variant, prompt.version, LoopConfig().model,
+    prompt = load_variant_prompt(prompt_variant, "de")
+    result = SetResult(scenarios, runs, mode, prompt_variant, prompt.version, loop_config.model,
                        current_git_commit(Path(__file__).resolve().parent), datetime.now(timezone.utc).isoformat(),
                        test_hook=mode == "dry" and test_client_factory is not None, budget_hook=budget_hook)
-    for scenario in scenarios:
-        for run in range(1, runs + 1):
-            if result.aborted is not None:
-                result.records.append(RunRecord(scenario.scenario_id, run, "nicht gelaufen",
-                                                f"Satz abgebrochen ({result.aborted})"))
-                continue
-            record = _run_one(scenario, run, out_dir, client_factory, budget_factory, result.git_commit)
-            result.records.append(record)
-            if record.closing in ABORT_CLOSINGS:
-                result.aborted = record.closing
+    with variant_overrides(prompt_variant):  # Ersatz-Hints der Variante nur während ihrer Läufe
+        for scenario in scenarios:
+            for run in range(1, runs + 1):
+                if result.aborted is not None:
+                    result.records.append(RunRecord(scenario.scenario_id, run, "nicht gelaufen",
+                                                    f"Satz abgebrochen ({result.aborted})"))
+                    continue
+                record = _run_one(scenario, run, out_dir, client_factory, budget_factory, result.git_commit, prompt_variant,
+                                  loop_config)
+                result.records.append(record)
+                if record.closing in ABORT_CLOSINGS:
+                    result.aborted = record.closing
     return result
 
 
@@ -239,6 +271,7 @@ def build_report(result: SetResult) -> dict[str, Any]:
                  for s in result.scenarios}
     return {
         "dry_run": result.mode == "dry", "banner": DRY_BANNER if result.mode == "dry" else None,
+        "live": result.mode == "live",
         "not_checkable_runs": len(result.invalid), "test_hook": result.test_hook, "budget_hook": result.budget_hook,
         "header": {"prompt_version": result.prompt_version, "prompt_variant": result.prompt_variant, "model": result.model,
                    "git_commit": result.git_commit, "mode": result.mode, "started": result.started,
@@ -259,6 +292,8 @@ def render_markdown(report: dict[str, Any], scenarios: list[Scenario]) -> str:
     lines: list[str] = []
     if report["banner"]:
         lines += [f"# {report['banner']}", ""]
+    if report["live"]:
+        lines += [f"# {LIVE_BANNER}", ""]
     lines += ["# Bericht der Szenarien", "",
               f"- Prompt: v{head['prompt_version']}, Variante {head['prompt_variant']}",
               f"- Modell: {head['model']}", f"- Git-Commit: {head['git_commit'] or 'unbekannt'}",
@@ -323,19 +358,50 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runs", type=int, default=DEFAULT_RUNS, help=f"Läufe je Szenario (mindestens {MIN_RUNS})")
     parser.add_argument("--out", type=Path, default=None, help="Ausgabeordner (Standard runs/eval/<Zeitstempel>/)")
     parser.add_argument("--prompt-variant", default="active", choices=PROMPT_VARIANTS)
-    parser.add_argument("--live", action="store_true", help="Live-Modus (nicht freigegeben)")
+    parser.add_argument("--live", action="store_true",
+                        help=f"Live-Modus mit echtem Modell und Kosten (nur mit {LIVE_ENV}=1, Terminal und Bestätigung)")
     return parser
 
 
+def _stdin_isatty() -> bool:
+    return sys.stdin is not None and sys.stdin.isatty()
+
+
+def _default_live_factory(api_key: str) -> ClientFactory:
+    """Die Standard-Fabrik des Live-Modus: je Lauf ein frischer Adapter; `anthropic` wird erst beim ersten Aufruf importiert."""
+    return lambda scenario, run: AnthropicAdapter(make_sdk_client(api_key))
+
+
+def _confirm_live(args: argparse.Namespace, scenarios: list[Scenario], settings: Any, config: LoopConfig, budget: SpendBudget,
+                  input_fn: Callable[[str], str]) -> bool:
+    """Vorschau und Bestätigung (Bedingung 3). Jede andere Eingabe als `LIVE <Gesamtläufe>`, EOF und Strg+C: Abbruch."""
+    total = len(scenarios) * args.runs
+    spent = budget.day_total()
+    print(f"Live-Lauf: {len(scenarios)} Szenarien x {args.runs} Läufe = {total} Gesamtläufe\n"
+          f"Modell: {config.model}\n"
+          f"Deckel: {settings.budget_run_usd} $ je Lauf, {settings.budget_day_usd} $ je Tag\n"
+          f"Heute bereits gebucht: {spent} $\n"
+          "Kosten nur geschätzt, siehe scripts/estimate_cost.py", flush=True)
+    try:
+        answer = re.sub(r"\r?\n\Z", "", input_fn(f"Zum Starten exakt 'LIVE {total}' eingeben: "))  # nur das Zeilenende, kein strip
+        return answer == f"LIVE {total}"
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
 def main(argv: list[str] | None = None, *, test_client_factory: ClientFactory | None = None,
-         budget_factory: BudgetFactory | None = None, scenarios_dir: Path | None = None) -> int:
+         budget_factory: BudgetFactory | None = None, scenarios_dir: Path | None = None,
+         live_client_factory: ClientFactory | None = None, env: Mapping[str, str] | None = None,
+         isatty: Callable[[], bool] | None = None, input_fn: Callable[[str], str] | None = None,
+         settings_loader: Callable[[], Any] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else EXIT_USAGE
-    if args.live:  # vor allem anderen: kein Client, kein SDK (Stufe C)
-        print(LIVE_NOT_ALLOWED, file=sys.stderr)
-        return EXIT_USAGE
+    if args.live:  # Bedingungen 1 und 2, bevor irgendetwas gelesen oder gebaut wird (Settings, Client, SDK)
+        if (os.environ if env is None else env).get(LIVE_ENV) != "1" or not (isatty or _stdin_isatty)():
+            print(LIVE_NOT_ALLOWED, file=sys.stderr)
+            return EXIT_USAGE
     if args.runs < MIN_RUNS:
         print(f"Mindestens {MIN_RUNS} Läufe je Szenario (Plan 12.12, Stichprobe).", file=sys.stderr)
         return EXIT_USAGE
@@ -354,10 +420,68 @@ def main(argv: list[str] | None = None, *, test_client_factory: ClientFactory | 
     if missing:
         print(f"Unbekannte Welten: {', '.join(missing)}", file=sys.stderr)
         return EXIT_USAGE
+    chosen = [by_id[w] for w in dict.fromkeys(wanted)]
     out = args.out or Path("runs") / "eval" / datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    result = run_set([by_id[w] for w in dict.fromkeys(wanted)], args.runs, out, prompt_variant=args.prompt_variant,
-                     test_client_factory=test_client_factory, budget_factory=budget_factory)
-    write_report(result, out)
+    if args.live and (out.is_symlink() or (out.exists() and (not out.is_dir() or any(out.iterdir())))):  # der Scan darf nie fremde Ordner (Repo, .env) lesen
+        print(OUT_NOT_EMPTY_TEXT, file=sys.stderr)
+        return EXIT_USAGE
+    mode, secrets = "dry", list(KNOWN_SECRETS)
+    run_kwargs: dict[str, Any] = {"test_client_factory": test_client_factory, "budget_factory": budget_factory}
+    if args.live:
+        try:
+            settings = (settings_loader or get_settings)()
+        except Exception:  # noqa: BLE001 — fester Text, nie `str(exc)` (Validierungsfehler können Werte enthalten)
+            print(NO_SETTINGS_TEXT, file=sys.stderr)
+            return EXIT_USAGE
+        if not settings.anthropic_api_key:
+            print(NO_KEY_TEXT, file=sys.stderr)
+            return EXIT_USAGE
+        config = LoopConfig.from_settings(settings)  # eine Quelle für Vorschau, Loop, Bericht, Trace-Kopf und Request
+        try:
+            config.price  # noqa: B018 — ohne Preis keine Kostenrechnung und kein Deckel: vor der Vorschau abweisen
+        except ValueError:
+            print(NO_PRICE_TEXT, file=sys.stderr)
+            return EXIT_USAGE
+        budget_injected = budget_factory is not None
+        budget_factory = budget_factory or (lambda: make_budget(scripted=False, settings=settings))
+        budget = budget_factory()
+        if budget.day_total() is None:
+            print(LEDGER_UNREADABLE_TEXT, file=sys.stderr)
+            return EXIT_USAGE
+        if not _confirm_live(args, chosen, settings, config, budget, input_fn or input):
+            print(LIVE_NOT_ALLOWED, file=sys.stderr)
+            return EXIT_USAGE
+        mode, secrets = "live", secrets_of(settings)
+        run_kwargs = {"client_factory": live_client_factory or _default_live_factory(settings.anthropic_api_key),
+                      "budget_factory": budget_factory, "loop_config": config, "budget_hook": budget_injected}
+        setup_logging(Redactor(secrets), log_path=out / "run.log", env=env)
+    pending: BaseException | None = None
+    result: SetResult | None = None
+    try:
+        result = run_set(chosen, args.runs, out, mode=mode, prompt_variant=args.prompt_variant, **run_kwargs)
+        write_report(result, out)
+    except BaseException as exc:  # noqa: BLE001 — auch bei Ausnahme und Strg+C wird gescannt, danach geht sie weiter
+        pending = exc
+    finally:
+        teardown_logging()
+    try:
+        findings = scan_findings([out], secrets)  # Rang über allen anderen Exit-Codes (12.10), auch nach einer Ausnahme
+    except Exception:  # noqa: BLE001 — ein Scan, der nicht lief, gilt als Fund (fail closed)
+        print(SCAN_FAILED_TEXT, file=sys.stderr)
+        if pending is not None:
+            print(ABORTED_ALSO_TEXT.format(name=type(pending).__name__), file=sys.stderr)
+        return EXIT_SECRET
+    for kind, text in (("secret", SECRET_FOUND_TEXT), ("unreadable", UNCHECKABLE_TEXT), ("link", LINK_TEXT)):
+        names = [str(f.path.relative_to(out)) for f in findings if f.kind == kind]
+        if names:
+            print(text.format(files=", ".join(names)), file=sys.stderr)
+    if findings:
+        if pending is not None:
+            print(ABORTED_ALSO_TEXT.format(name=type(pending).__name__), file=sys.stderr)
+        return EXIT_SECRET
+    if pending is not None:
+        raise pending
+    assert result is not None
     print(f"Bericht: {out / 'report.md'}")
     if result.hard_failures:
         return EXIT_HARD
