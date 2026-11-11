@@ -2134,6 +2134,10 @@ Live-Lauf zu entscheiden oder zu erledigen.
   parallelen Prozessen nicht hart; Wiederholungen innerhalb des SDK sind von der Vorprüfung nicht abgedeckt.
 - * E-04 (Stufe C) und die ungeprüften Annahmen zum SDK in Abschnitt 9 (keine Wiederholung bei 404/422, Klasse je
   Status, z. B. `RateLimitError` für 429; O-31) sind erst im Live-Lauf prüfbar.
+- * E-06 (Sean, 2026-11-11: „(b) erst messen“): Der Prompt (Z. 23, 26) erlaubt weiter pauschal Listennummern am
+  Zeilenanfang und Firmennamen mit Ziffern, obwohl O-39 die Klassen 3 und 4 geschärft hat. Der Prompt bleibt bis zum
+  Live-Lauf unverändert; die Fehlalarmrate der Klassen 3 und 4 wird im ersten halb-live-Satz gemessen, danach
+  Entscheidung über eine neue Prompt-Version (Vergleich nach 12.12, O-40).
 - `UNKNOWN_TOOL` zählt pauschal als harter B3-Ausfall (O-28, fail-closed).
 - `b09_nicht_us` trifft „nicht gefunden“, nicht die Umfangsgrenze (Welt mit 20-F-Filer fehlt; O-28).
 - Kostenabgleich gegen `end.session_cost_usd` im Bericht nur als Hinweis (O-28).
