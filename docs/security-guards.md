@@ -86,6 +86,8 @@ Testpfade sind relativ zu `tests/unit/`.
    `test_reject_proposal_applies_the_channel_rules_of_confirm_and_is_no_tool` und LT-09 abgedeckt.
 5. **SG-14 / Text am Limit:** geklärt — festgelegt als P4 (Plan 12.15); `test_m4_a_problem_text_at_the_limit_is_withheld_without_a_further_call` prüft, dass ein Problemtext am Limit zurückgehalten wird, ohne weiteren Aufruf (2026-10-28).
 
+Mutationslauf 2026-11-11 (`mutation-prober`, Stand cc1928a, nach TA-20.1): SG-01 (20, davon 3, 9, 10, 12, 14 mit an den Umbau angepassten Fragmenten), SG-27 (5), SG-28 (28): 53 Mutationen, 53 angeschlagen, keine zahnlos, keine nicht anwendbar. Dünn gefangen (je ein Test): SG-01 #7, #15, #20; SG-28 #22, #23, #25. Bei SG-01 #13, #16–#18, #20 legte der Prober die Kurzbeschreibung so aus: `return base` → `return ch`; Suffixe `"jahrig", "jahrige", "jahrigen", "tagig", "tagige"` entfernt; `|verkaufer`, `funftens`, Bruch-Präfix `funf` entfernt. SG-29 (TA-20.2): Mutationen vom Implementierer im Wegwerf-Klon belegt (4/4), `mutation-prober` noch nicht gelaufen.
+
 Mutationslauf 2026-11-03 (`mutation-prober`, Stand b6774a5): SG-01, SG-22 und die M4-Fassungen von SG-04c, SG-06, SG-11b, SG-12, SG-13: 25 Mutationen, 24 angeschlagen, eine nicht anwendbar (veraltetes Fragment SG-01, berichtigt und vom Orchestrator im Wegwerf-Klon geprüft: 7 Tests rot). Die Mutationen SG-01 bis SG-11a wurden beim Anlegen von Hand im Wegwerf-Worktree geprüft, die Mutationen von
 SG-04c bis SG-17 nach Schritt 7, Phase B durch den Agenten `mutation-prober` (Bericht archiviert:
 [`mutation-report-2026-10-11.md`](mutation-report-2026-10-11.md)).
