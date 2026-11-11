@@ -36,11 +36,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from eval.coarse_scan import NOT_COVERED_NOTE, scan_dump
 from eval.harness import EvalCase, EvalSessionConfig, run_case
 from eval.metrics import ERFUELLT, MANUELL, NA, STATUSES, VERFEHLT, RunVerdict, closing_of, evaluate_run
 from eval.scenarios import Scenario, load_all
 from eval.variants import PROMPT_VARIANTS, load_variant_prompt, variant_overrides
 from eval.worlds import KNOWN_SECRETS, WORLDS
+from scout_research.agent import texts
 from scout_research.agent.budgets import LoopConfig, Usage
 from scout_research.agent.loop import AgentLoop
 from scout_research.agent.model_client import AnthropicAdapter, ModelClient, ModelResponse, ScriptedModelClient, make_sdk_client
@@ -87,6 +89,8 @@ class RunRecord:
     closing: str | None = None
     deviations: list[dict[str, Any]] = field(default_factory=list)
     verdict: RunVerdict | None = None
+    coarse: list[dict[str, Any]] | None = None
+    """Treffer der unabhängigen groben Prüfung (`eval/coarse_scan.py`); `None`, wenn der Lauf nichts gezeigt hat."""
 
 
 @dataclass
@@ -122,9 +126,70 @@ def dry_client(scenario: Scenario, run: int) -> ModelClient:
     return ScriptedModelClient(steps)
 
 
-def _shown_dump(result: Any, ctx: Any) -> tuple[list[dict[str, str]], int, int]:
+class RawTextRecorder:
+    """Legt um den Client des Laufs und merkt sich je Modellaufruf den Text der Antwort (nur Textblöcke, Slots unaufgelöst).
+
+    Der Rohtext des Modells steht in `Shown` nicht (SG-14: die Host-API trägt nur Geprüftes); der Runner holt ihn hier. Die
+    Zuordnung zum gezeigten Eintrag läuft über `TurnResult.calls`: Der gezeigte Text eines Zugs stammt aus dessen letztem
+    Aufruf. Alles andere reicht der Aufnehmer unverändert durch."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.texts: list[str | None] = []
+
+    def create(self, request: Any, on_event: Any) -> Any:
+        index = len(self.texts)
+        self.texts.append(None)  # auch ein Aufruf, der eine Ausnahme wirft, zählt wie im Loop (`turn.calls`)
+        response = self._inner.create(request, on_event)
+        try:  # ein Fehler beim Mitschreiben darf nach einem bezahlten Aufruf den Loop nie stören
+            self.texts[index] = "".join(b.get("text", "") for b in response.content if b.get("type") == "text")
+        except Exception:  # noqa: BLE001 — unlesbarer Block: kein Rohtext, die Antwort geht unverändert weiter
+            self.texts[index] = None
+        return response
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+def _raw_texts(results: list[Any], ctx: Any, recorder: RawTextRecorder | None) -> list[tuple[str, str | None]]:
+    """Je gezeigtem Eintrag (Reihenfolge wie `results`): die Art für den Dump und der Rohtext des Modells oder `None`.
+
+    `text`: Rohtext des letzten Aufrufs des Zugs. `intro`: ebenso, außer bei der festen Einleitung (kein Modelltext).
+    `commentary`: Rohtext aus dem Eintrag von `ctx.commentary_log`, dessen Aktion eine Annahme ist (`accepted`,
+    `accepted_after_n`) und dessen `rendered` dem gezeigten Text gleicht; die Einträge werden der Reihe nach verbraucht, damit
+    ein späterer Kommentar zur selben Tabelle den Rohtext eines früheren nicht verändert (`ctx.commentaries` hält nur den
+    Stand am Ende des Laufs). Ohne passenden Eintrag heißt er `commentary_withheld` und hat keinen Rohtext (der Rohtext eines
+    zurückgehaltenen Kommentars ist der abgelehnte Text). `notice`: keiner."""
+    fixed = {texts.user_text(lang, "intro") for lang in ("de", "en")}
+    out: list[tuple[str, str | None]] = []
+    position = cursor = 0
+    log = ctx.commentary_log
+    for r in results:
+        last = position + r.calls - 1
+        position += r.calls
+        model = recorder.texts[last] if recorder is not None and r.calls and 0 <= last < len(recorder.texts) else None
+        for s in r.shown:
+            if s.kind == "text" or (s.kind == "intro" and s.text not in fixed):
+                out.append((s.kind, model))
+            elif s.kind == "commentary":
+                found = next((i for i in range(cursor, len(log))
+                              if log[i].get("action") in ("accepted", "accepted_after_n") and log[i].get("rendered") == s.text), None)
+                if found is None:
+                    out.append(("commentary_withheld", None))
+                else:
+                    cursor = found + 1
+                    out.append(("commentary", log[found].get("raw_text")))
+            else:
+                out.append((s.kind, None))
+    return out
+
+
+def _shown_dump(result: Any, ctx: Any, recorder: RawTextRecorder | None = None) -> tuple[list[dict[str, str]], int, int]:
     """Die gezeigten Texte (geschwärzt), die Zahl der Texte mit wörtlichem Treffer eines bekannten Secrets (hart) und die
-    Zahl der Texte, die nur ein allgemeines Muster trifft (`key=…`, `Bearer …`; Kennzahl). Nie ein Wert."""
+    Zahl der Texte, die nur ein allgemeines Muster trifft (`key=…`, `Bearer …`; Kennzahl). Nie ein Wert.
+
+    Mit `recorder` steht je Eintrag `model_text` (Rohtext des Modells mit Slots, geschwärzt) im Dump, soweit es ihn gibt; er
+    dient nur der groben Prüfung (`eval/coarse_scan.py`)."""
     shown = [s for r in result.results for s in r.shown]
     literal = pattern = 0
     for s in shown:
@@ -132,7 +197,10 @@ def _shown_dump(result: Any, ctx: Any) -> tuple[list[dict[str, str]], int, int]:
             literal += 1
             continue
         pattern += ctx.redact(s.text) != s.text
-    return [{"kind": s.kind, "text": ctx.redact(s.text)} for s in shown], literal, pattern
+    raws = _raw_texts(result.results, ctx, recorder)
+    dump = [{"kind": kind, "text": ctx.redact(s.text), **({"model_text": ctx.redact(raw)} if raw is not None else {})}
+            for s, (kind, raw) in zip(shown, raws)]
+    return dump, literal, pattern
 
 
 def _run_one(scenario: Scenario, run: int, out_dir: Path, client_factory: ClientFactory,
@@ -147,7 +215,9 @@ def _run_one(scenario: Scenario, run: int, out_dir: Path, client_factory: Client
         world = WORLDS[scenario.world]()
         ctx = world.context(eval_session=config, output_language=scenario.output_language)
         budget = budget_factory()
-        loop = AgentLoop(ctx, client_factory(scenario, run), prompt.text, replace(loop_config or LoopConfig(), language=scenario.output_language),
+        recorder = RawTextRecorder(client_factory(scenario, run))
+        holder["recorder"] = recorder
+        loop = AgentLoop(ctx, recorder, prompt.text, replace(loop_config or LoopConfig(), language=scenario.output_language),
                          budget=budget)
         holder["ctx"] = ctx
         return loop
@@ -170,9 +240,11 @@ def _run_one(scenario: Scenario, run: int, out_dir: Path, client_factory: Client
     record.trace_path = str(result.trace_path) if result.trace_path else None
     shown = out_dir / "shown" / f"{scenario.scenario_id}_run{run}.json"
     shown.parent.mkdir(parents=True, exist_ok=True)
-    dump, secret_hits, pattern_hits = _shown_dump(result, holder["ctx"])
+    dump, secret_hits, pattern_hits = _shown_dump(result, holder["ctx"], holder.get("recorder"))
     shown.write_text(json.dumps(dump, ensure_ascii=False, indent=1), encoding="utf-8")
     record.shown_path = str(shown)
+    # nur „manuell prüfen“; der Ausschnitt ASCII-sicher (kein rohes U+202E, DEL oder \x9b im Bericht), `None` heißt: nichts gezeigt
+    record.coarse = [{"entry": h.entry, "kind": h.kind, "snippet": ascii(h.snippet)[1:-1]} for h in scan_dump(dump)] if dump else None
     closed = next((r.reason for r in result.results if r.outcome == "closed"), None)
     if record.trace_path is None:
         record.reason = "kein Trace"
@@ -260,10 +332,22 @@ def _scenario_summary(scenario: Scenario, records: list[RunRecord]) -> dict[str,
             "failed_runs": [r.run for r, b in results if b.status == VERFEHLT],
         }
     return {
-        "behaviors": behaviors, "n_valid": len(valid),
+        "behaviors": behaviors, "n_valid": len(valid), "coarse_scan": _coarse_summary(records),
         "invalid": [{"run": r.run, "reason": r.reason} for r in records if r.status == "ungültig"],
         "not_run": [{"run": r.run, "reason": r.reason} for r in records if r.status == "nicht gelaufen"],
     }
+
+
+def _coarse_summary(records: list[RunRecord]) -> list[dict[str, Any]]:
+    """Je Lauf mit Dump: Zahl der Treffer der groben Prüfung, die Treffer und die Datei (TA-20.3); `hits` ist `None`, wenn der
+    Lauf nichts gezeigt hat (nicht „0 Treffer“). Ändert kein B-Ergebnis."""
+    return [{"run": r.run, "hits": None if r.coarse is None else len(r.coarse), "items": r.coarse or [], "file": r.shown_path}
+            for r in records if r.shown_path is not None]
+
+
+HARD_RULES_NOTE = "0 von n ist eine Rauchprobe, kein Nachweis; die Sicherheit kommt aus Code, Tests und Mutationen."
+HARD_RULES = ("B1", "B3", "B10 (Gate-Teil)")
+COARSE_HEADING = "Unabhängige grobe Prüfung (manuell prüfen)"
 
 
 def build_report(result: SetResult) -> dict[str, Any]:
@@ -276,7 +360,7 @@ def build_report(result: SetResult) -> dict[str, Any]:
         "header": {"prompt_version": result.prompt_version, "prompt_variant": result.prompt_variant, "model": result.model,
                    "git_commit": result.git_commit, "mode": result.mode, "started": result.started,
                    "runs_per_scenario": result.runs},
-        "aborted": result.aborted,
+        "aborted": result.aborted, "hard_rules_note": HARD_RULES_NOTE, "coarse_scan_note": NOT_COVERED_NOTE,
         "hard_failures": [{"scenario": r.scenario_id, "run": r.run, "trace": r.trace_path, "rule": line}
                           for r, line in result.hard_failures],
         "deviations": [{"scenario": r.scenario_id, "run": r.run, "deviations": r.deviations}
@@ -303,7 +387,9 @@ def render_markdown(report: dict[str, Any], scenarios: list[Scenario]) -> str:
               f"- Läufe je Szenario: {head['runs_per_scenario']}", ""]
     if report["not_checkable_runs"]:
         lines += [f"**Harte Regeln in {report['not_checkable_runs']} Läufen nicht prüfbar** (ungültige Läufe, Exit 5).", ""]
-    lines += ["## Harte Ausfälle", ""]
+    lines += ["## Lesart der harten Regeln", ""]
+    lines += [f"- {rule}: {report['hard_rules_note']}" for rule in HARD_RULES]
+    lines += ["", "## Harte Ausfälle", ""]
     if report["hard_failures"]:
         lines += [f"- {h['scenario']}, Lauf {h['run']}: {h['rule']} (Trace: {h['trace']})" for h in report["hard_failures"]]
     else:
@@ -323,6 +409,13 @@ def render_markdown(report: dict[str, Any], scenarios: list[Scenario]) -> str:
                   f"nicht gelaufen: {len(summary['not_run'])}"]
         lines += [f"- ungültig, Lauf {i['run']}: {i['reason']}" for i in summary["invalid"]]
         lines += [f"- nicht gelaufen, Lauf {i['run']}: {i['reason']}" for i in summary["not_run"]]
+        lines += ["", f"### {COARSE_HEADING}", "", NOT_COVERED_NOTE, ""]
+        if not summary["coarse_scan"]:
+            lines.append("Keine gezeigten Texte.")
+        for c in summary["coarse_scan"]:
+            lines.append(f"- Lauf {c['run']}: " + ("keine gezeigten Texte" if c["hits"] is None else f"{c['hits']} Treffer")
+                         + f"; Datei {c['file']}")
+            lines += [f"    - Eintrag {i['entry']}, {i['kind']}: \"{i['snippet']}\"" for i in c["items"]]
         lines.append("")
         for key, b in summary["behaviors"].items():
             c = b["counts"]
