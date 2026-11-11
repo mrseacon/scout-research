@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
+from scout_research.config import secret_value
 from scout_research.tools.sanitize import RedactingFilter, Redactor
 
 SDK_LOGGERS = ("anthropic", "httpx", "httpx2")
@@ -65,7 +66,8 @@ def teardown_logging() -> None:
 
 def secrets_of(settings: Any) -> list[str]:
     """Die Secrets eines Live-Laufs aus den Settings: beide Schlüssel, Kontaktadresse, User-Agent (leere entfallen)."""
-    values = (settings.anthropic_api_key, settings.finnhub_api_key, settings.edgar_contact_email, settings.edgar_user_agent)
+    values = (secret_value(settings.anthropic_api_key), secret_value(settings.finnhub_api_key), settings.edgar_contact_email,
+              settings.edgar_user_agent)
     return [v for v in values if isinstance(v, str) and v]
 
 

@@ -2,6 +2,8 @@
 Rückhalt, Pflichtwarnungen (O4), Basiszeile (O5), englische Vorlagen, fin:/mkt:-Slots (O1 B), Prüfung vor der Tabelle.
 Das Prüfkorpus selbst läuft in `test_number_check_corpus.py`."""
 
+import re
+
 import pytest
 
 from scout_research.tools.session import HumanInput
@@ -410,8 +412,23 @@ def _collision_session():
     return CheckSession(warning_ids=frozenset({"W9", "W1"}))
 
 
+def _in_sequence_context(text: str) -> str:
+    """Setzt einen Listenfall („⼆. Segmente“, „- ⼆. Segmente“) hinter die Zeilen 1. bis n−1., wobei n der Ziffernwert des Zeichens
+    ist: Die Listenregel (Vorzeile, Folge ab 1) wäre erfüllt, also prüft der Test den Vorrang von Klasse 17 und nicht die Folgeregel
+    (TA-20.5 Runde 2, NIEDRIG 8). Fälle ohne Listennummer und Werte außerhalb von 2–20 bleiben unverändert."""
+    from scout_research.tools.numbercheck import normalize
+
+    m = re.match(r"(?P<bullet>- )?(?P<num>[^\s.)]+)[.)] ", text)
+    digits = normalize(m.group("num")).norm if m else ""
+    if not digits.isdigit() or not 2 <= int(digits) <= 20:
+        return text
+    bullet = m.group("bullet") or ""
+    return "Es gilt:\n" + "".join(f"{bullet}{i}. Alpha\n" for i in range(1, int(digits))) + text
+
+
 @pytest.mark.parametrize("text", _EXEMPT_COLLISIONS)
 def test_an_exemption_never_covers_a_digit_that_came_from_a_non_ascii_character(text: str) -> None:
+    text = _in_sequence_context(text)
     result = check_text(_collision_session(), text, "slot_text")
     assert not result.ok and result.body is None, text
     assert {p.code for p in result.problems} == {"NAKED_NUMBER"}, [(p.code, p.kind, p.match) for p in result.problems]
@@ -420,7 +437,7 @@ def test_an_exemption_never_covers_a_digit_that_came_from_a_non_ascii_character(
     assert not any(e["status"] == "exempt" and e["start"] < violations[0][1] and violations[0][0] < e["end"] for e in result.extracted)
 
 
-@pytest.mark.parametrize("text", ["3. Segmente", "17. Segmente", "- 3. Segmente", "Das 10-K nennt es.", "Siehe W1.", "Wie 3M oder 3m."])
+@pytest.mark.parametrize("text", ["1. Segmente", "\n".join(f"{i}. Segmente" for i in range(1, 11)), "- 1. Segmente", "Das 10-K nennt es.", "Siehe W1.", "Wie 3M oder 3m."])
 def test_ascii_exemptions_stay_valid(text: str) -> None:
     from scout_research.tools.commentary import exempt_terms
     from scout_research.tools.slots import CheckSession
@@ -452,7 +469,7 @@ def test_invariant_every_character_that_folds_to_an_ascii_digit_is_a_finding_eve
              if unicodedata.category(chr(cp)) not in ("Cn", "Co", "Cs") and any("0" <= c <= "9" for c in normalize(chr(cp)).norm)}
     chars |= {chr(cp) for cp in (*_MARK_DIGITS, *_PICTOGRAPH_NUMBERS)}
     assert len(chars) > 500
-    missed = [f"U+{ord(c):04X}" for c in sorted(chars) if check_text(session, c + ". Segmente von ADBE", "slot_text").ok]
+    missed = [f"U+{ord(c):04X}" for c in sorted(chars) if check_text(session, _in_sequence_context(c + ". Segmente von ADBE"), "slot_text").ok]
     assert not missed, missed[:20]
 
 

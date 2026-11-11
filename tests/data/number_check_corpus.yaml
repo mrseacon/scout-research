@@ -57,6 +57,12 @@ session:
         - {cik: "0000769397", ticker: ADSK, name: "Autodesk, Inc.", sic_code: "7372", revenue_musd: 6131, size_ratio: 0.29}
         - {cik: "0000066740", ticker: MMM, name: "3M Co", sic_code: "7372", revenue_musd: 24575, size_ratio: 1.14}
         - {cik: "0001084869", ticker: FLWS, name: "1-800-FLOWERS.COM, Inc.", sic_code: "7372", revenue_musd: 1830, size_ratio: 0.09}
+        - {cik: "0009000001", ticker: TXGN, name: "10x Genomics, Inc.", sic_code: "7372", revenue_musd: 100, size_ratio: 0.01}
+        - {cik: "0009000002", ticker: SRCX, name: "1st Source Corp.", sic_code: "7372", revenue_musd: 100, size_ratio: 0.01}
+        - {cik: "0009000003", ticker: XXIX, name: "22nd Century Group, Inc.", sic_code: "7372", revenue_musd: 100, size_ratio: 0.01}
+        - {cik: "0009000004", ticker: FVNN, name: "Five9, Inc.", sic_code: "7372", revenue_musd: 100, size_ratio: 0.01}
+        - {cik: "0009000005", ticker: EGHX, name: "8x8 Inc", sic_code: "7372", revenue_musd: 100, size_ratio: 0.01}
+        - {cik: "0009000006", ticker: GRPS, name: "Group 7 Corp.", sic_code: "7372", revenue_musd: 100, size_ratio: 0.01}
       counts: {sic_matches: 212, without_ticker: 61, not_in_revenue_frame: 18, outside_size_range: 81,
                passed_filters: 52, returned: 40, truncated: 12, sic_search_truncated: true}
       warnings:
@@ -3424,4 +3430,209 @@ cases:
     expect: accepted
     category: plain
     reason: "Gegenprobe: Präpositionen und Artikel im Zweiwortfenster (TA-20, Fable 02 Befund 3, N-4)."
+    added_in: phase_b
+
+  - id: ST-B136
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das Multiple beträgt\n17. Das ist hoch."
+    expect: [NAKED_NUMBER]
+    findings: ["17"]
+    category: list_marker
+    reason: "Zahl am Zeilenanfang ohne Satzende in der Vorzeile und ohne Folge ab 1 ist keine Listennummer (TA-20.5, Fable-Review, Klasse 3)."
+    added_in: phase_b
+
+  - id: ST-B137
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das EV liegt bei\n12) [[co:ADBE:ev_ebitda]]"
+    expect: [NAKED_NUMBER]
+    findings: ["12"]
+    category: list_marker
+    reason: "Hinter „12)“ steht ein gültiger Slot; die Nummer ist trotzdem eine nackte Zahl: Vorzeile ohne Satzende, Folge beginnt nicht bei 1 (TA-20.5, Klasse 3)."
+    added_in: phase_b
+
+  - id: ST-B138
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gilt:\n1. Alpha\n2. Beta\n4. Delta\n1. Peers"
+    expect: [NAKED_NUMBER]
+    findings: ["4", "1. Peers"]
+    category: list_marker
+    reason: "Lücke in der Folge („4“) und Mengenwort hinter der Nummer („1. Peers“) nehmen der Zahl die Listen-Ausnahme (TA-20.5, Klasse 3)."
+    added_in: phase_b
+
+  - id: ST-B139
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Der Umsatz von 3M USD liegt hoch."
+    expect: [NAKED_NUMBER]
+    findings: ["3M"]
+    category: session_name
+    reason: "Der Name „3M Co“ aus der Sitzung ist hinter einer Währung eine Menge (TA-20.5, N2)."
+    added_in: phase_b
+
+  - id: ST-A37
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gilt:\n1. Alpha\n\n2. Beta\n3. Gamma wie 3M wächst."
+    expect: accepted
+    rendered: "Es gilt:\n1. Alpha\n\n2. Beta\n3. Gamma wie 3M wächst."
+    category: list_marker
+    reason: "Gegenprobe: Folge 1, 2, 3 nach Doppelpunkt mit Leerzeile; „3M“ als Name der Sitzung ohne Einheit dahinter (TA-20.5)."
+    added_in: phase_b
+
+  - id: ST-B140
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das EV/EBITDA liegt bei rund 10x."
+    expect: [NAKED_NUMBER]
+    findings: ["10x"]
+    category: session_name
+    reason: "Das Einzelwort „10x“ des Namens „10x Genomics, Inc.“ ist eine Menge und keine Ausnahme (TA-20.5 Runde 2, HOCH 1)."
+    added_in: phase_b
+
+  - id: ST-B141
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Sie liegt auf dem 22nd Platz."
+    expect: [NAKED_NUMBER]
+    findings: ["22nd"]
+    category: session_name
+    reason: "Ordinal „22nd“ aus „22nd Century Group, Inc.“ ist allein keine Ausnahme (TA-20.5 Runde 2, HOCH 1)."
+    added_in: phase_b
+
+  - id: ST-B142
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Sie war 1st in der Liste."
+    expect: [NAKED_NUMBER]
+    findings: ["1st"]
+    category: session_name
+    reason: "Ordinal „1st“ aus „1st Source Corp.“ ist allein keine Ausnahme (TA-20.5 Runde 2, HOCH 1)."
+    added_in: phase_b
+
+  - id: ST-B143
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Ein Einmaleffekt von $3M belastet."
+    expect: [NAKED_NUMBER]
+    findings: ["3M"]
+    category: session_name
+    reason: "Währung vor dem Namenstreffer „3M“ macht ihn zur Menge (TA-20.5 Runde 2, HOCH 2, N2)."
+    added_in: phase_b
+
+  - id: ST-B144
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Ein Einmaleffekt von USD 3M belastet."
+    expect: [NAKED_NUMBER]
+    findings: ["3M"]
+    category: session_name
+    reason: "Währungskürzel vor „3M“ (TA-20.5 Runde 2, HOCH 2, N2)."
+    added_in: phase_b
+
+  - id: ST-B145
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Ein Einmaleffekt von €3M belastet."
+    expect: [NAKED_NUMBER]
+    findings: ["3M"]
+    category: session_name
+    reason: "Währungszeichen vor „3M“ (TA-20.5 Runde 2, HOCH 2, N2)."
+    added_in: phase_b
+
+  - id: ST-B146
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Ein Einmaleffekt von 3M-USD belastet."
+    expect: [NAKED_NUMBER]
+    findings: ["3M"]
+    category: session_name
+    reason: "Einheit nach Bindestrich hinter „3M“ (TA-20.5 Runde 2, HOCH 2, N2)."
+    added_in: phase_b
+
+  - id: ST-B147
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Ein Einmaleffekt von 3M US-Dollar belastet."
+    expect: [NAKED_NUMBER]
+    findings: ["3M"]
+    category: session_name
+    reason: "„US-Dollar“ hinter „3M“ (TA-20.5 Runde 2, HOCH 2, N2)."
+    added_in: phase_b
+
+  - id: ST-B148
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Ein Einmaleffekt von 3M\nUSD belastet."
+    expect: [NAKED_NUMBER]
+    findings: ["3M"]
+    category: session_name
+    reason: "Einheit nach Zeilenumbruch hinter „3M“ (TA-20.5 Runde 2, HOCH 2, N2)."
+    added_in: phase_b
+
+  - id: ST-A38
+    lang: de
+    profile: slot_text
+    session: base
+    text: "**Einordnung:**\n1. Alpha\n2. Beta"
+    expect: accepted
+    category: list_marker
+    reason: "Gegenprobe: Vorzeile mit Fettdruck und Doppelpunkt (TA-20.5 Runde 2, MITTEL 4)."
+    added_in: phase_b
+
+  - id: ST-A39
+    lang: de
+    profile: slot_text
+    session: base
+    text: "## Peers\n1. Alpha\n2. Beta"
+    expect: accepted
+    category: list_marker
+    reason: "Gegenprobe: Überschrift als Vorzeile (TA-20.5 Runde 2, MITTEL 4)."
+    added_in: phase_b
+
+  - id: ST-A40
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gilt:\n1. Alpha\n   1. Unter-Alpha\n   2. Unter-Beta\n2. Beta"
+    expect: accepted
+    category: list_marker
+    reason: "Gegenprobe: verschachtelte Liste, die äußere Folge läuft weiter (TA-20.5 Runde 2, MITTEL 4)."
+    added_in: phase_b
+
+  - id: ST-A41
+    lang: de
+    profile: slot_text
+    session: base
+    text: "10x Genomics wächst, und Five9 wächst auch, ebenso 8x8."
+    expect: accepted
+    category: session_name
+    reason: "Gegenprobe: ganzer Name „10x Genomics“ und Einzelwörter „Five9“, „8x8“ ohne reines Mengen-Token (TA-20.5 Runde 2, HOCH 1)."
+    added_in: phase_b
+
+  - id: RA-37
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Das EV/EBITDA liegt bei 7 wie bei Group 7 Corp."
+    expect: [NAKED_NUMBER]
+    findings: ["7"]
+    category: session_name
+    reason: "Kandidat „Group 7 Corp.“ gibt die „7“ im Text nicht frei, nur der ganze Name (TA-20.5, I-1)."
     added_in: phase_b

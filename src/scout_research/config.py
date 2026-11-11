@@ -1,20 +1,22 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Zentrale Konfiguration. Lädt aus .env, dann Umgebungsvariablen."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True)
 
     edgar_contact_email: str
     edgar_app_name: str = "Scout Research"
 
-    finnhub_api_key: str | None = None
-    anthropic_api_key: str | None = None
+    finnhub_api_key: SecretStr | None = None
+    anthropic_api_key: SecretStr | None = None
+    """Beide Schlüssel sind `SecretStr` (TA-20.5): `repr`, `str`, `model_dump` und `format` zeigen sie nicht. Leser holen den
+    Klartext über `secret_value()` (nimmt auch ein `str`)."""
     anthropic_model: str = "claude-sonnet-5-5"
     anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     """Effort-Stufe (`output_config.effort`); der Modellvergleich läuft über diese Stufen (Plan, L9)."""
@@ -80,6 +82,14 @@ class Settings(BaseSettings):
     @property
     def edgar_user_agent(self) -> str:
         return f"{self.edgar_app_name} ({self.edgar_contact_email})"
+
+
+def secret_value(value: object) -> str | None:
+    """Der Klartext eines Schlüssels aus den Settings (`SecretStr`), `None` für fehlend oder leer. Nimmt auch ein `str`
+    (Attrappen der Tests); jeder andere Typ gilt als nicht gesetzt."""
+    if isinstance(value, SecretStr):
+        value = value.get_secret_value()
+    return value if isinstance(value, str) and value else None
 
 
 def get_settings() -> Settings:

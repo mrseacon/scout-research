@@ -25,7 +25,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from scout_research.config import get_settings
+from scout_research.config import get_settings, secret_value
 from scout_research.data.cache import SqliteCache
 from scout_research.data.edgar_client import CompanyLookup, EdgarClient, TickerNotFoundError
 from scout_research.data.market_provider import (
@@ -50,9 +50,10 @@ class _NullProvider:
 def _market_provider(settings) -> tuple[MarketDataProvider, SqliteCache]:
     # Ein einziger Provider (und damit ein einziger Throttle) für Target und alle Peers.
     # Stooq ist unverifiziert/deaktiviert (Foundation Doc 8.3, D7) und hier nicht eingehängt.
+    finnhub_key = secret_value(settings.finnhub_api_key)
     primary = (
-        FinnhubProvider(settings.finnhub_api_key, requests_per_minute=settings.finnhub_requests_per_minute)
-        if settings.finnhub_api_key
+        FinnhubProvider(finnhub_key, requests_per_minute=settings.finnhub_requests_per_minute)
+        if finnhub_key
         else _NullProvider()
     )
     cache = SqliteCache()

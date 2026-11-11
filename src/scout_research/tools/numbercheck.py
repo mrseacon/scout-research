@@ -182,9 +182,23 @@ _ID_TOKEN = re.compile(r"(?<![A-Za-z0-9])[WP][0-9]{1,3}(?![A-Za-z0-9])")
 DOMAIN_TERMS = re.compile(r"(?<![A-Za-z0-9])(?:B2B2C|B2B|B2C|D2C|P2P|2D|3D|4G|5G)(?![A-Za-z0-9])")
 """Klasse 5 (O7): feste Liste, nur per Code erweiterbar. Produktnamen mit Ziffern gehören nicht dazu."""
 
-_LIST_NUMBER = re.compile(r"^[ \t]*(?:[-*+•][ \t]+)?(?P<n>[1-9][0-9]?)(?P<sep>[.)])(?=[ \t])", re.MULTILINE)
-_UNIT_AFTER_LIST_NUMBER = re.compile(
-    r"[ \t]+(?:mio|mrd|tsd|usd|eur|bn|mn|prozent|percent|million|billion|milliard|dollar|euro|u\.s|[%$€£])", re.IGNORECASE)
+_LIST_NUMBER = re.compile(r"[ \t]*(?:[-*+•][ \t]+)?(?P<n>[1-9][0-9]?)(?P<sep>[.)])(?=[ \t])")
+"""Listennummer am Anfang einer Zeile; wird mit `match(norm, zeilenanfang)` benutzt (Zeilengrenzen: `_LINE_BREAKS`)."""
+_LINE_BREAKS = "\n\u2028\u2029"
+_LIST_BULLET = re.compile(r"[ \t]*[-*+•][ \t]+")
+_SENTENCE_END = ".!?:"
+_UNIT_WORDS = (
+    r"(?:mio|mrd|tsd|us[\s\-]?dollar|usd|eur|bn|mn|prozent|percent|million|billion|milliard|trillion|thousand|tausend|dollar|euro|cents?|"
+    r"u\.s|x(?![^\W\d_])|(?:-?fach|mal|times)(?![^\W\d_])|"
+    r"(?:peers?|unternehmen|firmen|werte|companies|company)(?![^\W\d_])|"
+    r"(?:quartal|halbjahr|jahr|platz|rang|quarter|place)(?:e|en|s)?(?![^\W\d_])|[%$€£])")
+_UNIT_AFTER_LIST_NUMBER = re.compile(rf"[ \t]+{_UNIT_WORDS}", re.IGNORECASE)
+"""Einheit, Skala, Faktor oder Mengenwort hinter der Nummer: dann ist es eine Menge („3. Mal“, „12) Peers“), keine Listennummer."""
+_ENDS_IN_NUMBER = re.compile(r"[0-9](?:[KkMmBbTt]|x|st|nd|rd|th)?$", re.IGNORECASE)
+_QUANTITY_AFTER = re.compile(rf"(?:[ \t\-\n]+{_UNIT_WORDS}|[ \t]*[%$€£])", re.IGNORECASE)
+_QUANTITY_BEFORE = re.compile(r"(?:[$€£]|(?<![A-Za-z])(?:usd|eur|us-?\$|chf|gbp))\s*$", re.IGNORECASE)
+"""N2: Einheit, Skala, Faktor oder Mengenwort hinter einem Namenstreffer mit Ziffer (Trenner: Leerraum, Bindestrich, Zeilenumbruch)
+oder eine Währung davor („$3M“, „USD 3M“); teilt die Wortliste mit der Listennummer (HOCH 2, TA-20.5 Runde 2)."""
 _CIK = re.compile(r"(?<![A-Za-z0-9])CIK[  ]+(?P<v>[0-9]{10})(?![0-9])")
 _SIC = re.compile(r"(?<![A-Za-z0-9])SIC(?:-Code)?[  ]+(?P<v>[0-9]{4})(?![0-9])")
 _ACCESSION = re.compile(r"(?<![0-9])[0-9]{10}-[0-9]{2}-[0-9]{6}(?![0-9])")
@@ -199,6 +213,49 @@ class Identifiers:
     accessions: frozenset[str] = frozenset()
 
 
+def _list_number_spans(norm: str) -> list[tuple[int, int]]:
+    """Listennummern (Klasse 3): „1.“/„1)“ am Zeilenanfang, auch hinter einem Aufzählungszeichen. Eine Nummer gilt nur, wenn
+    (1) die Zeile davor fehlt (Textanfang), leer ist, auf `. ! ? :` endet, eine Überschrift (`#`) ist oder selbst eine
+    Listenzeile ist, UND (2) die Nummern eine Folge bilden: die erste eines Blocks ist 1, jede weitere die vorige + 1
+    (TA-20.5, Fable-Review). Fett- und Kursivzeichen (`*`, `_`) und `#` zählen bei der Vorzeile nicht mit
+    („**Einordnung:**“). Ein Block besteht aus aufeinanderfolgenden Listenzeilen (nummeriert oder mit Aufzählungszeichen);
+    Leerzeilen und eingerückte Fortsetzungszeilen halten ihn offen, jede andere Textzeile beendet ihn. Eingerückte Nummern
+    bilden einen eigenen Unterblock je Einrückung, die äußere Folge läuft danach weiter. Fortsetzungszeilen ersetzen die
+    Vorzeilen-Bedingung nicht (im Zweifel keine Ausnahme). Eine Einheit, ein Faktor oder ein Mengenwort hinter der Nummer
+    („17. Peers“) nimmt ihr die Ausnahme; eine solche Zeile beendet alle Blöcke. Zeilengrenzen sind `\\n`, U+2028 und
+    U+2029. Gedeckt wird nur der ASCII-Text der Nummer; Nicht-ASCII-Ziffern nimmt der Aufrufer aus (Klasse 17)."""
+    spans: list[tuple[int, int]] = []
+    expected: dict[int, int] = {}  # Einrückung -> nächste Nummer des offenen Blocks
+    prev = ""  # vorige Zeile
+    starts = [0] + [i + 1 for i, ch in enumerate(norm) if ch in _LINE_BREAKS]
+    for k, start in enumerate(starts):
+        end = starts[k + 1] - 1 if k + 1 < len(starts) else len(norm)
+        line = norm[start:end]
+        m = _LIST_NUMBER.match(norm, start)
+        if m is not None and m.end() <= end:
+            n = int(m.group("n"))
+            indent = len(line) - len(line.lstrip(" \t"))
+            plain = re.sub(r"[*_#\s]", "", prev)
+            prev_ok = (k == 0 or not plain or plain[-1] in _SENTENCE_END or prev.lstrip().startswith("#")
+                       or _is_list_line(prev))
+            if n <= 20 and prev_ok and n == expected.get(indent, 1) and not _UNIT_AFTER_LIST_NUMBER.match(norm, m.end()):
+                spans.append((m.start("n"), m.end("sep")))
+                expected = {i: v for i, v in expected.items() if i < indent}  # tiefere Unterblöcke enden
+                expected[indent] = n + 1
+            else:
+                expected = {}
+        elif _LIST_BULLET.match(line):
+            pass  # Aufzählungszeile: hält den Block offen, ändert die Folge nicht
+        elif line.strip() and not line[0].isspace():
+            expected = {}  # gewöhnliche Textzeile beendet den Block (Leerzeilen und Einrückungen halten ihn offen)
+        prev = line
+    return spans
+
+
+def _is_list_line(line: str) -> bool:
+    return bool(_LIST_BULLET.match(line) or _LIST_NUMBER.match(line))
+
+
 def exempt_spans(
     norm: str, warning_ids: frozenset[str], identifiers: Identifiers, trigger_terms: tuple[str, ...]
 ) -> list[tuple[int, int]]:
@@ -209,9 +266,7 @@ def exempt_spans(
     for m in _ID_TOKEN.finditer(norm):
         if m.group(0) in warning_ids:
             spans.append(m.span())
-    for m in _LIST_NUMBER.finditer(norm):
-        if int(m.group("n")) <= 20 and not _UNIT_AFTER_LIST_NUMBER.match(norm, m.end()):
-            spans.append((m.start("n"), m.end("sep")))
+    spans.extend(_list_number_spans(norm))
     for m in DOMAIN_TERMS.finditer(norm):
         spans.append(m.span())
     for m in _CIK.finditer(norm):
@@ -227,6 +282,11 @@ def exempt_spans(
         # Namen mit Ziffer („3M“) gelten in jeder Schreibweise; Namen mit Zahlwort nur so, wie die Daten sie führen
         flags = re.IGNORECASE if any(ch.isdigit() for ch in term) else 0
         for m in re.finditer(rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])", norm, flags):
+            # N2 (TA-20.5): ein Treffer, der auf eine Ziffer (oder Ziffer + Skalenbuchstabe, „3M“) endet, ist mit Einheit,
+            # Währung, Skala, „x“, „%“ oder Mengenwort dahinter eine Menge („Umsatz von 3M USD“, „Name 7 Peers“)
+            if _ENDS_IN_NUMBER.search(m.group(0)) and (
+                    _QUANTITY_AFTER.match(norm, m.end()) or _QUANTITY_BEFORE.search(norm, max(0, m.start() - 8), m.start())):
+                continue
             spans.append(m.span())
     return spans
 

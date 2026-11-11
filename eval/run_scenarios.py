@@ -49,7 +49,7 @@ from scout_research.agent.model_client import AnthropicAdapter, ModelClient, Mod
 from scout_research.agent.spend import SpendBudget
 from scout_research.agent.trace import current_git_commit
 from scout_research.cli import LIVE_NOT_ALLOWED, make_budget
-from scout_research.config import get_settings
+from scout_research.config import get_settings, secret_value
 from scout_research.live_guard import scan_findings, secrets_of, setup_logging, teardown_logging
 from scout_research.tools.sanitize import Redactor
 
@@ -527,7 +527,8 @@ def main(argv: list[str] | None = None, *, test_client_factory: ClientFactory | 
         except Exception:  # noqa: BLE001 — fester Text, nie `str(exc)` (Validierungsfehler können Werte enthalten)
             print(NO_SETTINGS_TEXT, file=sys.stderr)
             return EXIT_USAGE
-        if not settings.anthropic_api_key:
+        api_key = secret_value(settings.anthropic_api_key)
+        if not api_key:
             print(NO_KEY_TEXT, file=sys.stderr)
             return EXIT_USAGE
         config = LoopConfig.from_settings(settings)  # eine Quelle für Vorschau, Loop, Bericht, Trace-Kopf und Request
@@ -546,7 +547,7 @@ def main(argv: list[str] | None = None, *, test_client_factory: ClientFactory | 
             print(LIVE_NOT_ALLOWED, file=sys.stderr)
             return EXIT_USAGE
         mode, secrets = "live", secrets_of(settings)
-        run_kwargs = {"client_factory": live_client_factory or _default_live_factory(settings.anthropic_api_key),
+        run_kwargs = {"client_factory": live_client_factory or _default_live_factory(api_key),
                       "budget_factory": budget_factory, "loop_config": config, "budget_hook": budget_injected}
         setup_logging(Redactor(secrets), log_path=out / "run.log", env=env)
     pending: BaseException | None = None
