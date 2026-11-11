@@ -239,6 +239,10 @@ class ToolContext:
         self.market_data: dict[str, dict[str, Any]] = {}
         """Jüngstes `get_market_data`-Ergebnis je Ticker (Slots `mkt:`)."""
         self.resolved_names: dict[str, str] = {}
+        self.ambiguous_candidates: dict[str, str] = {}
+        """CIK → bereinigter Name der Kandidaten mehrdeutiger `resolve_company`-Ergebnisse (TA-20.2, V5). Nur Sicht der
+        Prüfung (Klasse 4 und 6, damit die Rückfrage Name und CIK nennen darf); **nie** Allowlist: `allow_reason`
+        liest dieses Feld nicht, ein Kandidat gilt nicht als vom Nutzer genannt."""
         self.known_sic: set[str] = set()
         self.commentary_state: dict[str, CommentaryState] = {}
         self.commentaries: dict[str, StoredCommentary] = {}

@@ -324,7 +324,7 @@ def build_check_session(ctx: ToolContext, stored: StoredTable | None = None) -> 
         stored = next(reversed(ctx.tables.values()))
     table = stored.compact if stored is not None else None
     warning_ids = {w["id"] for w in table["warnings"]} if table else set()
-    ciks: set[str] = set(ctx.mentions)
+    ciks: set[str] = {*ctx.mentions, *ctx.ambiguous_candidates}  # Kandidaten einer Rückfrage (V5), ohne Freigabe
     sics: set[str] = set(ctx.known_sic)
     names: list[str | None] = list(ctx.resolved_names.values())
     for cs in ctx.candidate_sets.values():
@@ -351,7 +351,8 @@ def build_check_session(ctx: ToolContext, stored: StoredTable | None = None) -> 
         financials={fid: f.payload for fid, f in ctx.financials.items()},
         market=dict(ctx.market_data),
         warning_ids=frozenset(warning_ids),
-        terms=tuple(exempt_terms(names)),
+        # Kandidaten einer Rückfrage (V5) nur als GANZER Name, nie ihre Einzelwörter (I-1): „Group 7 Corp.“ gibt „7“ nicht frei
+        terms=tuple(dict.fromkeys([*exempt_terms(names), *[n for n in ctx.ambiguous_candidates.values() if has_trigger(n)]])),
         identifiers=Identifiers(frozenset(ciks), frozenset(sics), frozenset(accessions)),
     )
 

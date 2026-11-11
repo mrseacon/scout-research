@@ -227,6 +227,8 @@ def handle_resolve_company(ctx: ToolContext, args: ResolveCompanyInput) -> Resol
             for c in resolution.candidates
             if ctx.ticker_for(c.company.cik) is not None
         ]
+        for cand in candidates:  # nur Sicht der Prüfung (V5), keine Freigabe: weder `mentions` noch `resolved_names`
+            ctx.ambiguous_candidates[pad_cik(cand["cik"])] = cand["name"]
         return ResolveCompanyResult(status="ambiguous", candidates=candidates, candidate_count=resolution.candidate_count)
 
     return ResolveCompanyResult(status="not_found", candidate_count=0)
