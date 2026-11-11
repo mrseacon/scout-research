@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from scout_research.tools import payloads
 from scout_research.tools.errors import fail
 from scout_research.tools.numbercheck import (
+    BreakText,
     Identifiers,
     Normalized,
     exempt_spans,
@@ -248,7 +249,7 @@ def check_text(session: CheckSession, text: str, profile: Profile = "slot_text")
     # Klasse 17 geht vor (Plan 11.2): eine Ausnahme gilt nie für eine Stelle, die aus einem Nicht-ASCII-Zeichen entstand
     exempt = [(a, b) for a, b in exempt_spans(norm, session.warning_ids, session.identifiers, _trigger_terms(tuple(session.terms)))
               if not any(a <= i < b for i in n.foreign_digits)]
-    masked = mask(norm, [*exempt, *[(c.a, c.b) for c, _ in valid]])
+    masked = BreakText(mask(norm, [*exempt, *[(c.a, c.b) for c, _ in valid]]), n.breaks)
     extracted: list[dict[str, Any]] = []
     for finding in scan_numbers(masked, invalid_spans):
         add("NAKED_NUMBER", finding.kind, finding.start, finding.end, _HINTS[finding.kind])

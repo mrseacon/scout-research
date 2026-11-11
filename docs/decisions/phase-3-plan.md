@@ -989,7 +989,7 @@ Jeder Modelltext läuft durch genau ein Profil:
 | `free_text` | Modelltext ohne Comps-Tabelle (Rückfragen, Einleitung nach dem Vorschlag, Antworten aus `get_financials`) | nur typisierte Treffer in Tool-Ergebnissen der Sitzung (11.3); **entfällt bei O1 = B** |
 
 Allen Profilen gemeinsam sind die Ausnahmen (11.2, Klassen 1–6) und die Vorverarbeitung:
-1. Unsichtbare Formatzeichen (Unicode-Kategorie `Cf`, z. B. U+200B, U+00AD) und `Mn`-Zeichen ohne Zahlwert, die Wörter und Ziffernfolgen zerreißen (Variantenzeichen, U+034F; ergänzt 2026-11-03, `_INVISIBLE_MARKS`) entfernen; ihr Vorkommen geht in den Trace.
+1. Unsichtbare Formatzeichen (Unicode-Kategorie `Cf`, z. B. U+200B, U+00AD) und `Mn`-Zeichen ohne Zahlwert, die Wörter und Ziffernfolgen zerreißen (Variantenzeichen, U+034F; ergänzt 2026-11-03, `_INVISIBLE_MARKS`) und Steuerzeichen (Kategorie `Cc` außer Zeilenumbruch und Tab: C0, DEL, C1, auch `ESC`, Rückschritt, Wagenrücklauf; ergänzt 2026-11-11, TA-20, O-33) entfernen, nicht durch Leerzeichen ersetzen; ihr Vorkommen geht in den Trace (`format_chars`). Damit erreicht kein Steuerzeichen aus Modelltext den gezeigten Text, und ein Terminal kann keinen gerenderten Wert überschreiben. Der Wortscan prüft zusätzlich eine Fassung, in der jede entfernte Stelle eine Wortgrenze ist (`zwei\rPeers`).
 2. **Vor** der Normalisierung: jedes Zeichen mit `str.isnumeric()`, das keine ASCII-Ziffer ist (arabisch-indisch,
    Devanagari, Fullwidth, Hoch-/Tiefstellung, `½`, `①`, römische Zahlzeichen `Ⅻ`, CJK), ist eine Fundstelle. Grund:
    NFKC macht aus `Ⅻ` die Buchstaben `XII`, die der ASCII-Scan nicht mehr sieht. Das gilt auch mit angehängtem Zeichen (`٣́`, `Ⅻ́`): Das Zahlzeichen entscheidet das Cluster (Review TA-7, H1, 2026-11-03; vor dem Fix ein Durchlass). Ebenso für Zeichen, die erst NFKC zum Zahlzeichen macht (`⼆`), sichtbare `Mn`-Ziffern (U+A8E0–A8E9, U+11366–1136C) und eine geschlossene Liste von Bildzeichen mit Zahl (`💯`, `🔞`, `🔢`, Würfelflächen, `🆛` u. a.; O-16). Eine Ausnahme gilt nie für eine Stelle, die aus einem Nicht-ASCII-Zeichen entstand (`Normalized.foreign_digits`, O-17): `💯. Text`, `百. Text`, `١٧. Text`, `１０-K` sind Fundstellen. Klasse 17 geht Klasse 1–6 vor.
@@ -1040,6 +1040,8 @@ Ausnahme ist eng, geschlossen und häufig nötig.
 | 18 | Code-Blöcke, Inline-Code, Zitate, Links, Überschriften | Zahl in `` ` ``, ```` ``` ````, „…“, `>`, URL | Fundstelle | Fundstelle | wie außerhalb | Der Nutzer sieht den Inhalt genauso; eine Ausnahme wäre der einfachste Umweg. Ein Zitat des Nutzers mit Zahl ist eine Bestätigung durch die Hintertür |
 | 19 | Index- und Produktnamen mit Ziffern | `S&P 500`, `Nasdaq-100`, `Russell 2000`, `Microsoft 365` | Fundstelle | Fundstelle | Fundstelle | Vorwissen; nicht in Tool-Ergebnissen |
 | 20 | Ungefähr-Wörter | `rund`, `etwa`, `ca.`, `über`, `knapp`, `~`, `≈`, `about`, `over` | ändern nichts | | | Die Zahl dahinter entscheidet |
+
+**Seit TA-20.1 (O-33 bis O-35) zusätzlich als Restrisiko geführt:** zusammengeschriebene Wörter ohne unsichtbares Zeichen (`zweiPeers`), `a dollar` mitten im Satz (`paid a dollar for it`), `one turn`/`a turn of leverage`; bekannte Fehlalarme: `mit einem Mal`, `hundertprozentig`, `a few percent`, weicher Trennstrich in `Zwei\u00adfel`.
 
 **Bewusst nicht erkannt (Restrisiko, dokumentiert):** Zahlwörter anderer Sprachen (`douze`), ASCII-römische Zahlen
 (`XII` — Fehlalarme bei `CD`, `MD`, `DC` wären häufiger als Treffer), Buchstaben als Ziffern-Ersatz (`l2,5x` wird
@@ -1224,7 +1226,7 @@ ohne stille Korrektur (außer `.`↔`-`), `(n = k)` an jeder Statistik, englisch
 
 | Datei | Inhalt |
 |---|---|
-| `numbercheck.py` | reine Funktionen ohne Sitzungszugriff: Normalisierung mit Rückabbildung auf den Rohtext (Formatzeichen `Cf` raus, Ziffern aller Schriften als ASCII, andere Zahlzeichen als `9`, NFKC), Ausnahmen der Klassen 1–6, Ziffernscan (zusammengeführt: `1 2 . 5`, Daten, Brüche), Wortscan (Zahlwörter, Größenordnungs-, Rang- und Vergleichswörter) |
+| `numbercheck.py` | reine Funktionen ohne Sitzungszugriff: Normalisierung mit Rückabbildung auf den Rohtext (Formatzeichen `Cf` und Steuerzeichen `Cc` außer `\n`/`\t` raus (O-33), Ziffern aller Schriften als ASCII, andere Zahlzeichen als `9`, NFKC), Ausnahmen der Klassen 1–6, Ziffernscan (zusammengeführt: `1 2 . 5`, Daten, Brüche), Wortscan (Zahlwörter, Größenordnungs-, Rang- und Vergleichswörter) |
 | `slots.py` | `CheckSession` (alles, was die Prüfung aus der Sitzung braucht), strenge Grammatik, Auflösung gegen die **kompakten** Payloads, Formate de/en |
 | `commentary.py` | `check_text` (Profile `slot_text`, `rationale`), Rendering mit Ticker-Etikett, feste Bestandteile (Basiszeile, Fußnoten, Warnungsblock, Rückhalt-Darstellung), `submit_commentary`, `build_check_session(ctx)` |
 | `payloads.py` | Warn-, Ausschluss- und Überspringen-Vorlagen auf Deutsch und Englisch (`warning_text`, `excluded_text`, `skip_reason`) |
@@ -1567,6 +1569,25 @@ Gemessen aus dem Trace, **vor** Korrekturen (was die Schleife abfängt, zählt t
 - **Stichprobe:** Im halb-live-Satz läuft **jedes Szenario mindestens dreimal**. Ergebnisse werden als Anzahl (k von n)
   berichtet; aus kleinen Stichproben werden keine Prozentangaben gebildet. Prozentwerte in der Tabelle sind
   ausschließlich Leserichtung (wohin „gut“ zeigt), nie Messergebnis und nie Abnahmegrenze.
+- **Lesart der harten Kriterien (TA-20, Review Fable 04, 2.2; Stufe B, O-40):** „0 von n“ bei B1 und B3 (und dem
+  Gate-Teil von B10) ist eine **Rauchprobe, kein Nachweis**. Null Ausfälle in 3 Läufen schließen mit 95 % nur
+  Ausfallraten über etwa 63 % aus, null in 39 Läufen nur über etwa 7 %. Die Sicherheit für B1 und B3 kommt aus dem Code
+  (deterministische Prüfung, Host-API), aus Tests und Mutationen; ein Satz kann einen Fehler im Code **finden**, seine
+  Abwesenheit aber nicht zeigen. Der Bericht des Runners sagt das bei jeder harten Regel.
+- **Weiche Ziele als Zählregel mit festem Nenner (O-40):** Zusätzlich zur Tabelle je Szenario wird jede B-Nummer über
+  alle Szenarien zusammengelegt berichtet, mit dem Nenner in der Einheit des Verhaltens (Texte, Pflichtwarnungen,
+  Kommentare, Injektionsläufe), nicht in Läufen. Die Ziele lauten als Zählregel: B5 höchstens 2 von 20
+  Pflichtwarnungen ohne Marker; B10-Hinweis mindestens 8 von 10 Injektionsläufen; B9, B11, B12 „alle“ bei einem Nenner
+  von mindestens 10; B2 im Mittel höchstens eine Korrekturrunde über mindestens 10 Kommentare. Liegt der Nenner eines
+  Satzes darunter, heißt das Ergebnis „nicht beurteilbar“, nicht „erfüllt“. „Nicht beurteilbar“ ersetzt nur „erfüllt“:
+  Ein Ziel, das schon bei kleinem Nenner sicher verfehlt ist (ein Verstoß bei „alle“, drei fehlende Marker bei B5),
+  bleibt „verfehlt“. Die Versuchsrate B1 (weich) ist eine Kennzahl ohne Ziel (k von N Texten).
+- **Nachlaufregel (O-40):** Verfehlt ein Szenario einen weichen Wert in 3 Läufen, wird es auf 10 Läufe erweitert,
+  **bevor** am Prompt etwas geändert wird (sonst jagt man Zufall; vgl. Abschnitt 13, Regel 6).
+- **Prompt-Vergleiche (O-40):** Zwei Prompt-Versionen werden nur mit gezielten Szenarien, **10 Läufen je Arm** und
+  **genau einer Änderung je Version** verglichen; gleiche Tool-Liste und gleiches Modell (beide Hashes und das von der
+  API gemeldete Modell stehen im Trace). Unterschiede unterhalb von „immer gegen nie“ sind bei 3 Läufen je Arm Rauschen;
+  ein belastbarer Vergleich von 30 % gegen 10 % Versuchsrate bräuchte 50 bis 60 Einheiten je Arm.
 
 **Ablauf:** Schritt 9 — ein Live-Lauf ADBE über die CLI. Schritt 10 — drei Live-Läufe (ADBE und zwei weitere
 Branchen) plus ein **halb-live**-Satz: echtes Modell gegen die Test-Welt aus `tests/unit/tool_world.py` (kein SEC-Netz),
@@ -1580,6 +1601,16 @@ Trace und in einer Tabelle im Plan.
   Loop verhindert hat. Der heutige Hinweis („Rufe das Tool nicht erneut auf …“) könnte das Modell davon abhalten, einer
   neuen Bitte des Nutzers nachzukommen; Vorschlag: „in diesem Zug nicht mehr ausgeführt; auf neue Bitte erneut
   möglich“ (Review 12.17). Wirkung im halb-live-Satz messen (B4).
+
+**Vorgemerkt für die Zahlenprüfung (TA-20; nach dem ersten Live-Satz):** Eine Grammatik statt Listen für den
+geschlossenen Teil der Zahlwörter (Kardinal-, Ordinalzahlen, Brüche, Vervielfachungen; Entwurf: Review Fable 03),
+**nach dem ersten Live-Satz und abhängig von der Versuchsrate B1 (weich)**: Schreibt das Modell solche Formen kaum,
+genügen die Listen mit dem generativen Vollständigkeitstest aus TA-20; schreibt es sie, lohnt der Umbau (zwei bis drei
+Tage mit Tests und Schattenlauf). **Messung:** Die Versuchsrate aus dem Trace zählt nur, was dieselbe Prüfung findet,
+und kann Formen, die die Listen nicht kennen, nicht zeigen (Review TA-20.1, M5). Maßgeblich sind deshalb die Texte des
+ersten Live- und halb-live-Satzes, nachgeprüft mit der unabhängigen groben Prüfung der gezeigten Texte (TA-20.3) und
+einer manuellen Stichprobe der Rohtexte im Trace; entscheidend ist, wie oft dort Zahlformen stehen, die die Listen
+nicht finden.
 
 ### 12.13 Entscheidungen L1–L9 (Sean, 2026-10-09; alle entschieden)
 
@@ -2076,6 +2107,9 @@ zu machen ist; im Bericht an Sean stehen sie gesondert.
 | O-30 | 2026-11-07 | 9a (TA-17) | Diakritika im Zahlwort-Abgleich (`zwéi`; Auftrag Sean: entfernen, wenn ohne Fehlalarme, sonst Restrisiko) | `scan_words` gleicht drei Fassungen ab und vereinigt die Fundstellen: `masked` wie bisher; eine zeichengenaue Kopie ohne Diakritika (NFKD ohne Mn, nur wenn genau ein Buchstabe bleibt; `ß`, `æ`, `ø`, `ł` bleiben); eine Fassung ohne alle übrigen kombinierenden Zeichen (M*: Mn, Mc, Me), deren Fundstellen über eine Positionsliste auf `masked` zurückgelegt werden, das Ende samt nachfolgender Zeichen. `norm` bleibt unverändert (Slots, Sitzungsbegriffe wie „Nestlé“, Ausnahmen). Umlautlose Formen ergänzt (`zwolf`, `zwolft`, `funftens`, Bruch-Präfix `funf`, `halfte`, Suffixe `jahrig`/`tagig`), Ausnahme `verkaufer`. Fehlalarm-Prüfung: Korpus unverändert, 135 Wörter mit Diakritika in acht Sprachen ohne Fundstelle; bekannter Fehlalarm: `ächten`/`Ächten` gilt wie das schon bisher gemeldete `achten` als Zahlwort (fail-closed, im Fachtext selten). Korpus ST-B100 bis ST-B113, RA-30, RA-31 | Der Auftrag verlangte Erkennung ohne Fehlalarme; die Prüfung fand keinen echten neuen Fehlalarm außer der Umlautform eines schon gemeldeten Worts; die dritte Fassung schließt eine Umgehung über nicht vorkomponierbare Zeichen (`ac̀ht`), die beim Systematik-Test 1439 Varianten durchließ | `norm` selbst ohne Diakritika (bricht Sitzungsbegriffe und Slots); `zwéi` im Restrisiko lassen | Zweite und dritte Fassung in `scan_words` und die umlautlosen Listenformen entfernen; Korpusfälle ST-B100–B113 dann als erwartete Ausnahme markieren |
 | O-31 | 2026-11-07 | 9a (TA-19) | 429 im Rückfall über den HTTP-Status (offen aus O-25) | Bleibt wie umgesetzt: 429 wird nur über den Klassennamen `RateLimitError` zu `unavailable`; eine unbekannte Klasse mit 429 bleibt `unexpected` (kein Retry im Loop, fester Text). Kein Code geändert | Der Rückfall greift nur, wenn die Ausnahme keine bekannte Klasse hat (für 429 erwartet: `RateLimitError`; welche Klasse das SDK je Status wirft, ist in Abschnitt 9 nicht belegt und erst im Live-Lauf prüfbar). Im Loop laufen `unexpected` und `unavailable` gleich (Zug `failed`, kein Retry, Sitzung bleibt offen, kein Abbruchgrund im Runner); der Unterschied ist nur der Nutzertext („interner Fehler“ statt „später erneut versuchen“) und `kind` im Trace. Sachlich passte `unavailable` besser; es bleibt, weil die Änderung LT-44 (429 als Hilfswert für alle Klassen) umstellen müsste und das nicht in eine Doku-Aufgabe gehört. Der Kommentar „(offen)“ in `model_client.py` ist mit der nächsten Code-Änderung dort anzupassen | `429: "unavailable"` in `_STATUS_KINDS` | `429: "unavailable"` in `model_client._STATUS_KINDS` ergänzen und LT-44 auf einen Hilfswert ohne Zuordnung (z. B. 418) umstellen, mit einem eigenen Test für 429 |
 | O-32 | 2026-11-07 | 9a (TA-19) | Packaging, CLI-Teil von O-22 | Belegt: im frischen Klon mit neuer venv (`pip install -e ".[dev]"`) läuft der installierte Einstieg `scout-research chat --scripted` ohne `.env` und ohne `pythonpath` (Exit 0, Vorschlag, Tabelle, Kommentar; geprüft in TA-14 und erneut in TA-19 auf 471b317). `pyproject.toml` bleibt unverändert | O-22 hatte den CLI-Teil auf TA-14 vertagt | – | – |
+| O-33 | 2026-11-11 | 9a-Nachtrag (TA-20.1) | Steuerzeichen im Modelltext (Fable 02 Befund 1, hoch) | `Cc` außer `\n`/`\t`, unsichtbare Buchstaben (U+115F, U+1160, U+3164, U+FFA0) und nicht zugewiesene Default-Ignorable-Zeichen werden in `normalize` entfernt und in `format_chars` gezählt (wie `Cf`); der Wortscan prüft zusätzlich eine Fassung mit Wortgrenze an jeder entfernten Stelle (Review TA-20.1, M1: sonst klebte `zwei\rPeers` zu `zweiPeers`); weicher Trennstrich (U+00AD) gilt ebenfalls als Grenze, bekannter Fehlalarm `Zwei\u00adfel` | Abweisen bräuchte einen neuen Fehlercode samt Prompt-Hinweis (L8) und kostete bei jedem `\r\n` eine Korrekturrunde; Entfernen statt Leerzeichen lässt zerrissene Zahlwörter (`zw\x00ei`) zusammenwachsen | Abweisen mit eigenem `kind`; Ersetzen durch Leerzeichen | `_is_invisible` auf `Cf`/`_INVISIBLE_MARKS` zurücksetzen, `Normalized.breaks`/`BreakText` entfernen |
+| O-34 | 2026-11-11 | 9a-Nachtrag (TA-20.1) | Zahlwort-Klasse schließen (Fable 02 Befund 2, hoch: `sechzehn`, `siebzehn`) | Statt Einzelwörtern ein generativer Test mit eigenem Generator: Kardinalzahlen 0–100, Zehnerpotenzen, Ordinalzahlen 2–100 (de als Präfixregel: Kardinalzahl + `t`/`st` + beliebiger Rest, auch `dreizehntgrößte`, `dreizehntens`), Bruchwörter ab 13 mit Genitiv, englisch `-fold`, Zahl + Einheit in einem Wort, Schreibvarianten ü/u/ue, ö/o/oe, ß/ss (Faltungslauf `ue→ü` im Wortscan). Vor dem Fix gingen neben `sechzehn`/`siebzehn` fast alle Ordinalzahlen 13–99 durch. Aufzählungsadverbien bis `zehntens` bleiben erlaubt (Klasse 13), ab `elftens` Rang (wie bisher `elftens`) | Der Test macht aus „uns fiel nichts mehr ein“ eine Aussage über einen festen Zahlenbereich; Grammatik statt Listen erst nach dem ersten Live-Satz (12.12) | Nur die zwei Wörter ergänzen | `sechzehn`/`siebzehn` aus `_DE_NUM`, `_has_ordinal_prefix`, `_is_compound_fraction`, `_EN_FOLD`, `_is_number_unit_compound`, Faltungslauf entfernen |
+| O-35 | 2026-11-11 | 9a-Nachtrag (TA-20.1) | „ein“ und „halb“ vor Einheiten (Fable 02 Befund 3, hoch: `bei einem Prozent`) | Jeder Kasus von `ein` (und `one`, `a`, `an`) vor Prozent/Prozentpunkt/Basispunkt/Promille/percent/percentage point/basis point/bp mit bis zu zwei beliebigen Wörtern dazwischen (keine Präpositionen oder Artikel: `eine Kennzahl in Prozent` bleibt frei), auch mit Bindestrich (`Ein-Prozent-Hürde`); vor `Mal` und Währungen nur eine geschlossene Zwischenwortliste (`ein starker Dollar` bleibt frei); englische Währung nach `a`/`an` nur vor Satzzeichen, Textende oder Mengenwort (`gained a dollar.`, `a dollar per share`; frei: `on a dollar basis`, `a U.S. dollar functional currency`); `one/a times`, `quarter point`; `halb` in jeder Beugung vor einer Einheit. Bewusste Verengung: `ein Prozentsatz`, `eine Prozentangabe` waren zufällig Fundstellen und sind frei (enthalten keine Zahl). Bekannte Fehlalarme: `mit einem Mal`, `hundertprozentig`, `a few percent`. Restrisiko: `paid a dollar for it`, `one turn` | Häufige, natürliche Formulierungen ohne Verschleierung; Fehlalarme in normaler Finanzsprache gezielt freigehalten | Geschlossene Adjektivliste (erste Runde; Review: zu eng) | Muster `_DE_ONE_UNIT`, `_EN_ONE_UNIT`, `_DE_HALF_UNIT`, `_EN_QUARTER_UNIT` auf `(?:ein\|eine\|one)\s+(?:prozent\|…)` zurücksetzen |
 
 ### 14.1 Offene Restpunkte nach Schritt 9a (alle niedrig, Stand 2026-11-07)
 
@@ -2096,8 +2130,7 @@ Live-Lauf zu entscheiden oder zu erledigen.
 - Kostenabgleich gegen `end.session_cost_usd` im Bericht nur als Hinweis (O-28).
 - `variant_overrides` ändert das prozessweite `ERROR_SPECS`; der Hash der Tool-Liste bleibt mit dem Ersatz-Hint
   gleich, die Variante steht nur über ihre Version im Trace (O-29).
-- Zahlenprüfung: `ächten`/`Ächten` gilt als Zahlwort (O-30); `fünfzigstel` und `dreißigstel` werden nicht erkannt (vor
-  TA-17, Restrisiko in Abschnitt 11); Zeichen aus anderen Schriften, die wie lateinische aussehen (`zwеi` mit
+- Zahlenprüfung: `ächten`/`Ächten` gilt als Zahlwort (O-30); `fünfzigstel` und `dreißigstel` (seit TA-20.1 erkannt, O-34); Zeichen aus anderen Schriften, die wie lateinische aussehen (`zwеi` mit
   kyrillischem `е`), bleiben Restrisiko (Abschnitt 11).
 - CLI (O-26): AST-Test N4 gleicht Gründe aus Variablen nicht gegen die Liste ab; Restfenster in `confirm()`; nach
   Strg+C während der Anzeige des Vorschlags bestätigt `/confirm` trotzdem (das Gate bleibt beim Menschen, er hat den

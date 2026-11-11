@@ -78,6 +78,21 @@ def test_lt_05_fin_and_mkt_slots_before_the_table_render_with_value_and_unit() -
     run.assert_invariants()
 
 
+def test_lt_05b_control_characters_behind_a_valid_slot_never_reach_the_user() -> None:
+    """TA-20, Fable 02 Befund 1 (O-33): `\r` und `\x1b[K` hinter einem gültigen Slot können beim Nutzer eine Zeile
+    überschreiben; gezeigt wird der Text ohne Steuerzeichen, `\n` und `\t` bleiben."""
+    run = Run(standard_world(), [])
+    run.client._steps = [
+        use(("resolve_company", {"query": "NVDA"})),
+        use(("get_market_data", {"ticker": "NVDA"})),
+        say("NVDA: Kurs [[mkt:NVDA:price]].\r\x1b[K   Alles unauffällig.\n\tWeitere Zeile\x07\x00."),
+    ]
+    result = run.say("Wie hoch ist der Kurs von NVDA?")
+    assert shown_texts(result) == ["NVDA: Kurs 180,00 USD.[K   Alles unauffällig.\n\tWeitere Zeile."]
+    assert "\r" not in result.shown[0].text and "\x1b" not in result.shown[0].text
+    run.assert_invariants()
+
+
 def test_lt_31_a_number_repeated_from_the_user_message_is_rejected() -> None:
     run = Run(standard_world(), [say("Bei 500 Mio. Umsatz ist das Ziel klein."), say("Das Ziel ist eher klein.")])
     result = run.say("Mein Ziel hat 500 Mio. Umsatz, ist das klein?")

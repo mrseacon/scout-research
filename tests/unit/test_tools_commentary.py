@@ -584,3 +584,70 @@ def test_the_violation_entries_are_exactly_the_naked_number_problems_over_the_wh
         rejected += not result.ok
         exempt_seen += bool(keys)
     assert accepted and rejected and exempt_seen  # beide Rückgabewege und die Ausnahmen kommen im Korpus wirklich vor
+
+
+# --- TA-20, Fable 02 Befund 1: Steuerzeichen (Kategorie Cc) im gezeigten Text (O-33) --------------------------------
+
+import unicodedata  # noqa: E402
+
+_CONTROL_CHARS = [chr(c) for c in (*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0)) if chr(c) not in "\n\t"]
+_KEPT_WHITESPACE = "\n\t"
+
+
+def _has_bad_control(text: str) -> bool:
+    return any(unicodedata.category(ch) == "Cc" and ch not in _KEPT_WHITESPACE for ch in text)
+
+
+def _slot_session():
+    ctx, _, _ = _table()
+    return build_check_session(ctx)
+
+
+def test_the_control_character_list_covers_c0_del_and_c1_without_tab_and_newline() -> None:
+    assert len(_CONTROL_CHARS) == 32 - 2 + 1 + 32 and "\r" in _CONTROL_CHARS and "\x1b" in _CONTROL_CHARS
+
+
+@pytest.mark.parametrize("ch", _CONTROL_CHARS, ids=[f"U+{ord(c):04X}" for c in _CONTROL_CHARS])
+def test_a_control_character_anywhere_is_accepted_and_never_reaches_the_body(ch: str) -> None:
+    session = _slot_session()
+    texts = [
+        "NVDA liegt beim EV/EBITDA bei [[co:NVDA:ev_ebitda]]." + ch + "Text",     # direkt hinter dem Slot
+        "NVDA liegt beim EV/EBITDA bei [[co:NVDA:ev_ebitda]]." + ch * 3 + "   ",  # mehrfach, mit Leerzeichen
+        "NVDA liegt beim EV/EBITDA bei [[co:NVDA:ev_ebitda]], im Ver" + ch + "gleich teuer.",  # mitten im Wort
+        ch + "NVDA liegt beim EV/EBITDA bei [[co:NVDA:ev_ebitda]].",              # am Satzanfang
+        "NVDA liegt beim EV/EBITDA bei [" + ch + "[co:NVDA:ev_ebitda]].",         # im Slot-Beginn
+    ]
+    for text in texts:
+        result = check_text(session, text, "slot_text")
+        assert result.ok, (text, [(p.code, p.kind) for p in result.problems])
+        assert result.body is not None and not _has_bad_control(result.body), (text, result.body)
+        assert result.format_chars == text.count(ch)
+
+
+def test_newline_and_tab_stay_in_the_body() -> None:
+    result = check_text(_slot_session(), "NVDA: [[co:NVDA:ev_ebitda]].\n\nWeiterer\tAbsatz.\n- Punkt", "slot_text")
+    assert result.ok and result.body is not None
+    assert "\n\nWeiterer\tAbsatz.\n- Punkt" in result.body and result.format_chars == 0
+
+
+@pytest.mark.parametrize(("text", "found"), [
+    ("Es gibt zw\x00ei Peers.", "zw\x00ei"),
+    ("Es gibt sech\rzig Peers.", "sech\rzig"),
+    ("Es gibt fünf\x1bzig Peers.", "fünf\x1bzig"),
+    ("Es gibt 1\b5 Peers.", "1\b5"),
+    ("Es gibt dr\x9bei Peers.", "dr\x9bei"),
+])
+def test_numbers_torn_by_a_control_character_are_found_at_the_raw_position(text: str, found: str) -> None:
+    for profile in ("slot_text", "rationale"):
+        result = check_text(_names_session("Adobe Inc."), text, profile)
+        assert not result.ok and {p.code for p in result.problems} == {"NAKED_NUMBER"}, (text, profile)
+        a = text.index(found)
+        assert any(p.start < a + len(found) and a < p.end for p in result.problems), (text, profile, result.problems)
+
+
+def test_format_chars_counts_the_removed_control_characters() -> None:
+    from scout_research.tools.numbercheck import normalize
+
+    n = normalize("a\rb\x1b[Kc\x00\x7f\x85d\ne\tf​")
+    assert n.clean == "ab[Kcd\ne\tf" and n.format_chars == 6  # \r \x1b \x00 \x7f \x85 + U+200B
+    assert n.norm == n.clean

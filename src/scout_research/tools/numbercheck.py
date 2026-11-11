@@ -29,8 +29,8 @@ Buchstabe noch Leerraum."""
 class Normalized:
     raw: str
     clean: str
-    """Rohtext ohne unsichtbare Formatzeichen (Kategorie `Cf` und die unsichtbaren `Mn` aus `_INVISIBLE_MARKS`); daraus
-    wird gerendert."""
+    """Rohtext ohne unsichtbare Formatzeichen (Kategorie `Cf`, die unsichtbaren `Mn` aus `_INVISIBLE_MARKS`) und ohne
+    Steuerzeichen (Kategorie `Cc` außer `\\n` und `\\t`); daraus wird gerendert."""
     clean_to_raw: list[int]
     norm: str
     """Für den Scan: NFKC, Ziffern aller Schriften als ASCII, andere Zahlzeichen als `9`."""
@@ -40,6 +40,9 @@ class Normalized:
     foreign_digits: frozenset[int] = frozenset()
     """`norm`-Indizes der ASCII-Ziffern, die aus einem Nicht-ASCII-Zeichen entstanden sind (Plan 11.2, Klasse 17 geht
     vor: eine Ausnahme gilt nie für so eine Stelle)."""
+    breaks: frozenset[int] = frozenset()
+    """`norm`-Indizes, vor denen ein unsichtbares Zeichen oder Steuerzeichen entfernt wurde (TA-20.1, M1). Der Wortscan
+    prüft zusätzlich eine Fassung, in der jede dieser Stellen eine Wortgrenze ist (`zwei\\rPeers`)."""
 
     def raw_span(self, a: int, b: int) -> tuple[int, int]:
         """Norm-Bereich [a, b) → Rohtext-Bereich."""
@@ -95,18 +98,39 @@ COMBINING GRAPHEME JOINER U+034F, Khmer U+17B4/U+17B5, mongolische Variantenzeic
 und gezählt (Plan 11.1 Punkt 1): sonst zerreißen sie Zahlwörter und Ziffernfolgen und täuschen ein anderes Cluster vor."""
 
 
+_INVISIBLE_LETTERS = frozenset({0x115F, 0x1160, 0x3164, 0xFFA0})
+"""Unsichtbare Buchstaben der Kategorie `Lo` (Hangul-Füllzeichen, Default_Ignorable_Code_Point; TA-20.1, N-2)."""
+
+
+def _is_unassigned_ignorable(cp: int) -> bool:
+    """Nicht zugewiesene Default_Ignorable_Code_Points (Kategorie `Cn`): U+2065, U+FFF0–U+FFF8, U+E0000–U+E0FFF."""
+    return cp == 0x2065 or 0xFFF0 <= cp <= 0xFFF8 or 0xE0000 <= cp <= 0xE0FFF
+
+
 def _is_invisible(ch: str) -> bool:
-    return unicodedata.category(ch) == "Cf" or ord(ch) in _INVISIBLE_MARKS
+    """Zeichen, das beim Lesen nichts zeigt oder die Ausgabe verändert: `Cf`, `_INVISIBLE_MARKS`, unsichtbare Buchstaben
+    (`_INVISIBLE_LETTERS`), nicht zugewiesene Default-Ignorable-Zeichen und Steuerzeichen (`Cc`: C0, DEL, C1) außer
+    Zeilenumbruch und Tab (TA-20, O-33; TA-20.1, N-2). Steuerzeichen werden entfernt, nicht durch Leerzeichen
+    ersetzt: so wachsen zerrissene Zahlwörter (`zw\\x00ei`) wieder zusammen, und `\\r`, `\\x1b[K` oder `\\b` können im
+    gezeigten Text keine Zeile überschreiben."""
+    category = unicodedata.category(ch)
+    return (category == "Cf" or ord(ch) in _INVISIBLE_MARKS or ord(ch) in _INVISIBLE_LETTERS
+            or (category == "Cc" and ch not in "\n\t") or (category == "Cn" and _is_unassigned_ignorable(ord(ch))))
 
 
 def normalize(raw: str) -> Normalized:
     clean_chars: list[str] = []
     clean_to_raw: list[int] = []
     format_chars = 0
+    gap_before: set[int] = set()  # `clean`-Indizes, vor denen etwas entfernt wurde
+    previous = -1
     for i, ch in enumerate(raw):
         if _is_invisible(ch):
             format_chars += 1
             continue
+        if i > previous + 1:
+            gap_before.add(len(clean_chars))
+        previous = i
         clean_chars.append(ch)
         clean_to_raw.append(i)
     clean = "".join(clean_chars)
@@ -115,8 +139,11 @@ def normalize(raw: str) -> Normalized:
     norm_start: list[int] = []
     norm_end: list[int] = []
     foreign_digits: set[int] = set()
+    breaks: set[int] = set()
     i = 0
     while i < len(clean):
+        if i in gap_before and norm:
+            breaks.add(len(norm))
         j = i + 1
         while j < len(clean) and unicodedata.category(clean[j]).startswith("M"):
             j += 1
@@ -140,7 +167,7 @@ def normalize(raw: str) -> Normalized:
             norm_end.append(j)
         i = j
     return Normalized(raw, clean, clean_to_raw, "".join(norm), norm_start, norm_end, format_chars,
-                      frozenset(foreign_digits))
+                      frozenset(foreign_digits), frozenset(breaks))
 
 
 # --- Ausnahmen (Klassen 1–6) --------------------------------------------------------------------------------------
@@ -204,6 +231,18 @@ def exempt_spans(
     return spans
 
 
+class BreakText(str):
+    """Maskierter Text mit den Wortgrenzen aus `Normalized.breaks` (TA-20.1, M1). Ein `str`, damit `scan_numbers` seine
+    Signatur behält; `scan_words` liest `breaks` per `getattr`."""
+
+    breaks: frozenset[int] = frozenset()
+
+    def __new__(cls, text: str, breaks: frozenset[int] = frozenset()) -> "BreakText":
+        obj = super().__new__(cls, text)
+        obj.breaks = breaks
+        return obj
+
+
 def mask(text: str, spans: list[tuple[int, int]]) -> str:
     chars = list(text)
     for a, b in spans:
@@ -250,8 +289,8 @@ def scan_digits(masked: str, invalid_slots: list[tuple[int, int]] = ()) -> list[
 
 # --- Zahlwörter, Größenordnungen, Ränge, Vergleiche ---------------------------------------------------------------
 
-_DE_NUM = ("anderthalb", "eineinhalb", "einhalb", "zwölf", "zwolf", "zwoelf", "zwanzig", "dreißig", "dreissig", "vierzig", "fünfzig", "funfzig", "sechzig",
-           "siebzig", "achtzig", "neunzig", "hundert", "tausend", "dutzend", "zwei", "zwo", "drei", "vier", "fünf",
+_DE_NUM = ("anderthalb", "eineinhalb", "einhalb", "zwölf", "zwolf", "zwoelf", "zwanzig", "dreißig", "dreissig", "vierzig", "fünfzig", "funfzig", "sechzehn", "siebzehn",
+           "sechzig", "siebzig", "achtzig", "neunzig", "hundert", "tausend", "dutzend", "zwei", "zwo", "drei", "vier", "fünf",
            "funf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "null", "eins")
 _DE_GLUE = ("ein", "und", "komma")
 _DE_SUFFIXES = ("", "e", "en", "er", "es", "em", "s", "mal", "fach", "fache", "fachen", "facher", "faches", "stellig",
@@ -264,12 +303,64 @@ firstly secondly thirdly fourthly""".split())
 _ORDINAL_STEMS = ("zweit", "dritt", "viert", "fünft", "funft", "sechst", "siebt", "neunt", "zehnt", "elft", "zwölft", "zwolft",
                   "zwanzigst", "hundertst", "tausendst")
 _ORDINAL_EXCEPTIONS = re.compile(r"dritt(?:anbieter|land|länder|staat|staaten|mittel|partei|parteien|kunden|verkäufer|verkaufer)")
-_EN_ORDINALS = frozenset("""third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth twentieth hundredth
-thousandth""".split())
+_EN_ORDINALS = frozenset("""third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth thirteenth fourteenth
+fifteenth sixteenth seventeenth eighteenth nineteenth twentieth thirtieth fortieth fiftieth sixtieth seventieth eightieth
+ninetieth hundredth thousandth""".split())
 _FRACTION = re.compile(
     r"(?:ein|zwei|drei|vier|fünf|funf|sechs|sieben|acht|neun|zehn)?(?:drittel|viertel|fünftel|funftel|sechstel|siebtel|"
-    r"achtel|neuntel|zehntel|zwanzigstel|hundertstel|tausendstel)n?")
+    r"achtel|neuntel|zehntel|zwanzigstel|hundertstel|tausendstel)[ns]?")
+_FRACTION_STEM_ENDINGS = ("zehn", "elf", "zwölf", "zwolf", "zwoelf")
+_FRACTION_ST_ENDINGS = ("zig", "ßig", "ssig", "hundert", "tausend")
+_EN_FOLD = re.compile(r"(?P<n>[a-z]+)fold")
+_UNIT_COMPOUND = re.compile(r"(?P<n>[a-zäöüß]+?)(?:prozent|promill|basispunkt)")
 _MAGNITUDE_PREFIXES = ("milliard", "million", "billion", "trillion", "billiard")
+
+_UNIT_END = r"(?![^\W\d_])"  # Wortende: „Prozentsatz“, „Prozentangabe“ sind keine Einheit
+_UNIT_END_CURRENCY = r"(?![\w]|-\w)"  # Währungen auch nicht vor Bindestrich + Wort: „Dollar-Kurs“, „Euro-Staat“
+_W = r"[^\W\d_]+"
+_W2 = (r"(?!(?:in|im|von|vom|an|am|um|auf|bei|für|fur|fuer|mit|pro|per|zwischen|aus|ohne|nach|über|uber|ueber|unter|zu|zum|"
+       r"zur|der|des|dem|den|die|das|of|by|for|at|to|on|without|with|between|over|under|from|into|than|the)\b)[^\W\d_]+")
+"""Wort für das Zweiwortfenster vor Prozent-Einheiten (TA-20.1, N-4): keine Präposition und kein Artikel, damit „eine Kennzahl in Prozent“
+und „a measure in percent“ frei bleiben."""
+_SEP = r"[\s\-]+"
+_CURRENCY = rf"(?:u\.?s\.?[\s\-]?)?dollars?|euros?|cents?"
+_DE_PCT_UNITS = (rf"(?:prozent(?:e[ns]?|s)?{_UNIT_END}|prozentpunkt\w*|promillepunkt\w*|basis[\s\-]?punkt\w*|"
+                 rf"%[\s\-]?punkt\w*|promill(?:e[ns]?|s)?{_UNIT_END})")
+_DE_CLOSED_UNITS = rf"(?:(?:{_CURRENCY}){_UNIT_END_CURRENCY})"
+_DE_MAL = rf"mal{_UNIT_END}"
+_DE_UNITS = rf"(?:{_DE_PCT_UNITS}|{_DE_CLOSED_UNITS}|{_DE_MAL})"
+_DE_CLOSED_ADJECTIVE = r"(?:weiter|zus(?:ä|a)tzlich|einzig|knapp|gut|ganz|voll)(?:e[mnrs]?)?"
+_DE_MAL_ADJECTIVE = r"(?:knapp|gut|ganz|voll)(?:e[mnrs]?)?"  # „ein weiteres Mal“ (Redewendung) bleibt frei
+_DE_ART = r"\bein(?:e[mnrs]?)?"
+_DE_ONE_UNIT = re.compile(
+    rf"{_DE_ART}{_SEP}(?:{_W}{_SEP})?{_DE_PCT_UNITS}"  # ein beliebiges Wort: „um einen weiteren Prozentpunkt“
+    rf"|{_DE_ART}{_SEP}{_W2}{_SEP}{_W2}{_SEP}{_DE_PCT_UNITS}"  # zwei: „um einen ganzen weiteren Prozentpunkt“
+    rf"|{_DE_ART}{_SEP}(?:{_DE_CLOSED_ADJECTIVE}{_SEP})?{_DE_CLOSED_UNITS}"  # Mal, Währungen: geschlossene Liste
+    rf"|{_DE_ART}{_SEP}(?:{_DE_MAL_ADJECTIVE}{_SEP})?{_DE_MAL}"
+    rf"|\bein-(?:mal|(?:{_CURRENCY})){_UNIT_END}",  # „Ein-Dollar-Aktie“
+    re.I)
+_DE_HALF_UNIT = re.compile(rf"\bhalb(?:e[mnrs]?)?\s+{_DE_UNITS}", re.I)
+_EN_PCT = (rf"(?:per[\s\-]?cent{_UNIT_END}|percentage[\s\-]+points?{_UNIT_END}|basis[\s\-]+points?{_UNIT_END}|"
+           rf"(?-i:bps?){_UNIT_END})")
+_EN_CLOSED_ADJECTIVE = r"(?:additional|extra|further|single|whole|more|full)"
+_EN_AFTER_A_CURRENCY = r"(?=[.,;:)!?]|$|\s+(?:per|a|an|each|more|less|higher|lower|above|below|apiece)\b)"
+_EN_ONE_UNIT = re.compile(
+    rf"\b(?:one|an?){_SEP}(?:{_W}{_SEP})?{_EN_PCT}"  # „an additional percentage point“, „one more percent“
+    rf"|\b(?:one|an?){_SEP}{_W2}{_SEP}{_W2}{_SEP}{_EN_PCT}"  # „an additional full percentage point“
+    rf"|\bone{_SEP}(?:{_EN_CLOSED_ADJECTIVE}{_SEP})?(?:{_CURRENCY}){_UNIT_END_CURRENCY}"  # Währungen nur nach „one“
+    rf"|\ban?{_SEP}(?:{_EN_CLOSED_ADJECTIVE}{_SEP})?(?:{_CURRENCY}){_EN_AFTER_A_CURRENCY}"  # „gained a dollar.“
+    rf"|\b(?:one|an?){_SEP}(?-i:times)\b",  # „trades at one times sales“; „one-time charge“ bleibt frei
+    re.I)
+_EN_QUARTER_UNIT = re.compile(
+    rf"\bquarter{_SEP}(?:points?{_UNIT_END}|percent{_UNIT_END}|percentage{_SEP}points?|per{_SEP}cent|basis{_SEP}points?)",
+    re.I)
+"""Einheiten nach „ein“/„halb“/„one“/„a“/„an“ (Klasse 11/14). Der Artikel steht in jedem Fall (`ein`, `eine`, `einem`, …),
+Trenner ist Leerraum oder Bindestrich (`Ein-Prozent-Hürde`). Vor Prozent, Prozentpunkt, Basispunkt, Promille und den
+englischen Gegenstücken darf genau EIN beliebiges Wort stehen (TA-20.1, H1); „Mal“ und Währungen kennen nur eine
+geschlossene Liste von Zwischenwörtern („ein starker Dollar“ bleibt frei). Englische Währungen zählen nur nach „one“ (bekanntes
+Restrisiko „a dollar“; Fehlalarme wie „on a dollar basis“ wären sonst häufig). Einheiten nur am Wortende (`Prozentsatz`,
+`Prozentangabe` bleiben frei), Währungen nicht vor Bindestrich + Wort (`Dollar-Kurs`), außer der Artikel hängt mit Bindestrich
+dran (`Ein-Dollar-Aktie`). Bekannter Fehlalarm: „mit einem Mal“ (Redewendung)."""
 
 _PHRASES = [
     # (Muster, Art) — Vergleiche und Rechnungen in Worten (Klasse 14)
@@ -282,9 +373,12 @@ _PHRASES = [
      "multiplicative"),
     (re.compile(r"\bdoubl(?:e|ed|es|ing)\b(?!-?\s?(?:check|count))", re.I), "multiplicative"),
     (re.compile(r"\bquarters?\s+of\b", re.I), "fraction_word"),
-    # „ein Prozent“, „one percent“: die Zahl 1 als Artikel
-    (re.compile(r"\b(?:ein|eine|one)\s+(?:prozent|percent|prozentpunkt\w*|basispunkt\w*|percentage\s+points?|"
-                r"basis\s+points?)", re.I), "number_word"),
+    # „ein Prozent“, „einem halben Prozentpunkt“, „one percent“, „a single basis point“, „one-percent“, „halbes Prozent“:
+    # die Zahl 1 (bzw. ½) als Artikel in jedem Fall, mit optionalem Adjektiv dazwischen (TA-20, Fable 02 Befund 3)
+    (_DE_ONE_UNIT, "number_word"),
+    (_EN_ONE_UNIT, "number_word"),
+    (_DE_HALF_UNIT, "fraction_word"),
+    (_EN_QUARTER_UNIT, "fraction_word"),
     (re.compile(r"\b(?:erst|zweit|dritt|viert)\w*\s+(?:quartal|halbjahr)\w*", re.I), "ordinal"),
 ]
 _WORD = re.compile(r"[^\W\d_]+")
@@ -293,22 +387,64 @@ _SPACED_LETTERS = re.compile(r"(?<![^\W\d_])(?:[^\W\d_][ .\-]){2,}[^\W\d_](?![^\
 
 
 @lru_cache(maxsize=4096)
+def _is_german_cardinal(stem: str) -> bool:
+    """Ganzes Wort aus Zahlbausteinen (`_DE_NUM`) und Bindegliedern (`_DE_GLUE`), mindestens ein Zahlbaustein."""
+    if len(stem) < 3:
+        return False
+    reachable: list[set[bool]] = [set() for _ in range(len(stem) + 1)]
+    reachable[0].add(False)
+    for i in range(len(stem)):
+        if not reachable[i]:
+            continue
+        for morpheme in (*_DE_NUM, *_DE_GLUE):
+            if stem.startswith(morpheme, i):
+                reachable[i + len(morpheme)] |= {has or morpheme in _DE_NUM for has in reachable[i]}
+    return True in reachable[len(stem)]
+
+
+@lru_cache(maxsize=4096)
 def _is_german_number_word(token: str) -> bool:
     for suffix in _DE_SUFFIXES:
-        stem = token[: len(token) - len(suffix)] if suffix else token
         if suffix and not token.endswith(suffix):
             continue
-        if len(stem) < 3:
-            continue
-        reachable: list[set[bool]] = [set() for _ in range(len(stem) + 1)]
-        reachable[0].add(False)
-        for i in range(len(stem)):
-            if not reachable[i]:
-                continue
-            for morpheme in (*_DE_NUM, *_DE_GLUE):
-                if stem.startswith(morpheme, i):
-                    reachable[i + len(morpheme)] |= {has or morpheme in _DE_NUM for has in reachable[i]}
-        if True in reachable[len(stem)]:
+        if _is_german_cardinal(token[: len(token) - len(suffix)] if suffix else token):
+            return True
+    return False
+
+
+_ORDINAL_PREFIX = re.compile(r"zehnt|zigst|ßigst|ssigst|hundertst|tausendst")
+
+
+def _has_ordinal_prefix(token: str) -> bool:
+    """Wort beginnt mit einer Ordinalzahl ab 13 aus zusammengesetzter Kardinalzahl (TA-20.1, M2): Kardinalzahl auf -zehn + `t`
+    (`dreizehntgrößte`, `siebzehnte`) oder auf -zig/-hundert/-tausend + `st` (`einundzwanzigstbeste`, `dreizehntens`); der
+    Rest ist beliebig (Endung, Superlativ, Adverb). Der Anfang muss als Ganzes eine Kardinalzahl sein: „Jahrzehnt“ bleibt
+    frei, weil „jahrzehn“ keine ist. Die Sonderformen bis „zwölft“ stehen in `_ORDINAL_STEMS`."""
+    for m in _ORDINAL_PREFIX.finditer(token):
+        if _is_german_cardinal(token[: m.end() - (1 if m.group().endswith("zehnt") else 2)]):
+            return True
+    return False
+
+
+def _is_compound_fraction(token: str) -> bool:
+    """Bruchwort aus zusammengesetzter Kardinalzahl (TA-20.1): Kardinalzahl auf -zehn/-elf/-zwölf + `tel`
+    (`sechzehntel`, `elftel`) oder auf -zig/-hundert/-tausend + `stel` (`einundzwanzigstel`, `fünfzigstel`), mit
+    optionalem `n` (Mehrzahl) oder `s` (Genitiv). Der Stamm muss als Ganzes eine Kardinalzahl sein; Drittel bis Zehntel stehen in `_FRACTION`."""
+    t = token[:-1] if token[-1:] in ("n", "s") else token  # Mehrzahl (-n) und Genitiv (-s)
+    if t.endswith("tel") and t[:-3].endswith(_FRACTION_STEM_ENDINGS):
+        return _is_german_cardinal(t[:-3])
+    if t.endswith("stel") and t[:-4].endswith(_FRACTION_ST_ENDINGS):
+        return _is_german_cardinal(t[:-4])
+    return False
+
+
+def _is_number_unit_compound(token: str) -> bool:
+    """Zahlwort und Einheit in einem Wort (TA-20.1): `einprozentig`, `Fünfprozentmarke`, `halbprozentig`,
+    `sechzehnprozentige`, `zweibasispunkt…`. Der Teil vor `prozent`/`promill`/`basispunkt` muss `ein`, `halb` oder
+    ein Kardinalzahlwort sein; `Prozentsatz` und `Promillegrenze` ohne Zahl davor bleiben frei."""
+    for m in _UNIT_COMPOUND.finditer(token):
+        head = m.group("n")
+        if head in ("ein", "halb") or _is_german_cardinal(head):
             return True
     return False
 
@@ -322,9 +458,14 @@ def _classify_token(token: str, following: str) -> str | None:
         return "magnitude_word"
     if t in _EN_NUM or _is_german_number_word(t):
         return "number_word"
-    if _FRACTION.fullmatch(t):
+    if _FRACTION.fullmatch(t) or _is_compound_fraction(t):
         return "fraction_word"
-    if t.startswith(_ORDINAL_STEMS) and not _ORDINAL_EXCEPTIONS.match(t):
+    if _is_number_unit_compound(t):
+        return "number_word"
+    fold = _EN_FOLD.fullmatch(t)
+    if fold and fold.group("n") in _EN_NUM:
+        return "number_word"
+    if t.startswith(_ORDINAL_STEMS) and not _ORDINAL_EXCEPTIONS.match(t) or _has_ordinal_prefix(t):
         return "ordinal"
     if t == "second" and not re.match(r"\s*[,;:]", following):
         return "ordinal"
@@ -375,29 +516,93 @@ def _scan_words_in(masked: str) -> list[Finding]:
     return found
 
 
+@dataclass
+class _Variant:
+    """Eine Fassung von `masked` für den Wortscan; `spans[i]` ist die Spanne in `masked`, aus der `text[i]` entstand."""
+
+    text: str
+    spans: list[tuple[int, int]]
+    extend_marks: bool = False  # Fundstellen über angehängte kombinierende Zeichen hinaus verlängern
+
+
+def _drop_marks(v: _Variant) -> _Variant:
+    kept = [i for i, ch in enumerate(v.text) if not unicodedata.category(ch).startswith("M")]
+    return _Variant("".join(v.text[i] for i in kept), [v.spans[i] for i in kept], True)
+
+
+def _split_at_breaks(v: _Variant, breaks: frozenset[int]) -> _Variant:
+    """Vor jeder Stelle, an der ein unsichtbares Zeichen entfernt wurde, ein Leerzeichen einfügen (TA-20.1, M1)."""
+    chars: list[str] = []
+    spans: list[tuple[int, int]] = []
+    for ch, span in zip(v.text, v.spans):
+        if span[0] in breaks and chars and chars[-1] != " ":
+            chars.append(" ")
+            spans.append((span[0], span[0]))
+        chars.append(ch)
+        spans.append(span)
+    return _Variant("".join(chars), spans, v.extend_marks)
+
+
+_UMSCHRIFT = {"u": "ü", "o": "ö", "a": "ä"}
+
+
+def _fold_umschrift(v: _Variant) -> _Variant:
+    """`ue`/`oe`/`ae` → `ü`/`ö`/`ä` (TA-20.1, M3: `fuenf`, `zwoelfte`); die Länge ändert sich, `spans` hält die Rohstellen."""
+    chars: list[str] = []
+    spans: list[tuple[int, int]] = []
+    i = 0
+    while i < len(v.text):
+        ch = v.text[i]
+        if ch.lower() in _UMSCHRIFT and v.text[i + 1: i + 2].lower() == "e":
+            folded = _UMSCHRIFT[ch.lower()]
+            chars.append(folded.upper() if ch.isupper() else folded)
+            spans.append((v.spans[i][0], v.spans[i + 1][1]))
+            i += 2
+        else:
+            chars.append(ch)
+            spans.append(v.spans[i])
+            i += 1
+    return _Variant("".join(chars), spans, v.extend_marks)
+
+
 def scan_words(masked: str) -> list[Finding]:
     """Zahlwörter ab „zwei“, Größenordnungswörter, Ränge und Vergleiche in Worten (Klassen 11–14).
 
     Der Abgleich läuft auf `masked` (damit `fünf`, `zwölf`, `dreißig` über ihre Umlaut-Formen gefunden werden) und auf
-    der Kopie ohne Diakritika (`zwéi`, `dréißig`); die Fundstellen beider Läufe werden vereinigt (TA-17)."""
-    found = _scan_words_in(masked)
-    if masked.isascii():  # ohne Nicht-ASCII-Zeichen gibt es nichts zu entfernen
-        return _merge_adjacent_numbers(masked, sorted(found, key=lambda f: (f.start, f.end)))
-    folded = strip_diacritics(masked)
-    if folded != masked:
-        found = [*found, *(f for f in _scan_words_in(folded) if f not in found)]
-    # Kombinierende Zeichen (Mn, Mc, Me), die sich nicht zu einem Buchstaben verbinden lassen (`c` + U+0300), zerreißen
-    # sonst das Wort; dritte Fassung ohne sie, Fundstellen über die Positionsliste zurück auf `masked` gelegt.
-    kept = [i for i, ch in enumerate(folded) if not unicodedata.category(ch).startswith("M")]
-    if len(kept) != len(folded):
-        for f in _scan_words_in("".join(folded[i] for i in kept)):
-            start, end = kept[f.start], kept[f.end - 1] + 1
-            while end < len(masked) and unicodedata.category(masked[end]).startswith("M"):
-                end += 1
+    Fassungen davon, deren Fundstellen vereinigt werden (TA-17, TA-20.1): ohne Diakritika (`zwéi`, `dréißig`), ohne
+    kombinierende Zeichen, mit einer Wortgrenze an jeder Stelle, an der ein unsichtbares Zeichen entfernt wurde
+    (`zwei\\rPeers`, nur bei `BreakText`) und mit aufgelöster Umschrift (`fuenf` → `fünf`)."""
+    breaks: frozenset[int] = getattr(masked, "breaks", frozenset())
+    text = str(masked)
+    base = _Variant(text, [(i, i + 1) for i in range(len(text))])
+    variants = [base]
+    if not text.isascii():  # ohne Nicht-ASCII-Zeichen gibt es nichts zu entfernen
+        folded = strip_diacritics(text)
+        if folded != text:
+            variants.append(_Variant(folded, base.spans))
+        core = variants[-1]
+        if any(unicodedata.category(ch).startswith("M") for ch in core.text):
+            core = _drop_marks(core)
+            variants.append(core)
+    else:
+        core = base
+    extra = [core]
+    if breaks:
+        extra.append(_split_at_breaks(core, breaks))
+    if re.search(r"[uoa]e", core.text, re.I):
+        extra += [_fold_umschrift(v) for v in extra]
+    variants += extra[1:]
+    found: list[Finding] = []
+    for variant in variants:
+        for f in _scan_words_in(variant.text):
+            start, end = variant.spans[f.start][0], variant.spans[f.end - 1][1]
+            if variant.extend_marks:
+                while end < len(text) and unicodedata.category(text[end]).startswith("M"):
+                    end += 1
             mapped = Finding(start, end, f.kind)
             if mapped not in found:
                 found.append(mapped)
-    return _merge_adjacent_numbers(masked, sorted(found, key=lambda f: (f.start, f.end)))
+    return _merge_adjacent_numbers(text, sorted(found, key=lambda f: (f.start, f.end)))
 
 
 def _merge_adjacent_numbers(text: str, findings: list[Finding]) -> list[Finding]:

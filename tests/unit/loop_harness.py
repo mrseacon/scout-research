@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import itertools
+import unicodedata
 from typing import Any, Callable
 
 from scout_research.agent import texts
 from scout_research.agent.budgets import LoopConfig, Usage
-from scout_research.agent.loop import AgentLoop, TurnResult
+from scout_research.agent.loop import AgentLoop, Shown, TurnResult
 from scout_research.agent.model_client import (
     ManualClock,
     ModelRequest,
@@ -63,6 +64,7 @@ class Run:
         self.ctx = world.context(clock=self.clock, **ctx_kwargs)
         self.client = ScriptedModelClient(steps, clock=self.clock)
         self.status: list[str] = []
+        self.shown: list[Shown] = []  # alles, was `say`/`confirm`/`reject` dem Nutzer gezeigt haben
         kwargs: dict[str, Any] = {}
         if dispatch is not None:
             kwargs["dispatch"] = dispatch
@@ -72,13 +74,17 @@ class Run:
     # --- Aktionen ----------------------------------------------------------------------------------------------
 
     def say(self, text: str) -> TurnResult:
-        return self.loop.run_turn(HumanInput(text))
+        return self._record(self.loop.run_turn(HumanInput(text)))
 
     def confirm(self, keep: tuple[str, ...] = (AAPL_CIK, MSFT_CIK), **kw: Any) -> TurnResult:
-        return self.loop.confirm(self.proposal_id, list(keep), **kw)
+        return self._record(self.loop.confirm(self.proposal_id, list(keep), **kw))
 
     def reject(self, **kw: Any) -> TurnResult:
-        return self.loop.reject(self.proposal_id, **kw)
+        return self._record(self.loop.reject(self.proposal_id, **kw))
+
+    def _record(self, result: TurnResult) -> TurnResult:
+        self.shown.extend(result.shown)
+        return result
 
     # --- Zugriff auf Sitzungsdaten für Skript-Callables -------------------------------------------------------------
 
@@ -122,6 +128,9 @@ class Run:
         check_placement(probe)
         assert len({(r.system, str(r.tools)) for r in self.client.requests}) <= 1
         language = self.loop.config.language  # Statuszeile nur aus festen Texten (H3, SG-14)
+        for shown in self.shown:  # TA-20, O-33: kein Steuerzeichen (Cc) außer \n und \t in einem gezeigten Text
+            bad = [f"U+{ord(ch):04X}" for ch in shown.text if unicodedata.category(ch) == "Cc" and ch not in "\n\t"]
+            assert not bad, (shown.kind, bad)
         assert set(self.status) <= {*texts.TOOL_STATUS[language].values(), texts.user_text(language, "status_working")}
 
     def last_user_text(self, request_index: int = -1) -> str:

@@ -3086,3 +3086,342 @@ cases:
     category: ordinal
     reason: "Ordinal mit Akzent im Stamm statt Umlaut: `fúnft` wird zu `funft` (TA-17, Plan 11 Restrisiko `zwéi`)."
     added_in: phase_b
+
+  # ===============================================================================================================
+  # TA-20 (Review Fable 02): Steuerzeichen, Zahlwörter 16/17 und Ordinale, Kasusformen von „ein“/„halb“
+  # ===============================================================================================================
+
+  - id: ST-A34
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt beim EV/EBITDA mit [[co:ADBE:ev_ebitda]].\r\x1b[K Weiter geht es.\n\tPunkt\x07\x00 Ende."
+    expect: accepted
+    rendered: "ADBE liegt beim EV/EBITDA mit 17,0x*.[K Weiter geht es.\n\tPunkt Ende."
+    footnotes: ["*"]
+    category: control_characters
+    reason: "Steuerzeichen (Cc) hinter dem Slot werden entfernt, nicht ersetzt; `\\n` und `\\t` bleiben (TA-20, Fable 02 Befund 1, O-33)."
+    added_in: phase_b
+
+  - id: ST-A35
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt beim EV/EBITDA mit \b\b\b[[co:ADBE:ev_ebitda]]\x85 und im Ver\x9bgleich teuer."
+    expect: accepted
+    rendered: "ADBE liegt beim EV/EBITDA mit 17,0x* und im Vergleich teuer."
+    footnotes: ["*"]
+    category: control_characters
+    reason: "Backspace und C1-Steuerzeichen (U+0085, U+009B) am Slot und mitten im Wort werden entfernt (TA-20, Fable 02 Befund 1, O-33)."
+    added_in: phase_b
+
+  - id: ST-B114
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt zw\x00ei Peers und sech\rzig Kandidaten."
+    expect: [NAKED_NUMBER]
+    findings: ["zw\x00ei", "sech\rzig"]
+    category: number_word
+    reason: "Ein Steuerzeichen zerreißt das Zahlwort; es wird entfernt, die Zahl bleibt eine Fundstelle (TA-20, Fable 02 Befund 1, O-33)."
+    added_in: phase_b
+
+  - id: ST-B115
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt sechzehn Peers im Vergleichsset."
+    expect: [NAKED_NUMBER]
+    findings: ["sechzehn"]
+    category: number_word
+    reason: "„sechzehn“ (Kurzstamm sech-) fehlte in der Zahlwortliste (TA-20, Fable 02 Befund 2)."
+    added_in: phase_b
+
+  - id: ST-B116
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE ist Siebzehnfach so teuer, die siebzehnte Firma kommt dreizehnmal vor."
+    expect: [NAKED_NUMBER]
+    findings: ["Siebzehnfach", "siebzehnte", "dreizehnmal"]
+    category: number_word
+    reason: "„siebzehn“ mit -fach, als Ordinal und „dreizehnmal“ (TA-20, Fable 02 Befund 2)."
+    added_in: phase_b
+
+  - id: ST-B117
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt auf dem einundzwanzigsten Platz, MSFT auf dem neunundneunzigsten."
+    expect: [NAKED_NUMBER]
+    findings: ["einundzwanzigsten", "neunundneunzigsten"]
+    category: ordinal
+    reason: "Ordinale ab 20 aus zusammengesetzten Kardinalzahlen (Kardinalzahl + st + Endung) (TA-20, Fable 02 Befund 2)."
+    added_in: phase_b
+
+  - id: ST-B118
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "ADBE is the nineteenth and the thirtieth firm in the list."
+    expect: [NAKED_NUMBER]
+    findings: ["nineteenth", "thirtieth"]
+    category: ordinal
+    reason: "Englische Ordinale 13–19 und -ieth fehlten (TA-20, Fable 02 Befund 2)."
+    added_in: phase_b
+
+  - id: ST-B119
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Der Abstand beträgt bei einem Prozent, um einen Prozentpunkt und ein halbes Prozent."
+    expect: [NAKED_NUMBER]
+    findings: ["einem Prozent", "einen Prozentpunkt", "ein halbes Prozent"]
+    category: unit_article
+    reason: "Kasusformen von „ein“ und „ein halbes“ vor Einheiten (TA-20, Fable 02 Befund 3)."
+    added_in: phase_b
+
+  - id: ST-B120
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das sind eines Prozents, einer Prozentpunkt, ein knappes Prozent und um einen Basispunkt."
+    expect: [NAKED_NUMBER]
+    findings: ["eines Prozents", "einer Prozentpunkt", "ein knappes Prozent", "einen Basispunkt"]
+    category: unit_article
+    reason: "Weitere Kasus und Adjektive zwischen Artikel und Einheit (TA-20, Fable 02 Befund 3)."
+    added_in: phase_b
+
+  - id: ST-B121
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "The gap is one-percent wide, one per cent narrower, a half percentage point or a single basis point."
+    expect: [NAKED_NUMBER]
+    findings: ["one-percent", "one per cent", "a half percentage point", "a single basis point"]
+    category: unit_article
+    reason: "Bindestrichform, „per cent“ und Adjektiv zwischen „a“ und Einheit (TA-20, Fable 02 Befund 3)."
+    added_in: phase_b
+
+  - id: ST-B122
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Der Wert sank um halbes Prozent, um einen halben Prozentpunkt und um einen Dollar."
+    expect: [NAKED_NUMBER]
+    findings: ["halbes Prozent", "einen halben Prozentpunkt", "einen Dollar"]
+    category: unit_article
+    reason: "„halb“ in jeder Beugung vor einer Einheit und „einen Dollar“ (TA-20, Fable 02 Befund 3)."
+    added_in: phase_b
+
+  - id: RA-32
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Der Prozentsatz ist eine Prozentangabe und kein Dollar-Kurs; einmal mehr ein einfacher Fall."
+    expect: accepted
+    category: plain
+    reason: "Gegenprobe: Einheiten nur am Wortende und nicht vor Bindestrich + Wort; „einmal“, „einfach“ (TA-20, Fable 02 Befund 3)."
+    added_in: phase_b
+
+  - id: RA-33
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Dies ist die sechzehnte Stufe; es gibt siebzehn Wege."
+    expect: [NAKED_NUMBER]
+    findings: ["sechzehnte", "siebzehn"]
+    category: number_word
+    reason: "Im Profil `rationale` gelten dieselben Zahlwörter 16/17 (TA-20, Fable 02 Befund 2)."
+    added_in: phase_b
+
+  # TA-20.1, zweite Runde (Review Fable 02, Nachprüfung)
+
+  - id: ST-B123
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Der Abstand liegt bei eines Prozentes oder einem Promill."
+    expect: [NAKED_NUMBER]
+    findings: ["eines Prozentes", "einem Promill"]
+    category: unit_article
+    reason: "Genitiv und Variante ohne -e der Einheit nach „ein“ (TA-20, Fable 02 Befund 3, Nachprüfung); „Prozentsatz“ bleibt frei."
+    added_in: phase_b
+
+  - id: ST-B124
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Die einprozentige Marge und die Fünfprozentmarke, eine halbprozentige Hürde, sechzehnprozentig."
+    expect: [NAKED_NUMBER]
+    findings: ["einprozentige", "Fünfprozentmarke", "halbprozentige", "sechzehnprozentig"]
+    category: unit_compound
+    reason: "Zahlwort (auch „ein“, „halb“) und Prozent in einem Wort ist eine Zahl (TA-20, Fable 02 Befund 3, Nachprüfung)."
+    added_in: phase_b
+
+  - id: ST-B125
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE hält ein Sechzehntel, ein Einundzwanzigstel und ein Fünfzigstel des Umsatzes."
+    expect: [NAKED_NUMBER]
+    findings: ["Sechzehntel", "Einundzwanzigstel", "Fünfzigstel"]
+    category: fraction_word
+    reason: "Bruchwörter ab 13 (Kardinalzahl + tel/stel); Klasse 14 (TA-20, Fable 02 Befund 2, Nachprüfung)."
+    added_in: phase_b
+
+  - id: ST-B126
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "The multiple rose threefold, tenfold and hundredfold."
+    expect: [NAKED_NUMBER]
+    findings: ["threefold", "tenfold", "hundredfold"]
+    category: multiplicative
+    reason: "Englische Vervielfachung auf -fold aus einem Zahlwort; Klasse 14 (TA-20, Fable 02 Befund 2, Nachprüfung)."
+    added_in: phase_b
+
+  - id: RA-34
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Der Prozentsatz, die Promillegrenze und das Mittel im Titel; manifold, scaffold, unfold."
+    expect: accepted
+    category: plain
+    reason: "Gegenprobe: Wörter mit Zahlstamm-Ähnlichkeit ohne Zahl (TA-20, Fable 02, Nachprüfung)."
+    added_in: phase_b
+
+  # TA-20.1, dritte Runde (Review Opus)
+
+  - id: ST-B127
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Um einen weiteren Prozentpunkt, ein zusätzlicher Basispunkt, die Ein-Prozent-Hürde und eine Ein-Dollar-Aktie."
+    expect: [NAKED_NUMBER]
+    findings: ["einen weiteren Prozentpunkt", "ein zusätzlicher Basispunkt", "Ein-Prozent", "Ein-Dollar"]
+    category: unit_article
+    reason: "Genau ein beliebiges Wort zwischen Artikel und Einheit, Bindestrich als Trenner (TA-20, Fable 02 Befund 3, H1)."
+    added_in: phase_b
+
+  - id: ST-B128
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "ADBE trades at one times sales after an additional percentage point and a quarter-point cut, one more dollar."
+    expect: [NAKED_NUMBER]
+    findings: ["one times", "an additional percentage point", "quarter-point", "one more dollar"]
+    category: unit_article
+    reason: "„times“, Zwischenwort vor Einheit, „quarter-point“ und Währung nach „one“ (TA-20, Fable 02 Befund 3, H1/H2)."
+    added_in: phase_b
+
+  - id: ST-B129
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt zwei\rPeers und drei​Firmen."
+    expect: [NAKED_NUMBER]
+    findings: ["zwei", "drei"]
+    category: number_word
+    reason: "Ein entferntes Steuer- oder Formatzeichen klebt das Zahlwort nicht an das Nachbarwort (TA-20, Fable 02 Befund 1, M1)."
+    added_in: phase_b
+
+  - id: ST-B130
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE ist das dreizehntgrößte Unternehmen, das einundzwanzigstbeste und dreizehntens relevant."
+    expect: [NAKED_NUMBER]
+    findings: ["dreizehntgrößte", "einundzwanzigstbeste", "dreizehntens"]
+    category: ordinal
+    reason: "Rangwörter und Aufzählungsadverbien ab 13 (Kardinalzahl + t/st + beliebiger Rest) (TA-20, Fable 02 Befund 2, M2/N2)."
+    added_in: phase_b
+
+  - id: ST-B131
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt fuenf Peers, die zwoelfte Firma und eine fuenfprozentige Marge."
+    expect: [NAKED_NUMBER]
+    findings: ["fuenf", "zwoelfte", "fuenfprozentige"]
+    category: number_word
+    reason: "Umschrift ue/oe statt Umlaut (TA-20, Fable 02 Befund 2, M3)."
+    added_in: phase_b
+
+  - id: ST-B132
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Das ist eines Sechzehntels, einen Promillepunkt, einen %-Punkt und einen Basis-Punkt wert."
+    expect: [NAKED_NUMBER]
+    findings: ["eines Sechzehntels", "einen Promillepunkt", "einen %-Punkt", "einen Basis-Punkt"]
+    category: unit_article
+    reason: "Genitiv-s der Bruchwörter und weitere Einheitenformen (TA-20, Fable 02 Befund 3, N2)."
+    added_in: phase_b
+
+  - id: RA-35
+    lang: en
+    profile: rationale
+    session: pre_table_en
+    text: "Reported on a dollar basis with a U.S. dollar functional currency in a euro area country, as a Financial Times article notes."
+    expect: accepted
+    category: plain
+    reason: "Gegenprobe: englische Währungen zählen nur nach „one“ (TA-20, Fable 02 Befund 3, H1)."
+    added_in: phase_b
+
+  # TA-20.1, vierte Runde (Review Opus)
+
+  - id: ST-B133
+    lang: en
+    profile: slot_text
+    session: base_en
+    text: "The stock gained a dollar. It lost a cent, then an extra dollar a share."
+    expect: [NAKED_NUMBER]
+    findings: ["a dollar", "a cent", "an extra dollar"]
+    category: unit_article
+    reason: "„a“/„an“ + Währung vor Satzzeichen, Textende oder Mengenwort (TA-20, Fable 02 Befund 3, N-1)."
+    added_in: phase_b
+
+  - id: ST-B134
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es gibt zweiㅤPeers und zwﾠei Firmen."
+    expect: [NAKED_NUMBER]
+    findings: ["zwei", "zwﾠei"]
+    category: number_word
+    reason: "Unsichtbare Buchstaben (HANGUL FILLER, Lo) werden entfernt und trennen Wörter (TA-20, Fable 02 Befund 1, N-2)."
+    added_in: phase_b
+
+  - id: ST-A36
+    lang: de
+    profile: slot_text
+    session: base
+    text: "ADBE liegt beim EV/EBITDA mit [[co:ADBE:ev_ebitda]].ㅤ￰ Weiter geht es."
+    expect: accepted
+    rendered: "ADBE liegt beim EV/EBITDA mit 17,0x*. Weiter geht es."
+    footnotes: ["*"]
+    category: control_characters
+    reason: "Hangul-Füllzeichen und ein nicht zugewiesenes Default-Ignorable-Zeichen erreichen den Körper nicht (TA-20, Fable 02 Befund 1, N-2)."
+    added_in: phase_b
+
+  - id: ST-B135
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Es ging um einen ganzen weiteren Prozentpunkt und um einen zusatzlichen Dollar."
+    expect: [NAKED_NUMBER]
+    findings: ["einen ganzen weiteren Prozentpunkt", "einen zusatzlichen Dollar"]
+    category: unit_article
+    reason: "Bis zu zwei Wörter vor Prozent-Einheiten, „zusatzlich“ ohne Umlaut in der Währungsliste (TA-20, Fable 02 Befund 3, N-4)."
+    added_in: phase_b
+
+  - id: RA-36
+    lang: de
+    profile: rationale
+    session: pre_table
+    text: "Eine Kennzahl in Prozent, eine Frage der Prozent und ein Vergleich zwischen Prozentpunkten sind hier nur Begriffe."
+    expect: accepted
+    category: plain
+    reason: "Gegenprobe: Präpositionen und Artikel im Zweiwortfenster (TA-20, Fable 02 Befund 3, N-4)."
+    added_in: phase_b
