@@ -446,7 +446,8 @@ def write_report(result: SetResult, out_dir: Path) -> dict[str, Any]:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m eval.run_scenarios", description="Szenarien der Evaluation (Plan 12.12)")
+    parser = argparse.ArgumentParser(prog="python -m eval.run_scenarios", description="Szenarien der Evaluation (Plan 12.12)",
+                                     allow_abbrev=False)  # sonst gälte `--liv` als Live-Option, und der Hook (TA-20.4) erkennt nur den vollen Namen
     parser.add_argument("--scenario", action="append", default=None, metavar="ID", help="Szenario (mehrfach); ohne Angabe alle")
     parser.add_argument("--runs", type=int, default=DEFAULT_RUNS, help=f"Läufe je Szenario (mindestens {MIN_RUNS})")
     parser.add_argument("--out", type=Path, default=None, help="Ausgabeordner (Standard runs/eval/<Zeitstempel>/)")

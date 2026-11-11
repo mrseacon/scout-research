@@ -458,3 +458,15 @@ def test_every_main_call_in_the_runner_tests_passes_env() -> None:
                 if not any(k.arg == "env" or k.arg is None for k in node.keywords):
                     offenders.append(f"{name}:{node.lineno}")
     assert offenders == []
+
+
+@pytest.mark.parametrize("abbreviation", ["--l", "--li", "--liv"])
+def test_an_abbreviated_option_is_a_usage_error_and_never_the_live_option(tmp_path: Path, capsys, abbreviation: str) -> None:
+    """TA-20.4 (E-05): argparse würde `--liv` sonst als die Live-Option annehmen, und der Hook erkennt nur den vollen Namen."""
+    live = Live(tmp_path)  # volle Freigabe: Würde die Abkürzung angenommen, liefe der Lauf bis zum Client
+    budget = SpendBudget(1.0, 3.0, SpendLedger(tmp_path / "ledger.json"))
+    code = main([*SCENARIO, abbreviation, "--out", str(live.out)], live_client_factory=live.factory, budget_factory=lambda: budget,
+                env=live.env, isatty=live._isatty, input_fn=live._input, settings_loader=live._settings_loader)
+    assert code == 2
+    assert live.factory_calls == [] and (live.tty_calls, live.input_calls, live.settings_calls) == (0, 0, 0) and not live.out.exists()
+    assert "unrecognized arguments" in capsys.readouterr().err
