@@ -3636,3 +3636,35 @@ cases:
     category: session_name
     reason: "Kandidat „Group 7 Corp.“ gibt die „7“ im Text nicht frei, nur der ganze Name (TA-20.5, I-1)."
     added_in: phase_b
+
+  - id: ST-A42
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Wie 3M Company wächst auch das 3M-Unternehmen."
+    expect: accepted
+    category: session_name
+    reason: "Gegenprobe: Firmen-Mengenwörter hinter einem Namen sind keine Einheit (TA-20.5 Runde 3, N2)."
+    added_in: phase_b
+
+  - id: ST-B149
+    lang: de
+    profile: slot_text
+    session: base
+    text: "Ein Einmaleffekt von Dollar 3M belastet."
+    expect: [NAKED_NUMBER]
+    findings: ["3M"]
+    category: session_name
+    reason: "Ausgeschriebene Währung als letztes Wort vor „3M“ (TA-20.5 Runde 3, N2)."
+    added_in: phase_b
+
+  - id: ST-B150
+    lang: de
+    profile: slot_text
+    session: base
+    text: "# Das KGV liegt bei\n1. Das ist hoch."
+    expect: [NAKED_NUMBER]
+    findings: ["1"]
+    category: list_marker
+    reason: "Eine lange Überschrift ohne Satzende ist keine gültige Vorzeile (TA-20.5 Runde 3)."
+    added_in: phase_b

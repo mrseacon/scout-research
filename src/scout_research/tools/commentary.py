@@ -300,9 +300,15 @@ def _render_body(n: Normalized, valid: list[tuple[Construct, SlotOk]], session: 
 # --- Sitzungssicht für die Prüfung ------------------------------------------------------------------------------
 
 
-_QUANTITY_TOKEN = re.compile(r"[0-9]+(?:[.,][0-9]+)?(?:x|%|st|nd|rd|th|k|bn)?|(?:[QH]|FY|CY)[0-9]{1,4}", re.IGNORECASE)
+_QUANTITY_TOKEN = re.compile(r"[0-9]+(?:[.,/][0-9]+)*(?:x|%|st|nd|rd|th|k|bn)?|(?:[QH]|FY|CY)[0-9]{1,4}", re.IGNORECASE)
 """Wort, das vollständig eine Menge, Ordnungszahl, ein Quartal oder Halbjahr ist. Die Skalenbuchstaben m/b/t fehlen mit Absicht:
 „3M“ bleibt als Name Ausnahme und verliert sie über N2, wenn eine Einheit folgt."""
+
+
+def _is_quantity(word: str) -> bool:
+    """Ob ein Wort nach Abzug aller Randzeichen, die weder Buchstabe noch Ziffer noch „%“ sind („#1“, „-21“, „(Q3)“), ein
+    Mengen-Token ist; „20/20“ gilt wie eine Ziffernfolge."""
+    return bool(_QUANTITY_TOKEN.fullmatch(re.sub(r"^[^\w%]+|[^\w%]+$", "", word)))
 
 
 def exempt_terms(strings: list[str | None]) -> list[str]:
@@ -315,15 +321,17 @@ def exempt_terms(strings: list[str | None]) -> list[str]:
     for text in strings:
         if not text:
             continue
-        terms.append(text)
         words = [w.strip(".,;:()") for w in text.split()]
+        if len(words) == 1 and _is_quantity(text):
+            continue  # ein Name, der selbst nur eine Menge ist („21“, „Q3“), ist nie Ausnahme (TA-20.5 Runde 3, NIEDRIG a)
+        terms.append(text)
         # Ein Einzelwort eines mehrteiligen Namens fällt weg, wenn es selbst eine Menge ist („21“, „7“, „10x“, „1st“, „Q3“):
         # „P/E liegt bei 21“, „rund 10x“ sind keine Namensnennung (TA-20.5, I-1, HOCH 1). Solche Wörter gelten nur in der
         # Wortfolge („10x Genomics“). Einzelwörter, die kein reines Mengen-Token sind („3M“, „Five9“, „8x8“,
         # „1-800-FLOWERS.COM“), bleiben (Korpus RA-02, RA-03); hinter oder vor einer Einheit verlieren sie die Prüfung in
         # `exempt_spans` (N2).
         if len(words) > 1:
-            terms += [w for w in words if any(ch.isdigit() for ch in w) and not _QUANTITY_TOKEN.fullmatch(w)]
+            terms += [w for w in words if any(ch.isdigit() for ch in w) and not _is_quantity(w)]
         terms += [" ".join(words[i:j]) for i in range(len(words)) for j in range(i + 2, len(words) + 1)
                   if has_trigger(" ".join(words[i:j]))]
     return [t for t in dict.fromkeys(terms) if t and has_trigger(t)]

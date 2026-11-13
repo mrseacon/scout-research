@@ -187,18 +187,27 @@ _LIST_NUMBER = re.compile(r"[ \t]*(?:[-*+•][ \t]+)?(?P<n>[1-9][0-9]?)(?P<sep>[
 _LINE_BREAKS = "\n\u2028\u2029"
 _LIST_BULLET = re.compile(r"[ \t]*[-*+•][ \t]+")
 _SENTENCE_END = ".!?:"
-_UNIT_WORDS = (
-    r"(?:mio|mrd|tsd|us[\s\-]?dollar|usd|eur|bn|mn|prozent|percent|million|billion|milliard|trillion|thousand|tausend|dollar|euro|cents?|"
-    r"u\.s|x(?![^\W\d_])|(?:-?fach|mal|times)(?![^\W\d_])|"
-    r"(?:peers?|unternehmen|firmen|werte|companies|company)(?![^\W\d_])|"
-    r"(?:quartal|halbjahr|jahr|platz|rang|quarter|place)(?:e|en|s)?(?![^\W\d_])|[%$€£])")
+_HEADING_WORDS = 3
+"""Eine Überschrift als Vorzeile ist höchstens so lang; eine längere `#`-Zeile ist ein Satz und braucht ein Satzende."""
+_CURRENCY_CODES = r"usd|eur|gbp|chf|jpy|cad|aud|sgd|hkd|cny"
+_UNIT_CORE = (
+    rf"(?:mio|mrd|tsd|us[\s\-]?dollar|{_CURRENCY_CODES}|bn|mn|prozent|percent|million|billion|milliard|trillion|thousand|tausend|dollar|euro|cents?|"
+    r"u\.s|x(?![^\W\d_])|(?:-?fach|mal|times)(?![^\W\d_])|[%$€£])")
+"""Einheiten, Skalen, Währungen, Faktoren: gelten für die Listennummer **und** für N2."""
+_COUNT_WORDS = (
+    r"(?:(?:peers?|unternehmen|firmen|werte|companies|company)(?![^\W\d_])|"
+    r"(?:quartal|halbjahr|jahr|platz|rang|quarter|place)(?:e|en|s)?(?![^\W\d_]))")
+"""Mengen-, Zeit- und Rangwörter: nur für die Listennummer. Für N2 nicht: „3M Company“, „3M-Unternehmen“ sind Namensnennungen
+(TA-20.5 Runde 3)."""
+_UNIT_WORDS = rf"(?:{_UNIT_CORE}|{_COUNT_WORDS})"
 _UNIT_AFTER_LIST_NUMBER = re.compile(rf"[ \t]+{_UNIT_WORDS}", re.IGNORECASE)
 """Einheit, Skala, Faktor oder Mengenwort hinter der Nummer: dann ist es eine Menge („3. Mal“, „12) Peers“), keine Listennummer."""
 _ENDS_IN_NUMBER = re.compile(r"[0-9](?:[KkMmBbTt]|x|st|nd|rd|th)?$", re.IGNORECASE)
-_QUANTITY_AFTER = re.compile(rf"(?:[ \t\-\n]+{_UNIT_WORDS}|[ \t]*[%$€£])", re.IGNORECASE)
-_QUANTITY_BEFORE = re.compile(r"(?:[$€£]|(?<![A-Za-z])(?:usd|eur|us-?\$|chf|gbp))\s*$", re.IGNORECASE)
-"""N2: Einheit, Skala, Faktor oder Mengenwort hinter einem Namenstreffer mit Ziffer (Trenner: Leerraum, Bindestrich, Zeilenumbruch)
-oder eine Währung davor („$3M“, „USD 3M“); teilt die Wortliste mit der Listennummer (HOCH 2, TA-20.5 Runde 2)."""
+_QUANTITY_AFTER = re.compile(rf"(?:[\s\-]+{_UNIT_CORE}|\s*[%$€£])", re.IGNORECASE)
+_CURRENCY_BEFORE = re.compile(rf"(?:[$€£]|(?<![A-Za-z])(?:{_CURRENCY_CODES}|us-?\$|us-?dollars?|dollars?|euros?))$", re.IGNORECASE)
+_BEFORE_GAP = " \t\n\r\u00a0\u2028\u2029-"
+"""N2: Einheit, Skala, Währung, „x“ oder „%“ hinter einem Namenstreffer mit Ziffer (Trenner: beliebiger Leerraum, Bindestrich) oder
+eine Währung als letztes Wort davor („$3M“, „USD      3M“, „Dollar 3M“); Mengenwörter zählen hier nicht (HOCH 2, Runde 2 und 3)."""
 _CIK = re.compile(r"(?<![A-Za-z0-9])CIK[  ]+(?P<v>[0-9]{10})(?![0-9])")
 _SIC = re.compile(r"(?<![A-Za-z0-9])SIC(?:-Code)?[  ]+(?P<v>[0-9]{4})(?![0-9])")
 _ACCESSION = re.compile(r"(?<![0-9])[0-9]{10}-[0-9]{2}-[0-9]{6}(?![0-9])")
@@ -236,8 +245,8 @@ def _list_number_spans(norm: str) -> list[tuple[int, int]]:
             n = int(m.group("n"))
             indent = len(line) - len(line.lstrip(" \t"))
             plain = re.sub(r"[*_#\s]", "", prev)
-            prev_ok = (k == 0 or not plain or plain[-1] in _SENTENCE_END or prev.lstrip().startswith("#")
-                       or _is_list_line(prev))
+            heading = prev.lstrip().startswith("#") and len(prev.lstrip("# \t").split()) <= _HEADING_WORDS
+            prev_ok = k == 0 or not plain or plain[-1] in _SENTENCE_END or heading or _is_list_line(prev)
             if n <= 20 and prev_ok and n == expected.get(indent, 1) and not _UNIT_AFTER_LIST_NUMBER.match(norm, m.end()):
                 spans.append((m.start("n"), m.end("sep")))
                 expected = {i: v for i, v in expected.items() if i < indent}  # tiefere Unterblöcke enden
@@ -283,9 +292,10 @@ def exempt_spans(
         flags = re.IGNORECASE if any(ch.isdigit() for ch in term) else 0
         for m in re.finditer(rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])", norm, flags):
             # N2 (TA-20.5): ein Treffer, der auf eine Ziffer (oder Ziffer + Skalenbuchstabe, „3M“) endet, ist mit Einheit,
-            # Währung, Skala, „x“, „%“ oder Mengenwort dahinter eine Menge („Umsatz von 3M USD“, „Name 7 Peers“)
+            # Währung, Skala, „x“ oder „%“ dahinter (`_UNIT_CORE`) oder einer Währung davor eine Menge („Umsatz von 3M USD“,
+            # „$3M“); Mengenwörter zählen hier nicht („3M Company“ ist eine Namensnennung, Runde 3)
             if _ENDS_IN_NUMBER.search(m.group(0)) and (
-                    _QUANTITY_AFTER.match(norm, m.end()) or _QUANTITY_BEFORE.search(norm, max(0, m.start() - 8), m.start())):
+                    _QUANTITY_AFTER.match(norm, m.end()) or _CURRENCY_BEFORE.search(norm[:m.start()].rstrip(_BEFORE_GAP)[-12:])):
                 continue
             spans.append(m.span())
     return spans

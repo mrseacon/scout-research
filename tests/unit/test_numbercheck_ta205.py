@@ -112,7 +112,7 @@ def test_the_whole_name_and_one_word_names_stay_exempt(names: list[str], text: s
 
 def test_n2_applies_to_the_whole_name_when_it_ends_in_a_digit_before_a_unit() -> None:
     session = _names_session("Acme Holdings 21")
-    for tail in ("%", " %", " x", " Prozent", " Mio", " USD", " Peers", " companies", " times"):
+    for tail in ("%", " %", " x", " Prozent", " Mio", " USD", " times", " CAD", "-USD"):
         assert _naked(f"Wie Acme Holdings 21{tail}", session) != [], tail
     assert _naked("Wie Acme Holdings 21, oder Acme Holdings 21.", session) == []
 
@@ -227,7 +227,7 @@ def test_names_that_are_not_pure_quantity_tokens_stay_exempt(name: str, text: st
 @pytest.mark.parametrize("text", [
     "Ein Einmaleffekt von $3M", "Ein Einmaleffekt von USD 3M", "Ein Einmaleffekt von €3M", "Ein Einmaleffekt von 3M-USD",
     "Ein Einmaleffekt von 3M US-Dollar", "Ein Einmaleffekt von 3M\nUSD", "Ein Einmaleffekt von £3M", "Wert in EUR 3M",
-    "Ein Einmaleffekt von US-$3M", "Ein Einmaleffekt von 3M-Peers",
+    "Ein Einmaleffekt von US-$3M",
 ])
 def test_n2_also_looks_before_the_hit_and_accepts_other_separators(text: str) -> None:
     assert _naked(text, _names_session("3M Co")) != [], text
@@ -352,3 +352,78 @@ def test_the_eval_runner_gives_the_sdk_factory_a_str_from_real_settings(tmp_path
     main([*SCENARIO, "--live", "--out", str(tmp_path / "out")], budget_factory=lambda: budget, env={"SCOUT_EVAL_LIVE": "1"},
          isatty=lambda: True, input_fn=lambda prompt: "LIVE 3", settings_loader=lambda: settings)
     assert built and all(type(key) is str and key == FAKE_KEY for key in built)
+
+
+# --- Runde 3 -----------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["3M Co", "3M"])
+@pytest.mark.parametrize("text", [
+    "Wie 3M Company wächst auch NICE.", "Das 3M-Unternehmen wächst.", "Die 3M Peers wachsen.", "Die 3M-Firmen wachsen.",
+    "Wie 3M companies wachsen.", "Die 3M Werte steigen.",
+])
+def test_n2_ignores_company_and_count_words_after_a_name(name: str, text: str) -> None:
+    assert _naked(text, _names_session(name)) == [], text
+
+
+def test_company_words_still_end_a_list_exemption() -> None:
+    assert _naked("Es gilt:\n1. Peers", _names_session("Adobe Inc.")) == ["1"]
+
+
+def test_group_7_peers_is_a_name_mention_but_a_bare_7_peers_is_not() -> None:
+    session = _names_session("Group 7 Corp.")
+    assert _naked("Es gibt 7 Peers.", session) != []
+    assert _naked("Group 7 Peers wachsen.", session) == []
+
+
+@pytest.mark.parametrize("name, text", [
+    ("21", "Das P/E liegt bei 21."),
+    ("Q3", "Das war im Q3."),
+    ("10x", "Das liegt bei 10x."),
+    ("(Q3)", "Das war im Q3."),
+    ("1st", "Er war 1st."),
+])
+def test_a_one_word_name_that_is_itself_a_quantity_is_never_exempt(name: str, text: str) -> None:
+    assert _naked(text, _names_session(name)) != [], text
+
+
+@pytest.mark.parametrize("name, text", [
+    ("#1 Holdings", "Er ist #1 im Peer-Set."),
+    ("-21 Corp", "Das P/E liegt bei -21."),
+    ("20/20 Vision Inc.", "Das Verhältnis ist 20/20."),
+    ("+7 Capital", "Das P/E liegt bei +7."),
+    ("(Q3) Metals", "Das war im Q3."),
+])
+def test_edge_characters_do_not_hide_a_quantity_token(name: str, text: str) -> None:
+    assert _naked(text, _names_session(name)) != [], text
+
+
+def test_edge_characters_keep_real_names() -> None:
+    assert _naked("Wie Five9 wächst.", _names_session("(Five9), Inc.")) == []
+    assert _naked("Wie 20/20 Vision Inc. wächst.", _names_session("20/20 Vision Inc.")) == []
+
+
+@pytest.mark.parametrize("text", [
+    "Ein Einmaleffekt von Dollar 3M", "Ein Einmaleffekt von Euro 3M", "Ein Einmaleffekt von CAD 3M", "Ein Einmaleffekt von JPY 3M",
+    "Ein Einmaleffekt von SGD 3M", "Ein Einmaleffekt von CHF 3M", "Ein Einmaleffekt von $-3M", "Ein Einmaleffekt von USD      3M",
+    "Ein Einmaleffekt von USD\n\n   3M", "Ein Einmaleffekt von 3M  USD", "Ein Einmaleffekt von 3M\tUSD",
+    "Ein Einmaleffekt von 3M\u00a0USD", "Ein Einmaleffekt von 3M \n Dollar", "Ein Einmaleffekt von 3M \u2028USD",
+    "Ein Einmaleffekt von 3M HKD", "Ein Einmaleffekt von AUD 3M", "Ein Einmaleffekt von 3M - 3M EUR",
+])
+def test_n2_currency_before_and_any_whitespace_after(text: str) -> None:
+    assert _naked(text, _names_session("3M Co")) != [], text
+
+
+def test_a_currency_word_inside_another_word_does_not_count_before_a_name() -> None:
+    assert _naked("Der Eurovision 3M wächst.", _names_session("3M Co")) == []
+    assert _naked("Wie USDX 3M wächst.", _names_session("3M Co")) == []
+
+
+@pytest.mark.parametrize("prev", ["# Das KGV liegt bei", "## Das KGV liegt bei dem Wert von heute", "# Alpha Beta Gamma Delta"])
+def test_a_long_heading_without_sentence_end_is_no_valid_preceding_line(prev: str) -> None:
+    assert _naked(f"{prev}\n1. Das ist hoch.", _names_session("Adobe Inc.")) == ["1"], prev
+
+
+@pytest.mark.parametrize("prev", ["# Peers", "## Einordnung der Peers", "# Alpha Beta Gamma", "# Das KGV liegt bei dem Wert."])
+def test_a_short_heading_or_a_sentence_is_a_valid_preceding_line(prev: str) -> None:
+    assert _naked(f"{prev}\n1. Alpha\n2. Beta", _names_session("Adobe Inc.")) == [], prev
