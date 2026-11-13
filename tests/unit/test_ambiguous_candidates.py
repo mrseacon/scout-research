@@ -136,3 +136,19 @@ def test_an_ambiguous_candidate_without_a_ticker_is_not_made_known_to_the_check(
     assert list(ctx.ambiguous_candidates) == ["0009990051"]
     assert any(code == "NAKED_NUMBER" for code, _ in _problems(ctx, "Meinst du CIK 0009990052?"))
     assert _problems(ctx, "Meinst du CIK 0009990051?") == []
+
+
+def _five9_world():
+    w = ambiguous_target()
+    w.add_synthetic("0009990061", "FIVN", "Five9 Corp.", "3674", revenue=9.0e10, year=2025)
+    w.add_synthetic("0009990062", "FIVX", "Five9 Holdings Inc.", "3674", revenue=8.5e10, year=2025)
+    w.market.prices.update({"FIVN": 40.0, "FIVX": 35.0})
+    return w
+
+
+def test_a_single_word_of_an_ambiguous_candidate_name_is_not_exempt() -> None:
+    ctx = _ambiguous(_five9_world(), "Mach Comps für Five", "Five9")
+    assert sorted(ctx.ambiguous_candidates) == ["0009990061", "0009990062"]
+    assert not ctx.resolved_names and not ctx.candidate_sets and not ctx.tables
+    assert any(code == "NAKED_NUMBER" for code, _ in _problems(ctx, "Five9 wächst."))
+    assert _problems(ctx, "Meinst du Five9 Corp. oder Five9 Holdings Inc.?") == []
