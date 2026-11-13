@@ -276,8 +276,8 @@ def test_yoy_is_missing_when_years_are_not_consecutive() -> None:
 
 def test_annual_series_has_one_entry_per_period_end_latest_filing_wins() -> None:
     f = facts({REV: [
-        entry(FY_END, 500, accn="A", filed="2026-03-01"),
-        entry(FY_END, 510, accn="B", filed="2027-03-01"),  # Restatement als Vergleichsspalte
+        entry(FY_END, 500, accn="0000000001-26-000001", filed="2026-03-01"),
+        entry(FY_END, 510, accn="0000000001-27-000002", filed="2027-03-01"),  # Restatement als Vergleichsspalte
         entry("2025-01-31", 400, fy=2025),
     ]})
     series = extract_annual_series(CIK, f, [REV])

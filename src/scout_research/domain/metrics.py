@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from scout_research.data.edgar_client import CompanyMetadata
+from scout_research.data.formats import is_iso_date
 from scout_research.data.market_provider import PriceQuote
 from scout_research.domain.models import CompanyMetrics, FinancialFact, MarketSnapshot
 from scout_research.domain.periods import PeriodNotAvailable, PeriodSelector
@@ -314,13 +315,19 @@ def compute_ebitda(ebit: FinancialFact | None, d_and_a: FinancialFact | None) ->
 
 def available_period_ends(company_facts: dict) -> list[str]:
     """Geschäftsjahresenden mit Jahresumsatz in einem 10-K (über die ganze Umsatz-Kette), neueste zuerst.
-    Nur für diese Perioden lässt sich ein Periodenanker bilden."""
+    Nur für diese Perioden lässt sich ein Periodenanker bilden.
+
+    Ein Ende, das kein ISO-Datum ist, wirft `ValueError` (endet im Handler als `INTERNAL_ERROR`). Stilles Weglassen wäre
+    falsch: Das jüngste Ende fiele aus der Liste, ein ausdrücklich gewähltes Vorjahr gälte als aktuell (`is_historical`,
+    E3 in `find_peer_candidates`) und bekäme den heutigen Kurs (TA-20.6, M1)."""
     taxonomy_facts = company_facts.get("facts", {}).get("us-gaap", {})
     ends = {
         e["end"]
         for concept in REVENUE_CONCEPTS
         for e in _annual_entries(taxonomy_facts, concept, "USD", "10-K", "FY", None, None)
     }
+    if not all(is_iso_date(end) for end in ends):
+        raise ValueError("Periodenende kein ISO-Datum")
     return sorted(ends, reverse=True)
 
 

@@ -141,6 +141,10 @@ class ModelCallEvent(_Line):
     messages: int
     latency_s: float
     upper_input_tokens: int
+    model: str | None = Field(default=None, max_length=100)
+    """Das Modell des Aufrufs (TA-20.6): im Live-Lauf das von der API in der Antwort gemeldete (kann vom konfigurierten
+    abweichen), in Skript-Läufen das angefragte. Das konfigurierte steht im Kopf (SG-19). Mit
+    Vorgabe `None` wie `latency_s` unten: ältere Traces und handgebaute Ereignisse bleiben gültig; der Loop liefert es immer."""
 
 
 class ModelErrorEvent(_Line):

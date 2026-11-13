@@ -443,6 +443,7 @@ class AgentLoop:
         self.session_cost += call_cost
         self._update_bound_ref(response.usage, request.messages)
         self.events.append({"event": "model_call", "stop_reason": response.stop_reason, "request_id": response.request_id,
+                            "model": response.model,
                             "input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens,
                             "cache_read_input_tokens": response.usage.cache_read_input_tokens,
                             "cache_creation_input_tokens": response.usage.cache_creation_input_tokens,

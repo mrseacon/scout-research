@@ -20,6 +20,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from scout_research.data.edgar_client import EdgarDataNotFound, pad_cik
+from scout_research.data.formats import IsoDate
 from scout_research.domain.comps import build_comps_table
 from scout_research.domain.metrics import (
     RevenueNotFoundError,
@@ -103,7 +104,7 @@ class GetFinancialsResult(BaseModel):
     cik: str
     ticker: str | None
     name: str
-    period_end: str
+    period_end: IsoDate
     fiscal_year: int
     values: dict[str, dict[str, Any]]
     ebit_margin: float | int | None
@@ -114,7 +115,7 @@ class GetFinancialsResult(BaseModel):
 class GetMarketDataResult(BaseModel):
     ticker: str
     price: float | int | None
-    price_as_of: str | None
+    price_as_of: IsoDate | None
     price_source: str | None
     price_note: str
     shares_outstanding_mio: float | int | None
@@ -304,6 +305,7 @@ def handle_find_peer_candidates(ctx: ToolContext, args: FindPeerCandidatesInput)
         period_end=anchor.period_end,
         candidates=candidates,
         warnings=warnings,
+        counts=dict(result_counts),
         terms=commentary.exempt_terms([target["name"], target["ticker"], *[x for c in candidates for x in (c["name"], c["ticker"])]]),
     )
     return FindPeerCandidatesResult(

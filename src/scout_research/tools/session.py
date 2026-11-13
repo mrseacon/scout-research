@@ -121,6 +121,8 @@ class CandidateSet:
     """Namen und Ticker des Sets (Ausnahmen des Number-Checks, F18)."""
     warnings: list[dict[str, Any]] = field(default_factory=list)
     """Warnungen der Peer-Suche (`P1`): als Verweis im Text erlaubt."""
+    counts: dict[str, Any] = field(default_factory=dict)
+    """Zähler der Peer-Suche (wie `counts` im Tool-Ergebnis); der Host zeigt sie am Gate (Plan 12.7)."""
 
 
 @dataclass

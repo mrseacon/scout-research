@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from scout_research.data.edgar_client import CompanyMetadata
+from scout_research.data.formats import AccessionNumber, IsoDate
 
 
 class FinancialFact(BaseModel):
@@ -22,13 +23,13 @@ class FinancialFact(BaseModel):
     concept: str
     value: float
     unit: str
-    period_start: str | None
-    period_end: str
+    period_start: IsoDate | None
+    period_end: IsoDate
     fiscal_year: int
     fiscal_period: str
     form_type: str
-    accession_number: str
-    filed_date: str
+    accession_number: AccessionNumber
+    filed_date: IsoDate
     retrieved_at: datetime
 
 
@@ -40,7 +41,7 @@ class MarketSnapshot(BaseModel):
     price: float
     shares_outstanding: float
     market_cap: float
-    as_of_date: str
+    as_of_date: IsoDate
     source: str
 
 
@@ -53,7 +54,7 @@ class CompanyMetrics(BaseModel):
     """
 
     company: CompanyMetadata
-    period_end: str
+    period_end: IsoDate
     fiscal_year: int
 
     revenue: float | None

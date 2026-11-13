@@ -22,6 +22,7 @@ import httpx
 from pydantic import BaseModel
 
 from scout_research.data.cache import SqliteCache
+from scout_research.data.formats import IsoDate
 from scout_research.data.http_util import RequestLog
 from scout_research.data.http_util import parse_retry_after as _parse_retry_after
 from scout_research.data.rate_limiter import RateLimiter
@@ -118,7 +119,7 @@ logging.getLogger("httpx").addFilter(_RedactSecretsFilter())
 class PriceQuote(BaseModel):
     ticker: str
     price: float
-    as_of_date: str
+    as_of_date: IsoDate
     source: str
 
 

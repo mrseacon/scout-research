@@ -17,6 +17,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from scout_research.data.formats import is_iso_date
 from scout_research.tools.numbercheck import Identifiers
 
 # --- Sitzungsdaten, gegen die Slots aufgelöst werden --------------------------------------------------------------
@@ -87,10 +88,10 @@ MINUS = "−"
 
 
 def fmt_date(iso: str, lang: str) -> str:
-    try:
-        d = date.fromisoformat(iso)
-    except ValueError:
-        return str(iso)
+    """Nur ein ISO-Datum `YYYY-MM-DD`; alles andere wirft `ValueError` (TA-20.6, I-2) — ein Rohtext wird nie angezeigt."""
+    if not is_iso_date(iso):
+        raise ValueError("kein ISO-Datum")
+    d = date.fromisoformat(iso)
     return f"{d.day:02d}.{d.month:02d}.{d.year}" if lang == "de" else f"{_MONTHS[d.month - 1]} {d.day}, {d.year}"
 
 

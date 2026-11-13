@@ -16,6 +16,7 @@ sauber mit Exit-Code 130 (Konvention für SIGINT), EOF mit 0.
 from __future__ import annotations
 
 import argparse
+import codecs
 import sys
 import tempfile
 from collections.abc import Callable
@@ -30,7 +31,10 @@ from scout_research.agent.trace import TraceWriter
 from scout_research.demo.script import build_client
 from scout_research.demo.world import TARGET_TICKER, build_context
 from scout_research.tools.commentary import basis_line, render_table, render_warnings, table_legend
-from scout_research.tools.session import ConfirmationError, HumanInput, Proposal
+from scout_research.data.formats import is_iso_date
+from scout_research.tools.sanitize import clean_text
+from scout_research.tools.slots import fmt_date
+from scout_research.tools.session import ConfirmationError, HumanInput, Proposal, ToolContext
 
 LIVE_NOT_ALLOWED = "Live-Modus ist nicht freigegeben (Stufe C)."
 EXIT_USAGE = 2
@@ -73,11 +77,38 @@ def _guard(part: Callable[[], None]) -> None:
         _out("Hinweis: Ein Teil der Anzeige konnte nicht erstellt werden.")
 
 
-def render_proposal(proposal: Proposal) -> str:
-    """Der Vorschlag, deterministisch aus dem Speicher des Codes: je Peer Ticker, Name und Begründung mit dem festen Label
+_COUNT_KEYS = ("sic_matches", "without_ticker", "not_in_revenue_frame", "outside_size_range", "passed_filters", "returned")
+
+
+def _target_and_warnings(proposal: Proposal, ctx: ToolContext) -> list[str]:
+    """Ziel (Ticker, Name, CIK) und Warnungen der Peer-Suche aus dem Kandidatenset des Vorschlags (Plan 12.7, TA-20.6 I-6):
+    nur Tool-Daten des Codes, bereinigt; die Warnungstexte sind feste Texte des Codes. Dazu die Zähler der Peer-Suche (Zahlen
+    aus dem Code) und das Periodenende des Ziels. Fehlt das Set, steht eine feste Zeile da (N2), nie nichts."""
+    candidate_set = ctx.candidate_sets.get(proposal.candidate_set_id)
+    if candidate_set is None:
+        return ["Ziel: nicht ermittelbar"]
+    target = candidate_set.target
+    lines = [f"Ziel: {clean_text(target.get('ticker') or '?', 20)}, {clean_text(target.get('name', ''), 80)} "
+             f"(CIK {clean_text(target.get('cik') or proposal.target_cik, 20)})"]
+    if is_iso_date(candidate_set.period_end):
+        lines.append(f"Periodenende des Ziels: {fmt_date(candidate_set.period_end, LANGUAGE)}")
+    counts = candidate_set.counts
+    if all(isinstance(counts.get(k), int) for k in _COUNT_KEYS):
+        lines.append(f"Peer-Suche: {counts['sic_matches']} SIC-Treffer, {counts['without_ticker']} ohne Ticker, "
+                     f"{counts['not_in_revenue_frame']} nicht im Umsatzvergleich, {counts['outside_size_range']} außerhalb der "
+                     f"Größenspanne, {counts['passed_filters']} nach den Filtern, {counts['returned']} gezeigt")
+    if candidate_set.warnings:
+        lines.append("Warnungen der Peer-Suche:")
+        lines += [f"  - [{clean_text(w.get('id', '?'), 10)}] {clean_text(w.get('text', ''), 300)}" for w in candidate_set.warnings]
+    return lines
+
+
+def render_proposal(proposal: Proposal, ctx: ToolContext) -> str:
+    """Der Vorschlag, deterministisch aus dem Speicher des Codes: zuerst Ziel, Zähler und Warnungen der Peer-Suche,
+    je Peer Ticker, Name und Begründung mit dem festen Label
     (R6: durch den Code, nicht durch das Modell), Ausschlüsse mit Grund, Nutzerergänzungen als „vom Nutzer genannt“. Die
     Texte stehen so da, wie `propose_peer_set` sie (bereinigt) gespeichert hat."""
-    lines = ["Vorschlag für das Peer-Set:"]
+    lines = ["Vorschlag für das Peer-Set:", *_target_and_warnings(proposal, ctx)]
     for peer in proposal.peers:
         lines.append(f"  - {peer.get('ticker', '?')}: {peer.get('name', '')}")
         if peer.get("rationale"):
@@ -129,7 +160,7 @@ def _show(loop: AgentLoop, result: TurnResult | None, tables_before: set[str]) -
         _guard(lambda i=item: _show_item(i))
     proposal = ctx.open_proposal
     if proposal is not None and loop.state is LoopState.AWAITING_PEER_CONFIRMATION:
-        _guard(lambda: _out(render_proposal(proposal)))
+        _guard(lambda: _out(render_proposal(proposal, ctx)))
 
 
 # --- Sitzung --------------------------------------------------------------------------------------------------------
@@ -270,13 +301,35 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+ASCII_FORMS = {
+    "\u2212": "-", "≥": ">=", "≤": "<=", "†": "(+)", "‡": "(++)", "§": "(+++)", "…": "...", "–": "-", "—": "-",
+    "„": '"', "“": '"', "”": '"', "‘": "'", "’": "'", "‚": "'", "→": "->", "←": "<-", "↔": "<->", "≈": "~", "±": "+/-",
+    "×": "x", "\u00a0": " ", "€": "EUR", "£": "GBP", "¥": "JPY",
+}
+"""Feste ASCII-Formen der Sonderzeichen, die Renderer und feste Texte nutzen (TA-20.6, I-8, O-41). Sie gelten nur für Zeichen,
+die der Strom nicht kodieren kann: Ein „−“ (U+2212) darf nie zu „?“ werden, sonst verliert eine negative Marge ihr Vorzeichen."""
+OUTPUT_ERRORS = "scout_ascii_forms"
+UNKNOWN_FORM = "<?>"
+
+
+def _ascii_forms_or_escape(exc: UnicodeError) -> tuple[str, int]:
+    """Fehlerbehandlung der Kodierung: bekannte Zeichen in ihre feste ASCII-Form, jedes andere als fester, ziffernfreier
+    Platzhalter `<?>` (kein nacktes „?“; ein Codepunkt-Escape brächte Ziffern wie `2012` auf den Schirm, N3)."""
+    if not isinstance(exc, UnicodeEncodeError):
+        raise exc
+    parts = [ASCII_FORMS.get(ch, UNKNOWN_FORM) for ch in exc.object[exc.start : exc.end]]
+    return "".join(parts), exc.end
+
+
 def _prepare_streams() -> None:
-    """Nie an der Kodierung der Ausgabe scheitern (Pipe ohne UTF-8-Locale): ersetzen statt abbrechen."""
+    """Nie an der Kodierung der Ausgabe scheitern (Pipe ohne UTF-8-Locale): was der Strom nicht kodieren kann, wird in eine
+    feste ASCII-Form übersetzt oder sichtbar escaped (I-8); ein UTF-8-Strom bleibt unverändert."""
+    codecs.register_error(OUTPUT_ERRORS, _ascii_forms_or_escape)
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             try:
-                reconfigure(errors="replace")
+                reconfigure(errors=OUTPUT_ERRORS)
             except (ValueError, OSError):
                 pass
 

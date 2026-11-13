@@ -426,6 +426,12 @@ def test_a_table_made_in_a_turn_that_then_fails_is_still_shown(
     assert code == 0 and TABLE_HEAD in out and "Traceback" not in out
 
 
+def _empty_ctx():
+    from tests.unit.tool_world import standard_world
+
+    return standard_world().context()
+
+
 def _proposal(**kw) -> Proposal:
     base = dict(id="pp_x", candidate_set_id="cs_x", target_cik="1", peers=[], exclusions=[], user_additions=[])
     base.update(kw)
@@ -437,7 +443,8 @@ def test_the_proposal_renderer_labels_rationales_exclusions_and_user_additions()
     text = cli.render_proposal(_proposal(
         peers=[{"cik": "2", "ticker": "AAAA", "name": "A Corp", "rationale": "Gleiche Branche"}],
         exclusions=[{"cik": "3", "ticker": "BBBB", "name": "B Corp", "reason": "Zu klein"}],
-        user_additions=[{"cik": "4", "ticker": "CCCC", "name": "C Corp", "query": "c"}]))
+        user_additions=[{"cik": "4", "ticker": "CCCC", "name": "C Corp", "query": "c"}]), _empty_ctx())
+    assert "Ziel: nicht ermittelbar" in text  # N2: fehlt das Kandidatenset, steht das da statt nichts
     assert "Begründung (Modell-Einschätzung, nicht belegt): Gleiche Branche" in text
     assert "Ausgeschlossen:" in text and "BBBB: B Corp" in text and "Grund (Modell-Einschätzung, nicht belegt): Zu klein" in text
     assert "CCCC: C Corp (vom Nutzer genannt)" in text
@@ -512,3 +519,126 @@ def test_cli_and_demo_never_reference_make_sdk_client() -> None:
                 [node.value] if isinstance(node, ast.Constant) and isinstance(node.value, str) and len(node.value) < 60 else []
             offenders += [f"{path.name}: {n}" for n in names if "make_sdk_client" in n]
     assert offenders == []
+
+
+# --- TA-20.6 Teil 2 (I-6): der Vorschlag zeigt das Ziel und die Warnungen der Peer-Suche (Plan 12.7) -------------------------
+
+
+def _proposal_with_ctx(warnings: list[dict[str, Any]] | None = None):
+    from tests.unit.tool_world import propose, standard_world, start
+
+    ctx, set_id = start(standard_world())
+    if warnings is not None:
+        ctx.candidate_sets[set_id].warnings = warnings
+    propose(ctx, set_id)
+    return ctx, ctx.open_proposal
+
+
+def test_the_proposal_shows_ticker_name_and_cik_of_the_target_and_the_warnings_of_the_search() -> None:
+    from scout_research.tools.payloads import _warning_text
+
+    text_p1 = _warning_text("sic_search_truncated", {})
+    ctx, proposal = _proposal_with_ctx([{"id": "P1", "severity": "warning", "kind": "sic_search_truncated", "text": text_p1}])
+    text = cli.render_proposal(proposal, ctx)
+    assert "Ziel: NVDA, NVIDIA CORP (CIK 0001045810)" in text
+    assert "Warnungen der Peer-Suche:" in text and f"[P1] {text_p1}" in text
+    assert text.index("Ziel:") < text.index("Warnungen der Peer-Suche:") < text.index("  - AAPL")
+
+
+def test_the_proposal_without_warnings_shows_the_target_but_no_warning_block() -> None:
+    ctx, proposal = _proposal_with_ctx([])
+    text = cli.render_proposal(proposal, ctx)
+    assert "Ziel: NVDA, NVIDIA CORP" in text and "Warnungen der Peer-Suche" not in text
+
+
+def test_the_proposal_cleans_what_it_shows_of_the_target_and_the_warnings() -> None:
+    ctx, proposal = _proposal_with_ctx([{"id": "P1", "text": "Text\x1b[31m rot [[co:X:revenue]]"}])
+    set_ = ctx.candidate_sets[proposal.candidate_set_id]
+    set_.target["name"] = "Evil\x1b[2J Corp"
+    text = cli.render_proposal(proposal, ctx)
+    assert "\x1b" not in text and "[[" not in text and "Evil" in text
+
+
+def test_the_scripted_chat_shows_the_target_before_the_peers_at_the_gate(
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _, out, _ = _run(monkeypatch, capsys, [ASK, "/quit"])
+    gate = out[out.index("Vorschlag für das Peer-Set:"):]
+    assert gate.startswith("Vorschlag für das Peer-Set:\nZiel: ZZNV, ") and "(CIK " in gate.splitlines()[1]
+    assert gate.index("Ziel:") < gate.index("  - ZZPL")
+
+
+# --- TA-20.6 Teil 3 (I-8, O-41): Ausgabe ohne UTF-8 verliert kein Vorzeichen -------------------------------------------------
+
+
+def _stream(encoding: str) -> tuple[io.BytesIO, io.TextIOWrapper]:
+    raw = io.BytesIO()
+    return raw, io.TextIOWrapper(raw, encoding=encoding, errors="strict", write_through=True)
+
+
+def _printed(monkeypatch: pytest.MonkeyPatch, encoding: str, text: str) -> str:
+    raw, stream = _stream(encoding)
+    monkeypatch.setattr(sys, "stdout", stream)
+    monkeypatch.setattr(sys, "stderr", stream)
+    cli._prepare_streams()
+    print(text, flush=True)
+    return raw.getvalue().decode(encoding)
+
+
+@pytest.mark.parametrize("encoding", ["ascii", "cp1252"])
+def test_a_stream_without_utf8_keeps_the_sign_of_a_negative_margin_and_the_lower_bound(
+        monkeypatch: pytest.MonkeyPatch, encoding: str) -> None:
+    from scout_research.tools.slots import fmt_value
+
+    margin = fmt_value("pct", -12.5, "de")  # „−12,5 %“ mit dem Minus U+2212 des Renderers
+    assert "−" in margin
+    out = _printed(monkeypatch, encoding, f"Marge: {margin}\nSchuld: ≥ 4.200 Mio. USD\nGrenze: ≤ 3")
+    assert "Marge: -12,5 %" in out and "Schuld: >= 4.200" in out and "Grenze: <= 3" in out
+    assert "?" not in out
+
+
+def test_the_daggers_and_dashes_of_the_renderer_get_fixed_ascii_forms_on_ascii(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _printed(monkeypatch, "ascii", "† ‡ § … – — „x“ ’ → ×")
+    assert out.rstrip("\n") == '(+) (++) (+++) ... - - "x" \' -> x'
+
+
+def test_cp1252_keeps_the_characters_it_can_encode(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _printed(monkeypatch, "cp1252", "† ‡ … – „x“ ä").rstrip("\n") == "† ‡ … – „x“ ä"
+
+
+@pytest.mark.parametrize("encoding", ["ascii", "cp1252"])
+def test_any_other_unencodable_character_is_escaped_visibly_never_a_question_mark(
+        monkeypatch: pytest.MonkeyPatch, encoding: str) -> None:
+    out = _printed(monkeypatch, encoding, "Name: 二 \U0001f4af")
+    assert out.rstrip("\n") == "Name: <?> <?>"  # N3: fester, ziffernfreier Platzhalter; kein nacktes „?“, keine Codepunkt-Ziffern
+    assert not any(ch.isdigit() for ch in out) and "?" not in out.replace("<?>", "")
+
+
+def test_a_utf8_stream_is_left_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    text = "−12,5 % ≥ 3 † ‡ … 二"
+    assert _printed(monkeypatch, "utf-8", text).rstrip("\n") == text
+
+
+def test_the_translation_table_covers_every_special_character_the_renderer_uses() -> None:
+    from scout_research.tools import commentary, slots
+
+    assert slots.MINUS in cli.ASCII_FORMS and set(commentary.MARK_ORDER) - {"*"} <= set(cli.ASCII_FORMS)
+    assert "≥" in cli.ASCII_FORMS and "≤" in cli.ASCII_FORMS
+    assert all(form.isascii() for form in cli.ASCII_FORMS.values())
+
+
+def test_the_proposal_shows_the_counts_of_the_search_and_the_period_end_of_the_target() -> None:
+    """N1 (Plan 12.7): die Zähler der Peer-Suche als feste Zeile, Zahlen aus dem Code."""
+    ctx, proposal = _proposal_with_ctx([])
+    counts = ctx.candidate_sets[proposal.candidate_set_id].counts
+    assert counts and counts["returned"] == len(ctx.candidate_sets[proposal.candidate_set_id].candidates)
+    text = cli.render_proposal(proposal, ctx)
+    line = next(x for x in text.splitlines() if x.startswith("Peer-Suche:"))
+    for key in ("sic_matches", "without_ticker", "not_in_revenue_frame", "outside_size_range", "passed_filters", "returned"):
+        assert str(counts[key]) in line
+    assert f"{counts['sic_matches']} SIC-Treffer" in line and f"{counts['returned']} gezeigt" in line
+    assert "Periodenende des Ziels: 25.01.2026" in text
+
+
+def test_the_proposal_without_a_candidate_set_says_the_target_is_not_determinable() -> None:
+    text = cli.render_proposal(_proposal(candidate_set_id="cs_fehlt"), _empty_ctx())
+    assert text.splitlines()[:2] == ["Vorschlag für das Peer-Set:", "Ziel: nicht ermittelbar"]

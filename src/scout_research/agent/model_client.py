@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -76,6 +77,9 @@ class ModelResponse:
     stop_reason: str
     usage: Usage = field(default_factory=Usage)
     request_id: str | None = None
+    model: str | None = None
+    """Das Modell, das die API in der Antwort meldet (TA-20.6): kann vom konfigurierten abweichen. `None`, wenn die Antwort
+    keines nennt. Der Scripted-Client setzt bei `None` das angefragte Modell."""
 
 
 OnEvent = Callable[[str], None]
@@ -258,6 +262,8 @@ class ScriptedModelClient:
             step = step.then
         if isinstance(step, BaseException):
             raise step
+        if step.model is None:  # ohne Angabe im Skript meldet der Client das angefragte Modell (TA-20.6)
+            step = replace(step, model=request.model)
         self.responses.append(step)
         if is_usable(step):  # nur brauchbare Antworten kommen in den festen Verlauf (Z16, H2)
             self._base = copy.deepcopy(request.messages) + [{"role": "assistant", "content": history_content(step.content)}]
@@ -339,6 +345,15 @@ def _usage_of(raw: Any) -> Usage:
                  count("cache_read_input_tokens"), count("cache_creation_input_tokens"))
 
 
+_MODEL_NAME = re.compile(r"[A-Za-z0-9._:-]{1,100}")
+
+
+def _model_name(message: Any) -> str | None:
+    """Das von der API gemeldete Modell einer (Teil-)Nachricht; nur ein Name aus `[A-Za-z0-9._:-]`, 1 bis 100 Zeichen, zählt (N4); alles andere ist `None`."""
+    model = _field(message, "model") if message is not None else None
+    return model if isinstance(model, str) and _MODEL_NAME.fullmatch(model) else None
+
+
 def _field(raw: Any, name: str) -> Any:
     return raw.get(name) if isinstance(raw, dict) else getattr(raw, name, None)
 
@@ -350,12 +365,14 @@ class _UsageTally:
     def __init__(self) -> None:
         self._usage: Usage | None = None  # None = `message_start` nie gesehen: nichts bekannt, nichts verbucht
         self._output_seen = False
+        self.model: str | None = None  # das in `message_start` gemeldete Modell (Rückfall, falls die Endnachricht keines trägt)
 
     def feed(self, event: Any) -> None:
         kind = getattr(event, "type", None)
         if kind == "message_start":
             raw = getattr(getattr(event, "message", None), "usage", None)
             self._usage = _usage_of(raw) if raw is not None else Usage()
+            self.model = _model_name(getattr(event, "message", None))
             self._output_seen = False
         elif kind == "message_delta" and self._usage is not None:
             output = _field(getattr(event, "usage", None), "output_tokens")
@@ -412,6 +429,7 @@ class AnthropicAdapter:
             stop_reason=str(final.stop_reason),
             usage=_usage_of(final.usage),
             request_id=request_id if isinstance(request_id, str) else None,
+            model=_model_name(final) or tally.model,
         )
 
 
